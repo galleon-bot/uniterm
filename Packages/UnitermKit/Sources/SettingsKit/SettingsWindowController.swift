@@ -13,6 +13,7 @@ public final class SettingsWindowController: NSWindowController {
       defer: false)
     window.title = "Settings"
     window.isReleasedWhenClosed = false
+    window.isRestorable = false
     window.setAccessibilityIdentifier("settings-window")
     window.contentViewController = SettingsViewController(store: store)
     window.center()

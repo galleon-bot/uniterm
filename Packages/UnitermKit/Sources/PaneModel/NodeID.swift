@@ -26,8 +26,12 @@ public struct NodeID: Hashable, Comparable, Sendable, CustomStringConvertible {
 public struct NodeIDAllocator: Sendable, Equatable {
   public private(set) var highWaterMark: UInt64
 
+  /// The largest mark an allocator accepts. A saved mark above it is lowered to it, so `next()`
+  /// can never overflow. No real window comes near it.
+  public static let maximumMark: UInt64 = 1 << 62
+
   public init(highWaterMark: UInt64 = 0) {
-    self.highWaterMark = highWaterMark
+    self.highWaterMark = min(highWaterMark, Self.maximumMark)
   }
 
   public mutating func next() -> NodeID {

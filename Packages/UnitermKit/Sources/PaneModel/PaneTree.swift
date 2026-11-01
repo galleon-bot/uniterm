@@ -14,6 +14,9 @@ public enum PaneTreeError: Error, Equatable {
   /// The ID to bring back was never handed out by this tree.
   case neverIssued(NodeID)
 
+  /// A saved tree cannot be restored: an ID is zero or repeats.
+  case invalidRestore(String)
+
   /// The ID to bring back belongs to a node that is gone for good: it was retired, or it was never
   /// closed as a pane.
   case retired(NodeID)
@@ -82,6 +85,32 @@ public struct PaneTree: Sendable, Equatable {
     self.root = .pane(Pane(id: allocator.next()))
     self.metrics = metrics
     self.allocator = allocator
+  }
+
+  /// Makes a tree from a saved one. The allocator starts at `highWaterMark`, or at the largest ID in
+  /// `root` when that is larger, so no ID that was handed out before the save is handed out again.
+  /// That includes the IDs of panes that were closed and are not in `root`.
+  ///
+  /// The saved tree is normalized, since a file may have been edited. Throws when an ID is zero or
+  /// repeats, because two nodes cannot share an identity.
+  public init(
+    restoring root: Node, highWaterMark: UInt64, metrics: PaneMetrics = .standard
+  ) throws {
+    var seen = Set<NodeID>()
+
+    for id in root.allIDs {
+      guard id.rawValue > 0 else { throw PaneTreeError.invalidRestore("a node has the ID 0") }
+
+      guard seen.insert(id).inserted else {
+        throw PaneTreeError.invalidRestore("the ID \(id) is used by two nodes")
+      }
+    }
+
+    let highest = seen.map(\.rawValue).max() ?? 0
+
+    self.root = root.normalizedRoot()
+    self.metrics = metrics
+    self.allocator = NodeIDAllocator(highWaterMark: max(highWaterMark, highest))
   }
 
   public var paneIDs: [NodeID] { root.paneIDs }

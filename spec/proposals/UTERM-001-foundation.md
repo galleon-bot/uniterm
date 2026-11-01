@@ -2,7 +2,7 @@
 
 **Status:** accepted
 **Created:** 2026-10-31
-**Updated:** 2026-10-31
+**Updated:** 2026-11-01
 
 ## Dependencies
 
@@ -870,7 +870,7 @@ Out of scope, for later proposals:
 
 ### M8: Layout persistence
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 - Quitting and relaunching restores every window's frame, pane tree, applet types, and applet descriptions
 - The saved file carries a version field
@@ -888,6 +888,65 @@ Out of scope, for later proposals:
 - AppKit window restoration never opens a second copy of a restored window
 - A saved layout with zero windows opens one default window
 - A restored tree whose minimum size exceeds the visible screen still opens usable
+
+**As built:**
+
+- The file is `layout.json` in `~/Library/Application Support/uniterm/`. Its top level is the integer `version`, 1, and
+  the windows. A window holds its frame, its screen's frame, its focused pane, its tree, and its own ID high-water
+  mark. Each applet description inside carries its own type and version. The file, every temp file, and the folder are
+  mode 0600, 0600, and 0700. A test clears the umask to prove it.
+- Schema upgrades run one version at a time from a table of steps. The table is empty, since version 1 is the first.
+  A file with no version, a non-integer version, or a version below 1 is unreadable. A version above 1 is newer. Both
+  are moved aside, and a default layout starts with a warning in the first window.
+- Starting bounds: 3 launches that began and never finished, a 1 second debounce, and 5 kept-aside files. They are
+  policy values with no setting. The launch marker counts the launches that never finished. The fourth launch after
+  three crashed ones moves the file aside. The marker clears one turn of the main loop after the windows are shown.
+  Kept-aside files are numbered, so none replaces another, and the oldest are deleted past 5.
+- The ID high-water mark is per window, since each window has its own tree. The saved tree is the visible one. Panes
+  hidden for undo and the undo stack are not saved. Their IDs stay below the window's mark, so a restored tree counts
+  them as retired and refuses to insert them. A mark lower than the largest ID in the tree is raised to it.
+- A description that is unknown, newer, or unreadable becomes a placeholder pane. The file bytes of every description
+  are kept exactly, including key order, spacing, and numbers a double cannot hold, and a placeholder writes them
+  back unchanged. A readable description that its applet refuses to restore does the same. The window posts one
+  warning with the count.
+- Only the instance that holds the lock on the folder reads, saves, or sets aside anything. A second running instance
+  opens one default window, saves nothing, and says so in its status bar. A launch that cannot take the lock for any
+  other reason, or cannot move an unreadable file aside, also saves nothing for the whole run.
+- Saving stays off until the launch has opened its windows, so a half-restored layout never replaces the file. If one
+  saved window fails to open, the rest restore, and a copy of the file is kept aside before any save can replace it.
+  The layout saves after a layout change that is quiet for the debounce, and once, at once, in the quit path before
+  the hidden panes are hung up.
+- The window frame is clamped onto a screen that exists now. A frame already inside one screen stays. Otherwise the
+  screen with the saved frame is used, then the one with the largest overlap, then the main one.
+- A restored tree whose minimum size exceeds the visible screen opens inside the screen. The window's minimum content
+  size is capped to the visible area, and the layout holds panes at their minimum and overflows. The user reaches the
+  panes by keyboard and can close them. The window is never larger than the screen.
+- AppKit window restoration is off for every window, and the app delegate refuses to restore secure state. A UI test
+  launches with `-NSQuitAlwaysKeepsWindows NO`, which is what the "Close windows when quitting" setting does, and the
+  layout comes back with exactly one copy of each window.
+- UI tests and debug builds can set `UNITERM_LAYOUT_DIR` for the folder, and `UNITERM_LAYOUT_DEBOUNCE` for a long
+  debounce so only the save on quit can write. Release builds ignore both. Each UI test gets its own layout folder.
+- Saving has a maximum wait of 10 seconds. The first change after a save starts it, and later changes restart only the
+  debounce. A stream of changes that never goes quiet still writes within 10 seconds. A title or segment change that
+  leaves the pane's saved description the same is not a layout change.
+- A write flushes the temp file with `F_FULLFSYNC`, falling back to `fsync`, and flushes the folder after the rename.
+  A weight that is not a positive finite number is written as an equal share, and an unusable frame as a default one,
+  so one bad number never makes the next launch reject the file. A node ID above 2^48 is unreadable, and a mark above
+  it is lowered to it. The allocator lowers any mark above 2^62, so it never overflows.
+- Decoding makes one pass over each object. A first version rescanned each object once per field. It took 428 ms on a
+  150-level tree in a debug build. One pass takes 185 ms in a debug build and 9 ms in a release build. A tree of 1,000
+  panes takes 55 ms in debug and 14 ms in release. Nesting of 100,000 levels returns an error and does not crash.
+- A process that lacks the lock gets a `notWriter` error from the store, never a trap. The quit path reports a failed
+  save through the saver's failure path. A pane with no applet is left out of the saved window, and a split left with
+  one child collapses, so the file stays valid.
+- Mutation checks each failed named tests and were undone: the crash bound off by one, the launch marker not set, the
+  lock weakened, the mode loosened, the verbatim bytes dropped, the mark ignored, both keep-aside rules, the frame
+  clamp, the minimum-size cap, AppKit restoration, the debounce, saving while off, a skipped upgrade step, and the
+  quit save. One mutation survived: loosening the mode in `open` alone. The `fchmod` that follows it sets 0600 before
+  any data is written, so the two are equivalent.
+- The package tests pass, 372 run with 4 skipped, in 14.1 seconds. The full UI suite passes, 46 tests with no failure,
+  in 353 seconds.
+  Left to the user: restoring after a real crash, a second real instance, and a real unplugged display.
 
 ### M9: User visual check
 
@@ -1057,7 +1116,7 @@ The proposal ends with the user looking at the finished app.
 - 2026-11-01: ADR candidate (cuts across the system): every applet implements one applet contract: hosted view,
   lifecycle, segments, detach and reattach, an inert versioned description, and a running-state query. Undecided.
   Found in M2. Extended 2026-11-01 in M5: the running-state query covers every tab of an applet, since the close
-  guards in M7 depend on it. Extended 2026-11-01 in M7: window close and quit count hidden panes too.
+  guards in M7 depend on it. Extended 2026-11-01 in M7: window close and quit count hidden panes too. Extended 2026-11-01 in M8: descriptions round-trip byte-for-byte when unreadable.
 - 2026-11-01: ADR candidate (cuts across the system): a terminal program never reads the clipboard without the user's
   confirmation naming its pane, and a denial sends it nothing. Undecided. Found in M2.
 - 2026-11-01: ADR candidate (cuts across the system, hard to reverse): undo close has two tiers. A closed pane first
@@ -1067,6 +1126,20 @@ The proposal ends with the user looking at the finished app.
 - 2026-11-01: ADR candidate (cuts across the system): the main window answers the standard `undo:` selector. It undoes
   the edit in a focused text control, and the pane close otherwise. The Edit menu keeps the standard selector.
   Undecided. Found in M7.
+- 2026-11-01: M8 best guesses. The starting bounds are 3 unfinished launches, a 1 second debounce, and 5 kept-aside
+  files. The ID high-water mark is stored per window, since each window has its own tree. A second running instance
+  opens a default window and saves nothing, and the first instance's layout is untouched. A restored tree that needs
+  more room than the screen opens inside the screen with panes overflowing, instead of growing the window past the
+  screen or dropping panes. The launch marker clears one turn after the windows show. A failed window restore keeps a
+  copy of the file aside. The folder and a long debounce are debug-only launch variables for UI tests. A description
+  is kept as its exact file bytes, so a placeholder writes it back unchanged. (work-queue best guess)
+- 2026-11-01: ADR candidate (cuts across the system): node IDs are scoped to a window's pane tree, and a saved layout
+  stores each window's ID high-water mark, so an ID retired before a quit is never reissued in that window. It reads
+  ADR-02's "including after a relaunch" per window. A cross-window ID, such as one for scripting or control, would need
+  its own rule. Undecided. Found in M8.
+- 2026-11-01: ADR candidate (cuts across the system, hard to reverse): a stored applet description is kept as its exact
+  file bytes. One that cannot be restored becomes a placeholder pane and is written back unchanged, so a newer or
+  unknown description survives a round trip through an older build. Undecided. Found in M8.
 
 ## References
 

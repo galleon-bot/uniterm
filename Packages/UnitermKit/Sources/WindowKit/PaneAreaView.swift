@@ -17,7 +17,10 @@ final class PaneAreaView: NSView {
   private(set) var tree: PaneTree
   private(set) var focusedPane: NodeID {
     didSet {
-      if focusedPane != oldValue { onFocusChange?() }
+      if focusedPane != oldValue {
+        onFocusChange?()
+        onLayoutChange?()
+      }
     }
   }
 
@@ -26,6 +29,10 @@ final class PaneAreaView: NSView {
 
   /// Runs when the tree changes shape, so the window can follow the new minimum size.
   var onTreeChange: (() -> Void)?
+
+  /// Runs when anything a saved layout holds about the tree changes: its shape, its weights, or
+  /// the focused pane.
+  var onLayoutChange: (() -> Void)?
 
   private var paneViews: [NodeID: PaneFrameView] = [:]
   private var dividerViews: [DividerKey: DividerView] = [:]
@@ -43,6 +50,24 @@ final class PaneAreaView: NSView {
 
     install(firstApplet, as: focusedPane)
     paneViews[focusedPane]?.isFocused = true
+  }
+
+  /// Makes the view for a restored tree. `applets` holds one applet for each pane of `tree`, and
+  /// `focus` is the pane that has focus. Nothing is started here.
+  init(restoring tree: PaneTree, applets: [NodeID: any Applet], focus: NodeID) {
+    self.tree = tree
+    focusedPane = tree.paneIDs.contains(focus) ? focus : tree.paneIDs[0]
+    super.init(frame: .zero)
+
+    for id in tree.paneIDs {
+      guard let applet = applets[id] else {
+        preconditionFailure("the restored pane \(id) has no applet")
+      }
+
+      install(applet, as: id)
+    }
+
+    refreshFocusMarks()
   }
 
   @available(*, unavailable)
@@ -165,6 +190,7 @@ final class PaneAreaView: NSView {
     refreshFocusMarks()
     needsLayout = true
     onTreeChange?()
+    onLayoutChange?()
   }
 
   // MARK: Focus
@@ -285,6 +311,7 @@ final class PaneAreaView: NSView {
       between: divider.leading, and: divider.trailing, by: delta, in: bounds.size)
     needsLayout = true
     layoutSubtreeIfNeeded()
+    onLayoutChange?()
   }
 
   /// Moves a divider as a drag would, by points along its axis. Returns the distance it moved.
@@ -296,6 +323,7 @@ final class PaneAreaView: NSView {
       between: leading, and: trailing, by: delta, in: bounds.size)
     needsLayout = true
     layoutSubtreeIfNeeded()
+    onLayoutChange?()
     return moved
   }
 

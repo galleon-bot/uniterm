@@ -56,8 +56,11 @@ final class FakeApplet: TabbedApplet {
   func reattach() { reattachCount += 1 }
   func focus() {}
 
+  /// When set, the description stays fixed while the title changes, as a terminal's does.
+  var fixedDescription: AppletDescription?
+
   /// The description carries the title, so a test can tell which applet a reopened pane came from.
   func describe() -> AppletDescription {
-    AppletDescription(type: "fake", version: 1, payload: .string(title))
+    fixedDescription ?? AppletDescription(type: "fake", version: 1, payload: .string(title))
   }
 }

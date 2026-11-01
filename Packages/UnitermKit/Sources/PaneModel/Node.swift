@@ -55,6 +55,14 @@ public enum Node: Sendable, Equatable {
     }
   }
 
+  /// The ID of this node and of every node under it.
+  var allIDs: [NodeID] {
+    switch self {
+    case .pane(let pane): return [pane.id]
+    case .split(let split): return [split.id] + split.children.flatMap { $0.node.allIDs }
+    }
+  }
+
   func contains(_ target: NodeID) -> Bool {
     switch self {
     case .pane(let pane):

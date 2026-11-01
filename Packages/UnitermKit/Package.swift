@@ -20,6 +20,7 @@ let package = Package(
     .library(name: "Theme", targets: ["Theme"]),
     .library(name: "Preferences", targets: ["Preferences"]),
     .library(name: "PaneModel", targets: ["PaneModel"]),
+    .library(name: "LayoutKit", targets: ["LayoutKit"]),
     .library(name: "WindowKit", targets: ["WindowKit"]),
     .library(name: "SettingsKit", targets: ["SettingsKit"]),
     .library(name: "TerminalSurface", targets: ["TerminalSurface"]),
@@ -33,9 +34,10 @@ let package = Package(
     .target(name: "StatusKit"),
     .target(name: "AppletKit", dependencies: ["StatusKit", "Theme"]),
     .target(name: "PaneModel"),
+    .target(name: "LayoutKit", dependencies: ["AppletKit", "PaneModel"]),
     .target(
       name: "WindowKit",
-      dependencies: ["Theme", "Preferences", "AppletKit", "StatusKit", "PaneModel"]),
+      dependencies: ["Theme", "Preferences", "AppletKit", "StatusKit", "PaneModel", "LayoutKit"]),
     .target(name: "SettingsKit", dependencies: ["Preferences"]),
     .binaryTarget(name: "GhosttyKit", path: ghosttyKitPath),
     .target(
@@ -61,6 +63,7 @@ let package = Package(
     .testTarget(name: "StatusKitTests", dependencies: ["StatusKit"]),
     .testTarget(name: "PaneModelTests", dependencies: ["PaneModel"]),
     .testTarget(name: "AppletKitTests", dependencies: ["AppletKit"]),
+    .testTarget(name: "LayoutKitTests", dependencies: ["LayoutKit", "AppletKit", "PaneModel"]),
     .testTarget(
       name: "TerminalAppletTests",
       dependencies: [
@@ -73,7 +76,9 @@ let package = Package(
     .testTarget(name: "TerminalSurfaceTests", dependencies: ["TerminalSurface", "Theme"]),
     .testTarget(
       name: "WindowKitTests",
-      dependencies: ["WindowKit", "Theme", "Preferences", "StatusKit", "AppletKit", "PaneModel"]),
+      dependencies: [
+        "WindowKit", "Theme", "Preferences", "StatusKit", "AppletKit", "PaneModel", "LayoutKit",
+      ]),
   ],
   swiftLanguageModes: [.v6]
 )

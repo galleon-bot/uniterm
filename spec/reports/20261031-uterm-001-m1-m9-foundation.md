@@ -23,7 +23,7 @@ The run is in progress. See the run state below.
 | M5 Terminal tabs and program mode | DONE | "Add terminal tabs and program mode" |
 | M6 Multiple windows | DONE | "Add multiple windows with per-window panes and status" |
 | M7 Undo close pane | DONE | "Add undo close pane with grace and description tiers and close guards" |
-| M8 Layout persistence | QUEUED | |
+| M8 Layout persistence | DONE | "Save and restore every window's layout across launches" |
 | M9 User visual check | HELD: a check only the user can perform | |
 
 Held or blocked rows: none. M9 is left to the user. The row stays in `queue.md` until the user records it.
@@ -465,6 +465,67 @@ narrowly.
 Checks left to the user: how the grace segment and the Run prompt look, and a real vim buffer surviving an undo.
 
 Test cost: `swift test` takes 12.0 s of test time for 299 tests. The UI suite takes 301 s for 39 tests.
+
+### M8: Layout persistence
+
+Commit: "Save and restore every window's layout across launches".
+
+Checks:
+- The implementer ran `make fmt-check`, `make lint`, `make check`, `make build`, `make test-package`, and a build of
+  the UI test target, and all passed.
+- Before the review fixes, the coordinator reran `make test-package`: 364 tests, 0 failures, and the same 4 US-layout
+  skips. It also ran `make test-app`: 46 tests, 0 failures, 357 s.
+- After the review fixes, the coordinator reran both suites. `make test-package` ran 372 tests with 0 failures and 4
+  skips. `make test-app` ran 46 tests with 0 failures in 353 s.
+- `proposals.py check` and `proposals.py freeze` both print `[]`.
+- The implementer mutation-checked 22 rules across two rounds. Each mutation failed a named test, except one. Loosening
+  the mode in `open` survives, because `fchmod` sets 0600 before any data is written.
+- A mutation showed that the old UI tests passed with the quit save removed, since a debounced save had already written
+  the file. A DEBUG-only `UNITERM_LAYOUT_DEBOUNCE` now lets two UI tests depend on the quit save alone.
+
+Best guesses from the implementer:
+- The bounds are 3 unfinished launches, a 1 s debounce with a 10 s maximum wait, and 5 keep-asides.
+- The ID high-water mark is per window, since each window's tree has its own allocator. A future cross-window address,
+  for scripting or trust, would need a window and node pair.
+- A second instance opens one default window, restores nothing, and saves nothing. A status message says so.
+- A tree larger than the screen caps the window's minimum size to the visible area. Panes overflow at their minimum,
+  and the focus keys still reach them.
+- The launch marker clears one main-loop turn after the windows show.
+- A saved window that fails to open does not stop the others. The file is copied aside before any save replaces it.
+- Descriptions are kept as exact file bytes by a small hand-written scanner, since a parsed value would round large
+  numbers. A readable description that its applet refuses also becomes a placeholder.
+- A frame already inside a screen stays. Otherwise it goes to the saved screen, then the one with the most overlap, then
+  the main screen.
+- The DEBUG-only UI hooks are `UNITERM_LAYOUT_DIR` and `UNITERM_LAYOUT_DEBOUNCE`.
+- A non-finite or non-positive weight is written as an equal share. A stored ID mark above 2^48 is lowered to it, and
+  the allocator lowers any mark above 2^62.
+
+Review findings:
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | A doc comment bound to the wrong function | Fixed |
+| 2 | A title that changes faster than 1 s starved every save until quit | Confirmed by a failing test. Fixed with a 10 s maximum wait, and title-only changes no longer count |
+| 3 | A byte-for-byte test skipped instead of failing | Fixed with `XCTUnwrap` |
+| 4 | Production traps on the save path | Replaced by a thrown error that reaches the failure route. A pane with no applet is left out instead |
+| 5 | Fixed 2 s sleeps in the layout UI tests | One replaced by a poll. One kept as a 1 s negative wait, with the reason in a comment |
+| 6 | A dense doc block | Fixed |
+| 7 | A quadratic scan on large or deep files | Confirmed by measurement. A single pass per object cut debug decode from 103 ms to 55 ms at 1,000 panes, and from 428 ms to 185 ms at 150 levels. Release takes 14 ms and 9 ms |
+| 8 | No drive flush and no directory sync after the rename | Fixed with `F_FULLFSYNC`, falling back to `fsync`, plus a directory sync. A crash cannot be simulated, so this has no test |
+| 9 | A non-finite weight written as 0 sent the whole file aside | Confirmed by a failing test, fixed |
+| 10 | adr-impact: a hand-edited ID mark could overflow the allocator | Fixed. The allocator test cannot fail first, since the unfixed code traps the test run. The codec side was mutation-checked |
+
+The 185 ms debug decode for a 150-level file is over the coordinator's 100 ms line. It was accepted, since release
+takes 9 ms and no real layout nests that deep.
+
+adr-impact: ADR-02, ADR-03, and ADR-04 are consistent, and ADR-01 is untouched. Two ADR candidates were recorded as
+Undecided: per-window node ID scope, and the exact-byte description round trip. The second also extends the
+applet-contract candidate.
+
+Checks left to the user: a real crash loop, a second real instance, a real unplugged display, how the placeholder pane
+looks, and the real "Close windows when quitting" toggle. The UI test sets `-NSQuitAlwaysKeepsWindows NO` instead.
+
+Test cost: `swift test` takes 14.5 s of test time for 372 tests. The 7 layout UI tests take 49 s.
 
 ## Status
 

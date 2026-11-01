@@ -2,8 +2,10 @@ import XCTest
 
 /// The base class of every UI test. It launches the app in an isolated environment.
 ///
-/// The app reads a throwaway plist for its preferences and writes its terminal config to a scratch
-/// folder, so no test touches the developer's settings.
+/// The app reads a throwaway plist for its preferences and writes its terminal config and its saved
+/// layout to scratch folders, so no test touches the developer's settings or layout. The layout
+/// folder lasts for the whole test, so a test can quit the app and launch it again over the same
+/// saved layout.
 ///
 /// The shell reads a fixture folder through `ZDOTDIR` and never the developer's dotfiles. Those may
 /// prompt for an ssh passphrase or run anything else. Ghostty's zsh integration restores `ZDOTDIR`
@@ -32,16 +34,33 @@ class UnitermUITestCase: XCTestCase {
     launched = []
     try? FileManager.default.removeItem(atPath: scratch + "-shell")
     try? FileManager.default.removeItem(atPath: scratch + "-terminal")
+    try? FileManager.default.removeItem(atPath: scratch + "-layout")
   }
 
-  func launchApp(environment: [String: String] = [:]) -> XCUIApplication {
+  /// The folder the app saves its layout in during this test.
+  var layoutDirectory: URL {
+    URL(fileURLWithPath: scratch + "-layout", isDirectory: true)
+  }
+
+  /// Writes a layout file before the app launches.
+  func plantLayout(_ json: String) throws {
+    try FileManager.default.createDirectory(at: layoutDirectory, withIntermediateDirectories: true)
+    try Data(json.utf8).write(to: layoutDirectory.appendingPathComponent("layout.json"))
+  }
+
+  func launchApp(
+    environment: [String: String] = [:], arguments: [String] = []
+  ) -> XCUIApplication {
     let app = XCUIApplication()
     for (key, value) in environment {
       app.launchEnvironment[key] = value
     }
 
+    app.launchArguments += arguments
+
     app.launchEnvironment["UNITERM_DEFAULTS_PATH"] = scratch
     app.launchEnvironment["UNITERM_TERMINAL_DIR"] = scratch + "-terminal"
+    app.launchEnvironment["UNITERM_LAYOUT_DIR"] = scratch + "-layout"
     app.launchEnvironment["SHELL"] = "/bin/zsh"
     app.launchEnvironment["ZDOTDIR"] = scratch + "-shell"
     app.launchEnvironment["SSH_AUTH_SOCK"] = ""

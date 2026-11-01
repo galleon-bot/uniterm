@@ -1,4 +1,5 @@
 import AppKit
+import LayoutKit
 import StatusKit
 
 /// Where a new window lands when it cascades from an existing one.
@@ -23,6 +24,10 @@ enum WindowCascade {
   }
 }
 
+public enum WindowSetError: Error, Equatable {
+  case cannotRestore
+}
+
 /// The open main windows, in the order they were opened.
 ///
 /// Each window has its own controller, so its own pane tree, status bar, and status center. The
@@ -36,8 +41,15 @@ public final class WindowSet {
   /// The open windows' controllers, oldest first. A window leaves the list the moment it closes.
   public private(set) var controllers: [MainWindowController] = []
 
+  /// Makes the controller for a window of a saved layout. The controller restores its panes from
+  /// the saved window.
+  public typealias RestoringFactory =
+    @MainActor (_ identifier: String, _ restored: RestoredWindow) throws -> MainWindowController
+
   private let makeController: Factory
+  private let makeRestoredController: RestoringFactory?
   private let visibleFrame: @MainActor (NSWindow) -> NSRect?
+  private let screens: @MainActor () -> [ScreenArea]
   private var serial = 0
 
   /// Messages posted while no window was open, oldest first.
@@ -49,18 +61,34 @@ public final class WindowSet {
 
   private let confirmer: CloseConfirmer
 
+  /// Runs when a window opens or closes, and when anything a saved layout holds changes in one.
+  public var onLayoutChange: (() -> Void)?
+
   /// The visible frame decides where a cascade wraps. It defaults to the window's screen. The
   /// confirmer asks before a quit that would end something running.
+  ///
+  /// The screens place a restored window. They default to the screens attached now, the main one
+  /// first. A restored window comes from `makeRestoredController`, and without one a saved window
+  /// cannot be opened.
   public init(
     visibleFrame: @escaping @MainActor (NSWindow) -> NSRect? = { window in
       (window.screen ?? NSScreen.main)?.visibleFrame
     },
+    screens: @escaping @MainActor () -> [ScreenArea] = WindowSet.attachedScreens,
     confirmer: @escaping CloseConfirmer = CloseDialog.present,
+    makeRestoredController: RestoringFactory? = nil,
     makeController: @escaping Factory
   ) {
     self.visibleFrame = visibleFrame
+    self.screens = screens
     self.confirmer = confirmer
+    self.makeRestoredController = makeRestoredController
     self.makeController = makeController
+  }
+
+  /// The screens attached now. The first is the main screen.
+  public static let attachedScreens: @MainActor () -> [ScreenArea] = {
+    NSScreen.screens.map { ScreenArea(frame: $0.frame, visibleFrame: $0.visibleFrame) }
   }
 
   /// Everything running in any window, hidden closed panes included. Quitting ends all of it.
@@ -114,10 +142,7 @@ public final class WindowSet {
     let controller = try makeController(Self.identifier(forSerial: number))
     serial = number
 
-    controller.onClose = { [weak self] controller in
-      self?.windowDidClose(controller)
-    }
-    controllers.append(controller)
+    register(controller)
 
     if let anchor, let window = controller.window {
       let corner = WindowCascade.topLeft(
@@ -125,13 +150,66 @@ public final class WindowSet {
       window.setFrameTopLeftPoint(corner)
     }
 
+    show(controller)
+    return controller
+  }
+
+  /// Opens a window of a saved layout where it was, moved onto a screen that exists now. When the
+  /// factory throws, nothing opens and no number is used.
+  @discardableResult
+  public func open(restoring restored: RestoredWindow) throws -> MainWindowController {
+    guard let makeRestoredController else {
+      throw WindowSetError.cannotRestore
+    }
+
+    let number = serial + 1
+    let controller = try makeRestoredController(Self.identifier(forSerial: number), restored)
+    serial = number
+
+    register(controller)
+
+    if let window = controller.window {
+      let minimum = window.frameRect(
+        forContentRect: NSRect(origin: .zero, size: window.contentMinSize)
+      ).size
+
+      let frame = FrameClamp.clamp(
+        restored.saved.frame, savedScreen: restored.saved.screen, screens: screens(),
+        minimumSize: minimum)
+
+      window.setFrame(frame, display: false)
+      controller.refreshMinimumSize()
+    }
+
+    show(controller)
+    return controller
+  }
+
+  private func register(_ controller: MainWindowController) {
+    controller.onClose = { [weak self] controller in
+      self?.windowDidClose(controller)
+    }
+    controller.onLayoutChange = { [weak self] in
+      self?.onLayoutChange?()
+    }
+    controller.visibleFrameProvider = visibleFrame
+    controller.refreshMinimumSize()
+    controllers.append(controller)
+  }
+
+  private func show(_ controller: MainWindowController) {
     for message in held {
       controller.statusCenter.post(level: message.level, source: message.source, text: message.text)
     }
     held.removeAll()
 
     controller.showWindow(nil)
-    return controller
+    onLayoutChange?()
+  }
+
+  /// The layout as a file holds it. Windows are listed oldest first.
+  func savedLayout() -> SavedLayout {
+    SavedLayout(windows: controllers.compactMap { $0.savedWindow() })
   }
 
   /// Opens a window when no main window is open, and says whether it did. A Dock click calls it.
@@ -157,6 +235,7 @@ public final class WindowSet {
   private func windowDidClose(_ controller: MainWindowController) {
     controllers.removeAll { $0 === controller }
     closing.append(controller)
+    onLayoutChange?()
 
     Task { @MainActor [weak self] in
       self?.closing.removeAll { $0 === controller }

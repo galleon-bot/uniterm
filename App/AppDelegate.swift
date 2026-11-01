@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var paletteSync: TerminalPaletteSync?
   private var terminalEngine: GhosttyTerminalEngine?
   private var windowSet: WindowSet?
+  private var layoutPersistence: LayoutPersistence?
   private var settingsWindowController: SettingsWindowController?
   private var askingToQuit = false
 
@@ -44,6 +45,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
 
     return try TerminalConfigStore.defaultDirectory()
+  }
+
+  /// UI tests set `UNITERM_LAYOUT_DIR` so the saved layout stays out of the developer's Application
+  /// Support folder. Only debug builds honor it, for the same reason as the terminal folder.
+  private static func layoutDirectory() throws -> URL {
+    #if DEBUG
+      if let path = ProcessInfo.processInfo.environment["UNITERM_LAYOUT_DIR"] {
+        return URL(fileURLWithPath: path, isDirectory: true)
+      }
+    #endif
+
+    return try LayoutPersistence.defaultDirectory()
+  }
+
+  /// UI tests set `UNITERM_LAYOUT_DEBOUNCE` to a long delay in seconds, so only the save on quit can
+  /// write the layout. Only debug builds honor it.
+  private static func layoutDebounce() -> TimeInterval {
+    #if DEBUG
+      if let text = ProcessInfo.processInfo.environment["UNITERM_LAYOUT_DEBOUNCE"],
+        let seconds = TimeInterval(text), seconds > 0
+      {
+        return seconds
+      }
+    #endif
+
+    return 1
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -74,32 +101,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     NSApp.mainMenu = MainMenu.make(target: self)
 
     let settings = settings
-    let windows = WindowSet { identifier in
-      try MainWindowController(
-        appearance: appearance, settings: settings, identifier: identifier,
-        restoreApplet: { description in
-          guard description.type == TerminalDescription.typeID else {
-            throw AppletRestoreError.wrongType(
-              expected: TerminalDescription.typeID, found: description.type)
-          }
 
-          return try TerminalApplet(engine: engine, restoring: description)
-        },
-        makeApplet: { choice in
-          switch choice {
-          case .terminalShell:
-            return TerminalApplet(engine: engine)
+    let restoreApplet: AppletRestorer = { description in
+      guard description.type == TerminalDescription.typeID else {
+        throw AppletRestoreError.wrongType(
+          expected: TerminalDescription.typeID, found: description.type)
+      }
 
-          case .terminalProgram(let command):
-            return try TerminalApplet(engine: engine, program: command)
-          }
-        })
+      return try TerminalApplet(engine: engine, restoring: description)
     }
+
+    let makeApplet: AppletFactory = { choice in
+      switch choice {
+      case .terminalShell:
+        return TerminalApplet(engine: engine)
+
+      case .terminalProgram(let command):
+        return try TerminalApplet(engine: engine, program: command)
+      }
+    }
+
+    let windows = WindowSet(
+      makeRestoredController: { identifier, restored in
+        try MainWindowController(
+          appearance: appearance, settings: settings, identifier: identifier,
+          restoring: restored, restoreApplet: restoreApplet, makeApplet: makeApplet)
+      },
+      makeController: { identifier in
+        try MainWindowController(
+          appearance: appearance, settings: settings, identifier: identifier,
+          restoreApplet: restoreApplet, makeApplet: makeApplet)
+      })
     windowSet = windows
 
-    let controller: MainWindowController
+    let persistence: LayoutPersistence
     do {
-      controller = try windows.open()
+      persistence = LayoutPersistence(
+        directory: try Self.layoutDirectory(), windows: windows, debounce: Self.layoutDebounce())
+    } catch {
+      logger.error("the layout folder is not available: \(String(describing: error))")
+      NSApp.terminate(nil)
+      return
+    }
+
+    layoutPersistence = persistence
+
+    do {
+      try persistence.launch()
     } catch {
       logger.error("the first pane did not start: \(String(describing: error))")
       NSApp.terminate(nil)
@@ -116,7 +164,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     NSApp.activate()
 
-    postDebugError(to: controller)
+    if let controller = windows.activeController {
+      postDebugError(to: controller)
+    }
   }
 
   /// UI tests set `UNITERM_DEBUG_POST_ERROR` to get an error on the status bar without relying on
@@ -149,8 +199,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    layoutPersistence?.saveForQuit()
     windowSet?.hangUpHiddenPanes()
     terminalEngine?.removeConfigFile()
+  }
+
+  /// uniterm restores its own layout on every launch, from its own file. AppKit's window
+  /// restoration is off, so it never opens a second copy of a restored window, and it never follows
+  /// the system setting that closes windows when quitting.
+  func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+    true
+  }
+
+  func application(_ app: NSApplication, shouldRestoreSecureApplicationState coder: NSCoder) -> Bool
+  {
+    false
   }
 
   /// Closing the last window leaves the app running, as on macOS generally. Cmd-N or a click on

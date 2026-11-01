@@ -1,5 +1,6 @@
 import AppKit
 import AppletKit
+import LayoutKit
 import PaneModel
 import Preferences
 import StatusKit
@@ -56,11 +57,27 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// Runs once, when the window closes. The set of windows uses it to let go of the controller.
   var onClose: ((MainWindowController) -> Void)?
 
+  /// The description of each pane as of the last snapshot of the window.
+  private var savedDescriptions: [NodeID: AppletDescription] = [:]
+
+  /// Runs when something a saved layout holds changes: the pane tree, the focus, the window's frame,
+  /// or an applet's description.
+  var onLayoutChange: (() -> Void)?
+
+  /// The visible area of the screen the window is on. A window never asks for more room than that.
+  /// Tests replace it.
+  var visibleFrameProvider: @MainActor (NSWindow) -> NSRect? = { window in
+    (window.screen ?? NSScreen.main)?.visibleFrame
+  }
+
   /// The settings store supplies the status bar position, which is global to every window. The
   /// identifier names the window to accessibility, so it must differ between open windows.
   ///
   /// The undo policy sets how many closed panes stay alive, for how long, and how many closes the
   /// window remembers. The clock and scheduler time the grace period.
+  ///
+  /// A restored window takes its pane tree and its applets from the saved layout, and `makeApplet`
+  /// is not called for the first pane.
   public init(
     appearance: AppearanceController, settings: SettingsStore,
     statusCenter: StatusCenter = StatusCenter(),
@@ -68,6 +85,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     undoPolicy: CloseUndoPolicy = .standard,
     undoClock: any StatusClock = SystemStatusClock(),
     undoScheduler: @escaping StatusScheduler = StatusCenter.defaultScheduler,
+    restoring restored: RestoredWindow? = nil,
     restoreApplet: @escaping AppletRestorer = { _ in
       throw AppletRestoreError.unsupported("this window cannot reopen a closed pane")
     },
@@ -82,7 +100,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     ledger = CloseUndoLedger(policy: undoPolicy)
     placement = StatusBarPlacement(store: settings, statusCenter: statusCenter)
 
-    paneArea = PaneAreaView(firstApplet: try makeApplet(.terminalShell))
+    let panes = try restored.map { try PaneRestoration.restore($0, restorer: restoreApplet) }
+
+    if let panes {
+      paneArea = PaneAreaView(restoring: panes.tree, applets: panes.applets, focus: panes.focus)
+    } else {
+      paneArea = PaneAreaView(firstApplet: try makeApplet(.terminalShell))
+    }
+
     contentController = MainContentViewController(
       paneView: paneArea, statusBarEdge: DockEdge(placement.position))
 
@@ -95,6 +120,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     window.titlebarAppearsTransparent = true
     window.titleVisibility = .hidden
     window.isReleasedWhenClosed = false
+    window.isRestorable = false
     window.setAccessibilityIdentifier(identifier)
     window.contentViewController = contentController
     window.setContentSize(NSSize(width: 960, height: 640))
@@ -106,6 +132,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     for applet in paneArea.applets { applet.host = self }
 
     paneArea.onTreeChange = { [weak self] in self?.updateMinimumSize() }
+    paneArea.onLayoutChange = { [weak self] in self?.onLayoutChange?() }
     paneArea.onFocusChange = { [weak self] in self?.refreshStatusBar() }
     contentController.onLayout = { [weak self] in self?.updateMinimumSize() }
     contentController.statusBar.onActivate = { [weak self] in self?.toggleMessageHistory(nil) }
@@ -125,6 +152,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
 
     refreshStatusBar()
+
+    if let panes, panes.placeholders > 0 {
+      let noun = panes.placeholders == 1 ? "pane" : "panes"
+      statusCenter.post(
+        level: .warning, source: .uniterm,
+        text: "\(panes.placeholders) saved \(noun) could not be restored and kept as they were.")
+    }
   }
 
   isolated deinit {
@@ -207,14 +241,26 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   var isHistoryVisible: Bool { historyVisible }
 
+  func refreshMinimumSize() {
+    updateMinimumSize()
+  }
+
   /// The window never shrinks below what the tree needs. The tree's minimum is for the pane area
   /// alone, so the title bar and the docked regions add to it.
   private func updateMinimumSize() {
     guard let window else { return }
 
     let tree = paneArea.minimumSize
-    let minimum = NSSize(
+    var minimum = NSSize(
       width: tree.width, height: tree.height + contentController.chromeHeight)
+
+    // A tree that needs more than the screen offers still opens. The layout holds each pane at its
+    // minimum and overflows, and the user closes panes or moves focus by keyboard.
+    if let visible = visibleFrameProvider(window) {
+      let room = window.contentRect(forFrameRect: visible).size
+      minimum = NSSize(
+        width: min(minimum.width, room.width), height: min(minimum.height, room.height))
+    }
 
     if window.contentMinSize != minimum {
       window.contentMinSize = minimum
@@ -790,6 +836,64 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     closePane(paneArea.focusedPane, appletEnded: false)
   }
 
+  // MARK: Saved layout
+
+  /// The window as a saved layout holds it. Hidden panes and the undo state are not part of it.
+  /// The saved tree is the visible one, and its IDs stay below the layout's high-water mark.
+  ///
+  /// A pane with no applet cannot happen while the window is consistent. If it did, the pane is
+  /// left out, so the rest of the layout still saves. A window with no pane left is not saved.
+  func savedWindow() -> SavedWindow? {
+    guard let window else { return nil }
+
+    var described: [NodeID: AppletDescription] = [:]
+
+    guard let tree = savedNode(paneArea.tree.root, described: &described) else { return nil }
+
+    savedDescriptions = described
+
+    return SavedWindow(
+      frame: window.frame, screen: window.screen?.frame, tree: tree,
+      focusedPane: paneArea.focusedPane, highWaterMark: paneArea.tree.highWaterMark)
+  }
+
+  private func savedNode(_ node: Node, described: inout [NodeID: AppletDescription]) -> SavedNode? {
+    switch node {
+    case .pane(let pane):
+      guard let applet = paneArea.applet(for: pane.id) else { return nil }
+
+      let description = applet.describe()
+      described[pane.id] = description
+      return .pane(id: pane.id, applet: description)
+
+    case .split(let split):
+      var children: [SavedChild] = []
+
+      for child in split.children {
+        if let saved = savedNode(child.node, described: &described) {
+          children.append(SavedChild(node: saved, weight: child.weight))
+        }
+      }
+
+      switch children.count {
+      case 0: return nil
+      case 1: return children[0].node
+      default: return .split(id: split.id, axis: split.axis, children: children)
+      }
+    }
+  }
+
+  /// A title or segment change that leaves the saved description the same, such as a spinner in a
+  /// title, is not a layout change. Only a description that differs from the last saved one is.
+  private func notifyLayoutIfDescriptionChanged(_ applet: any Applet) {
+    guard let pane = paneArea.paneID(for: applet),
+      let saved = savedDescriptions[pane], saved == applet.describe()
+    else {
+      onLayoutChange?()
+      return
+    }
+  }
+
   // MARK: Window
 
   /// The red button and Cmd-Q on the last window end here. When something is running in the window,
@@ -801,6 +905,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
     askToCloseWindow(labels: labels) {}
     return false
+  }
+
+  public func windowDidMove(_ notification: Notification) {
+    onLayoutChange?()
+  }
+
+  public func windowDidResize(_ notification: Notification) {
+    onLayoutChange?()
   }
 
   /// Closing the window ends every applet in it, hidden ones included, and lets go of the undo
@@ -849,6 +961,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// Only the focused pane's applet shows in the bar, so a change in any other applet is not
   /// the bar's business until that pane takes focus.
   public func appletDidChange(_ applet: any Applet) {
+    notifyLayoutIfDescriptionChanged(applet)
+
     guard applet === paneArea.applet(for: paneArea.focusedPane) else { return }
 
     refreshStatusBar()
