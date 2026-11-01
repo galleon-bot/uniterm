@@ -4,11 +4,11 @@ import Preferences
 /// The Settings window's content: one row for each global setting.
 @MainActor
 final class SettingsViewController: NSViewController {
-  private let appearance: ChoiceSettingViewController<AppearancePreference>
-  private let statusBarPosition: ChoiceSettingViewController<StatusBarPosition>
+  private let appearance: ChoiceSettingRow<AppearancePreference>
+  private let statusBarPosition: ChoiceSettingRow<StatusBarPosition>
 
   init(store: SettingsStore) {
-    appearance = ChoiceSettingViewController(
+    appearance = ChoiceSettingRow(
       store: store, key: .appearance, caption: "Appearance:", identifier: "appearance-control"
     ) { preference in
       switch preference {
@@ -18,7 +18,7 @@ final class SettingsViewController: NSViewController {
       }
     }
 
-    statusBarPosition = ChoiceSettingViewController(
+    statusBarPosition = ChoiceSettingRow(
       store: store, key: .statusBarPosition, caption: "Status bar:",
       identifier: "status-bar-position-control"
     ) { position in
@@ -36,16 +36,31 @@ final class SettingsViewController: NSViewController {
     fatalError("init(coder:) is not supported")
   }
 
+  /// A two-column form. Captions are right-aligned and end at one edge. Controls start at the
+  /// next edge. The window sizes itself to the form plus the standard margin.
   override func loadView() {
-    addChild(appearance)
-    addChild(statusBarPosition)
+    let grid = NSGridView(views: [
+      [appearance.label, appearance.control],
+      [statusBarPosition.label, statusBarPosition.control],
+    ])
+    grid.translatesAutoresizingMaskIntoConstraints = false
+    grid.rowSpacing = 12
+    grid.columnSpacing = 8
+    grid.column(at: 0).xPlacement = .trailing
+    grid.column(at: 1).xPlacement = .leading
+    grid.rowAlignment = .firstBaseline
 
-    let column = NSStackView(views: [appearance.view, statusBarPosition.view])
-    column.orientation = .vertical
-    column.alignment = .leading
-    column.spacing = 16
-    column.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
+    let content = NSView()
+    content.addSubview(grid)
 
-    view = column
+    let margin: CGFloat = 20
+    NSLayoutConstraint.activate([
+      grid.topAnchor.constraint(equalTo: content.topAnchor, constant: margin),
+      grid.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: margin),
+      grid.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+      grid.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -margin),
+    ])
+
+    view = content
   }
 }

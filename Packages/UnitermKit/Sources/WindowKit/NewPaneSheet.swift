@@ -8,7 +8,11 @@ final class NewPaneSheet: NSObject, NSTextFieldDelegate {
   private let alert = NSAlert()
   private let popup = NSPopUpButton(frame: .zero, pullsDown: false)
   private let field = NSTextField(frame: .zero)
+  private let accessory = NSView(frame: .zero)
   private var openButton: NSButton?
+
+  private static let accessoryWidth: CGFloat = 320
+  private static let accessorySpacing: CGFloat = 8
 
   /// Shows the sheet on `window`. `completion` runs with the choice, or never when the user
   /// cancels.
@@ -37,16 +41,11 @@ final class NewPaneSheet: NSObject, NSTextFieldDelegate {
     field.isHidden = true
     field.setAccessibilityIdentifier("pane-command")
 
-    let stack = NSStackView(views: [popup, field])
-    stack.orientation = .vertical
-    stack.alignment = .leading
-    stack.spacing = 8
-    stack.frame = NSRect(x: 0, y: 0, width: 320, height: 56)
-    popup.widthAnchor.constraint(equalToConstant: 320).isActive = true
-    field.widthAnchor.constraint(equalToConstant: 320).isActive = true
-    stack.detachesHiddenViews = true
+    accessory.addSubview(popup)
+    accessory.addSubview(field)
+    layoutAccessory()
 
-    alert.accessoryView = stack
+    alert.accessoryView = accessory
     alert.layout()
     alert.window.initialFirstResponder = popup
     updateOpenButton()
@@ -61,12 +60,28 @@ final class NewPaneSheet: NSObject, NSTextFieldDelegate {
   @objc private func modeChanged(_ sender: NSPopUpButton) {
     form.mode = NewPaneForm.Mode(rawValue: sender.indexOfSelectedItem) ?? .shell
     field.isHidden = form.mode != .program
+    layoutAccessory()
     alert.layout()
     updateOpenButton()
 
     if form.mode == .program {
       alert.window.makeFirstResponder(field)
     }
+  }
+
+  /// NSAlert sizes its window from the accessory view's frame and ignores Auto Layout inside it.
+  /// The accessory is laid out by hand, and it resizes to fit what shows. The caller then asks the
+  /// alert to lay out again.
+  private func layoutAccessory() {
+    let width = Self.accessoryWidth
+    let popupHeight = popup.fittingSize.height
+    let fieldHeight = field.fittingSize.height
+    let showsField = !field.isHidden
+    let height = showsField ? popupHeight + Self.accessorySpacing + fieldHeight : popupHeight
+
+    accessory.frame = NSRect(x: 0, y: 0, width: width, height: height)
+    popup.frame = NSRect(x: 0, y: height - popupHeight, width: width, height: popupHeight)
+    field.frame = NSRect(x: 0, y: 0, width: width, height: fieldHeight)
   }
 
   func controlTextDidChange(_ obj: Notification) {

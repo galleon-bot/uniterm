@@ -7,7 +7,7 @@ import Preferences
 public final class SettingsWindowController: NSWindowController {
   public init(store: SettingsStore) {
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 420, height: 130),
+      contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false)

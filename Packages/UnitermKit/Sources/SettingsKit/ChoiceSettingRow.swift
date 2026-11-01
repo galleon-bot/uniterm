@@ -1,22 +1,21 @@
 import AppKit
 import Preferences
 
-/// One row of the Settings window for a setting with a few named values. A change writes the
-/// setting at once. A change from outside the window, such as `defaults write`, updates the control.
-/// A stored value this version does not know shows the default, and the row never writes it back.
+/// One row of the Settings form for a setting with a few named values. It supplies the caption and
+/// the control, and the form lays them out in its columns. A change writes the setting at once. A
+/// change from outside the window, such as `defaults write`, updates the control. A stored value
+/// this version does not know shows the default, and the row never writes it back.
 @MainActor
-final class ChoiceSettingViewController<
+final class ChoiceSettingRow<
   Value: RawRepresentable & CaseIterable & Equatable & Sendable
->:
-  NSViewController
+>: NSObject
 where Value.RawValue == String, Value.AllCases: RandomAccessCollection, Value.AllCases.Index == Int
 {
+  let label: NSTextField
+  let control = NSSegmentedControl()
+
   private let store: SettingsStore
   private let key: SettingKey<Value>
-  private let caption: String
-  private let segmentTitle: (Value) -> String
-  private let controlIdentifier: String
-  private let control = NSSegmentedControl()
   private var observation: SettingsObservation?
 
   init(
@@ -25,37 +24,17 @@ where Value.RawValue == String, Value.AllCases: RandomAccessCollection, Value.Al
   ) {
     self.store = store
     self.key = key
-    self.caption = caption
-    self.controlIdentifier = identifier
-    self.segmentTitle = title
-    super.init(nibName: nil, bundle: nil)
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) is not supported")
-  }
-
-  override func loadView() {
-    let label = NSTextField(labelWithString: caption)
-    label.alignment = .right
-    label.widthAnchor.constraint(equalToConstant: 90).isActive = true
+    label = NSTextField(labelWithString: caption)
+    super.init()
 
     control.segmentCount = Value.allCases.count
     control.trackingMode = .selectOne
     for (index, value) in Value.allCases.enumerated() {
-      control.setLabel(segmentTitle(value), forSegment: index)
+      control.setLabel(title(value), forSegment: index)
     }
     control.target = self
     control.action = #selector(selectionChanged(_:))
-    control.setAccessibilityIdentifier(controlIdentifier)
-
-    let row = NSStackView(views: [label, control])
-    row.orientation = .horizontal
-    row.alignment = .firstBaseline
-    row.spacing = 12
-
-    view = row
+    control.setAccessibilityIdentifier(identifier)
 
     store.watch(key)
     observation = store.addObserver { [weak self] in self?.syncFromStore() }

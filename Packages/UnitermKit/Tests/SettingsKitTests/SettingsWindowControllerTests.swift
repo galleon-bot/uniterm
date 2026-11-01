@@ -104,4 +104,53 @@ final class SettingsWindowControllerTests: XCTestCase {
 
     XCTAssertEqual(store.value(of: .appearance), .dark)
   }
+
+  private func subviews<T: NSView>(of type: T.Type, in view: NSView) -> [T] {
+    var found: [T] = []
+
+    for subview in view.subviews {
+      if let match = subview as? T { found.append(match) }
+
+      found += subviews(of: type, in: subview)
+    }
+
+    return found
+  }
+
+  /// The alignment rect, which is what Auto Layout aligns. A label's frame reaches a little past it.
+  private func frameInWindow(_ view: NSView) -> NSRect {
+    view.convert(view.alignmentRect(forFrame: view.bounds), to: nil)
+  }
+
+  /// Catches a form whose labels or controls do not line up, a control that runs to the window
+  /// edge, and a window that does not fit its rows. Labels must end at one trailing edge and
+  /// controls must start at one leading edge. Everything keeps a standard margin from the edges.
+  func testRowsShareColumnEdgesAndKeepMargins() throws {
+    let window = try XCTUnwrap(SettingsWindowController(store: makeStore()).window)
+    let content = try XCTUnwrap(window.contentView)
+    content.layoutSubtreeIfNeeded()
+
+    let controls = ["appearance-control", "status-bar-position-control"].map {
+      frameInWindow(control($0, in: window)!)
+    }
+    let labels = subviews(of: NSTextField.self, in: content)
+      .filter { ["Appearance:", "Status bar:"].contains($0.stringValue) }
+      .map(frameInWindow)
+    XCTAssertEqual(labels.count, 2)
+
+    XCTAssertEqual(controls[0].minX, controls[1].minX, accuracy: 0.5, "controls start apart")
+    XCTAssertEqual(labels[0].maxX, labels[1].maxX, accuracy: 0.5, "labels end apart")
+    XCTAssertLessThan(labels[0].maxX, controls[0].minX, "labels and controls collide")
+
+    let bounds = content.bounds
+    for frame in labels + controls {
+      XCTAssertGreaterThanOrEqual(frame.minX, 20 - 0.5, "too close to the leading edge")
+      XCTAssertLessThanOrEqual(frame.maxX, bounds.maxX - 20 + 0.5, "too close to the trailing edge")
+      XCTAssertGreaterThanOrEqual(frame.minY, 20 - 0.5, "too close to the bottom edge")
+      XCTAssertLessThanOrEqual(frame.maxY, bounds.maxY - 20 + 0.5, "too close to the top edge")
+    }
+
+    XCTAssertEqual(
+      content.fittingSize.width, bounds.width, accuracy: 1, "window is not sized to fit")
+  }
 }
