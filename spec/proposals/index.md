@@ -3,3 +3,35 @@
 | Proposal | Description | Status |
 |----------|-------------|--------|
 | [UTERM-001](UTERM-001-foundation.md) | Windows, regions, pane tree, status bar, and the libghostty terminal applet | draft |
+| [UTERM-002](UTERM-002-command-palette.md) | Floating or docked command palette with tab search | draft |
+| [UTERM-003](UTERM-003-janet-scripting.md) | Embedded Janet, host API, `uniterm run`, and the REPL applet | draft |
+| [UTERM-004](UTERM-004-control-and-trust.md) | Control levels, pane trust, exec panes, and layout requests | draft |
+| [UTERM-005](UTERM-005-browser-applet.md) | WebKit browser applet with tabs and a security indicator | draft |
+| [UTERM-006](UTERM-006-image-viewer-applet.md) | Image viewer applet with folder slideshow | draft |
+| [UTERM-007](UTERM-007-text-viewer-applet.md) | Viewer for Markdown, RTF, Word, and PDF | draft |
+| [UTERM-008](UTERM-008-map-viewer-applet.md) | MapKit applet with custom pins | draft |
+| [UTERM-009](UTERM-009-data-viewer-applet.md) | Table viewer for CSV, JSON, and spreadsheets | draft |
+| [UTERM-010](UTERM-010-canvas-applet.md) | Canvas applet that programs draw on | draft |
+| [UTERM-011](UTERM-011-widget-bar.md) | Widget bar region with small widgets | deferred |
+| [UTERM-012](UTERM-012-shell-blocks.md) | Collapsible command blocks in the terminal | deferred |
+
+## Dependency Graph
+
+```text
+UTERM-001
+UTERM-002 ← UTERM-001
+UTERM-003 ← UTERM-001
+UTERM-004 ← UTERM-001, UTERM-003
+UTERM-005 ← UTERM-001
+UTERM-006 ← UTERM-001
+UTERM-007 ← UTERM-001
+UTERM-008 ← UTERM-001
+UTERM-009 ← UTERM-001
+UTERM-010 ← UTERM-001, UTERM-004
+UTERM-011 ← UTERM-001
+UTERM-012 ← UTERM-001
+```
+
+## Not Yet Filed
+
+- User-written custom applets. The write-up calls this pie-in-the-sky. File it after UTERM-004 settles the control model.

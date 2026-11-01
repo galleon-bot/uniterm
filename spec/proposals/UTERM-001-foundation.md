@@ -4,6 +4,13 @@
 **Created:** 2026-10-31
 **Updated:** 2026-10-31
 
+## Impacts
+
+- UTERM-002, UTERM-011 — "Regions are separate from position": the palette and widget bar join as regions
+- UTERM-003, UTERM-004 — "Panes and applets": scripts and control address panes and applets
+- UTERM-005 through UTERM-010 — "Panes and applets": every applet implements the applet contract
+- UTERM-012 — "Terminal surface behind an internal protocol": blocks need shell integration through that boundary
+
 ## Summary
 
 This proposal builds the base of uniterm. The app opens one or more windows. Each window holds a tree of resizable split
@@ -281,7 +288,7 @@ names may still be found. Settle them before M3, since type names follow from th
 
 ## References
 
-- Original write-up: `~/tmp_work/uniterm.md`
+- Original write-up: `~/projects/private_specs/uniterm/spec/research/original-writeup.md`
 - [Ghostty](https://ghostty.org/docs/about): libghostty is not yet a stable API
 - [loeschg/GhosttyKit](https://github.com/loeschg/GhosttyKit)
 - [rijieli/libghostty-spm](https://github.com/rijieli/libghostty-spm)
