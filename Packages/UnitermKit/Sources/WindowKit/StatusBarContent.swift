@@ -2,11 +2,13 @@ import AppletKit
 import StatusKit
 
 /// Names a slot of the status bar. The window owns its slots. The focused pane's applet fills the
-/// applet slots. A later slot, such as the undo grace period, joins as a new case.
+/// applet slots. A later slot joins as a new case.
 enum BarSegmentID: Hashable, Sendable {
   case message
   case dismiss
   case unseenError
+  case grace
+  case graceHangUp
   case applet(Int)
 
   var identifier: String {
@@ -14,8 +16,24 @@ enum BarSegmentID: Hashable, Sendable {
     case .message: return "status-message"
     case .dismiss: return "status-dismiss"
     case .unseenError: return "status-unseen-error"
+    case .grace: return "status-grace"
+    case .graceHangUp: return "status-grace-hangup"
     case .applet(let index): return "status-applet-\(index)"
     }
+  }
+}
+
+/// The closed panes that are still alive, hidden, in a window. The status bar shows them so the
+/// user knows processes are running that the window does not display.
+struct GraceIndicator: Equatable, Sendable {
+  var count: Int
+
+  /// Seconds until the first of them is hung up, rounded up.
+  var secondsLeft: Int
+
+  var text: String {
+    let noun = count == 1 ? "closed pane" : "closed panes"
+    return "\(count) \(noun) kept for \(secondsLeft)s. Cmd-Z undoes"
   }
 }
 
@@ -39,10 +57,13 @@ struct BarSegment: Sendable, Equatable {
 /// Works out what the status bar shows. It is pure, so a test needs no window.
 enum StatusBarContent {
   /// The window's slots in order: the message area, a dismiss control while an error is on the
-  /// bar, the unseen-error indicator, then the focused applet's slots. The message area is always
-  /// there, empty when the bar is idle, so the layout does not jump when a message arrives.
+  /// bar, the unseen-error indicator, the undo grace period with its hang-up control, then the
+  /// focused applet's slots. The message area is always there, empty when the bar is idle, so the
+  /// layout does not jump when a message arrives. The grace slots belong to the window, not to the
+  /// message queue, so a flood of messages never displaces them.
   static func segments(
-    display: StatusDisplay?, hasUnseenError: Bool, applet: [AppletSegment]
+    display: StatusDisplay?, hasUnseenError: Bool, grace: GraceIndicator? = nil,
+    applet: [AppletSegment]
   ) -> [BarSegment] {
     var result = [message(display)]
 
@@ -58,6 +79,17 @@ enum StatusBarContent {
         BarSegment(
           id: .unseenError, symbolName: "exclamationmark.circle.fill", text: nil, tone: .error,
           accessibilityLabel: "Unseen errors"))
+    }
+
+    if let grace {
+      result.append(
+        BarSegment(
+          id: .grace, symbolName: "arrow.uturn.backward.circle", text: grace.text,
+          tone: .emphasized, accessibilityLabel: nil))
+      result.append(
+        BarSegment(
+          id: .graceHangUp, symbolName: "power.circle", text: nil, tone: .warning,
+          accessibilityLabel: "Hang up closed panes now"))
     }
 
     for (index, segment) in applet.enumerated() {

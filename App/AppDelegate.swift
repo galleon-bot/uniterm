@@ -1,4 +1,5 @@
 import AppKit
+import AppletKit
 import OSLog
 import Preferences
 import SettingsKit
@@ -17,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var terminalEngine: GhosttyTerminalEngine?
   private var windowSet: WindowSet?
   private var settingsWindowController: SettingsWindowController?
+  private var askingToQuit = false
 
   /// UI tests set `UNITERM_DEFAULTS_PATH` to a plist path inside the test runner's container, so
   /// they never touch the developer's real preferences. A write to that file from the sandboxed
@@ -73,16 +75,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     let settings = settings
     let windows = WindowSet { identifier in
-      try MainWindowController(appearance: appearance, settings: settings, identifier: identifier) {
-        choice in
-        switch choice {
-        case .terminalShell:
-          return TerminalApplet(engine: engine)
+      try MainWindowController(
+        appearance: appearance, settings: settings, identifier: identifier,
+        restoreApplet: { description in
+          guard description.type == TerminalDescription.typeID else {
+            throw AppletRestoreError.wrongType(
+              expected: TerminalDescription.typeID, found: description.type)
+          }
 
-        case .terminalProgram(let command):
-          return try TerminalApplet(engine: engine, program: command)
-        }
-      }
+          return try TerminalApplet(engine: engine, restoring: description)
+        },
+        makeApplet: { choice in
+          switch choice {
+          case .terminalShell:
+            return TerminalApplet(engine: engine)
+
+          case .terminalProgram(let command):
+            return try TerminalApplet(engine: engine, program: command)
+          }
+        })
     }
     windowSet = windows
 
@@ -118,7 +129,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
   }
 
+  /// Quitting asks first when anything is running in any window, hidden closed panes included.
+  /// The answer comes later, so AppKit waits for it. A second Cmd-Q while the question is open
+  /// does not stack another one.
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard let windowSet, !windowSet.runningTabLabels.isEmpty else { return .terminateNow }
+
+    guard !askingToQuit else { return .terminateCancel }
+
+    askingToQuit = true
+
+    Task { @MainActor [weak self] in
+      let confirmed = await windowSet.shouldQuit()
+      self?.askingToQuit = false
+      sender.reply(toApplicationShouldTerminate: confirmed)
+    }
+
+    return .terminateLater
+  }
+
   func applicationWillTerminate(_ notification: Notification) {
+    windowSet?.hangUpHiddenPanes()
     terminalEngine?.removeConfigFile()
   }
 

@@ -154,6 +154,33 @@ final class PaneTreeUITests: UnitermUITestCase {
     XCTAssertEqual(window.groups["pane-1"].frame.width, whole, accuracy: 2)
   }
 
+  /// Catches an undo that does not bring the pane back where it was: after Cmd-W closes the second
+  /// pane, the grace segment shows in the bar, and Cmd-Z puts pane 2 back beside pane 1 with its
+  /// ID and its shell.
+  func testUndoBringsBackTheClosedPaneAndTheGraceSegmentShowsMeanwhile() {
+    let app = launchApp()
+    let window = app.windows["main-window"]
+    _ = waitForTerminal(in: app)
+
+    openPane(in: app, keys: "d", modifiers: .command)
+    XCTAssertTrue(window.groups["pane-2"].waitForExistence(timeout: 20))
+    XCTAssertTrue(
+      waitFor(window.groups["pane-2"].textViews["terminal"], timeout: 40) { $0.contains("% ") })
+
+    app.typeKey("w", modifierFlags: .command)
+    XCTAssertTrue(waitUntilGone(window.groups["pane-2"], timeout: 15))
+    XCTAssertTrue(
+      window.staticTexts["status-grace"].waitForExistence(timeout: 5),
+      "the grace segment never showed")
+
+    app.typeKey("z", modifierFlags: .command)
+
+    XCTAssertTrue(window.groups["pane-2"].waitForExistence(timeout: 15), "undo never returned it")
+    XCTAssertTrue(waitForPaneCount(2, in: window))
+    XCTAssertGreaterThan(window.groups["pane-2"].frame.minX, window.groups["pane-1"].frame.minX)
+    XCTAssertTrue(waitUntilGone(window.staticTexts["status-grace"], timeout: 5))
+  }
+
   /// Catches a window that can shrink past its panes. With three panes in a row the minimum is
   /// 3 * 200 + 2 * 5 = 610 wide. A drag that asks for far less stops there, and no pane is
   /// narrower than 200.

@@ -13,6 +13,15 @@ final class FakeApplet: TabbedApplet {
   weak var host: (any AppletHost)?
   var started = false
   var closed = false
+  var detachCount = 0
+  var reattachCount = 0
+
+  /// What a dialog calls the running parts. Without it, a running applet names its title.
+  var labels: [String]?
+
+  var runningLabels: [String] {
+    isRunningSomething ? (labels ?? [title]) : []
+  }
 
   var tabCount = 1
   var selectedTabIndex = 0
@@ -43,10 +52,12 @@ final class FakeApplet: TabbedApplet {
 
   func start() { started = true }
   func close() { closed = true }
-  func detach() {}
-  func reattach() {}
+  func detach() { detachCount += 1 }
+  func reattach() { reattachCount += 1 }
   func focus() {}
+
+  /// The description carries the title, so a test can tell which applet a reopened pane came from.
   func describe() -> AppletDescription {
-    AppletDescription(type: "fake", version: 1, payload: .null)
+    AppletDescription(type: "fake", version: 1, payload: .string(title))
   }
 }

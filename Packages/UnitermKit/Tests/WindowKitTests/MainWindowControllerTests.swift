@@ -81,13 +81,20 @@ final class MainWindowControllerTests: XCTestCase {
     XCTAssertTrue(made[0].started)
   }
 
-  /// Cmd-Z is a menu item answered by the window until undo exists.
-  func testPlaceholderActionsAnswerWithAMessage() throws {
+  /// Catches an undo with nothing to undo that does nothing silently. The item stays on, so Cmd-Z
+  /// reaches the window and the action says there is nothing to undo.
+  func testUndoWithNothingClosedStaysOnAndSaysSo() throws {
     let controller = try makeController()
+    let item = NSMenuItem(
+      title: "Undo", action: #selector(MainWindow.undoCloseOrEdit(_:)), keyEquivalent: "z")
+
+    XCTAssertTrue(controller.validateMenuItem(item))
+    XCTAssertEqual(item.title, "Undo Close Pane")
 
     controller.undoClosePane(nil)
 
     XCTAssertEqual(controller.statusCenter.history.count, 1)
+    XCTAssertEqual(controller.statusCenter.history.last?.text, "There is no closed pane to undo.")
     XCTAssertTrue(controller.statusCenter.history.allSatisfy { $0.source == .uniterm })
   }
 
@@ -194,8 +201,8 @@ final class MainWindowControllerTests: XCTestCase {
 
   // MARK: Closing
 
-  /// Catches a close that leaves a hole: the closed applet ends, the window stays, and the
-  /// remaining pane takes the whole width and the focus.
+  /// Catches a close that leaves a hole: the closed applet leaves the tree, the window stays, and
+  /// the remaining pane takes the whole width and the focus.
   func testClosingAPaneGivesItsSpaceToTheNeighbor() throws {
     let controller = try makeController()
     controller.window?.orderFrontRegardless()
@@ -206,7 +213,8 @@ final class MainWindowControllerTests: XCTestCase {
 
     XCTAssertEqual(controller.paneIDs, [NodeID(rawValue: 1)])
     XCTAssertEqual(controller.focusedPane, NodeID(rawValue: 1))
-    XCTAssertTrue(made[1].closed)
+    XCTAssertEqual(made[1].detachCount, 1)
+    XCTAssertFalse(made[1].closed)
     XCTAssertFalse(made[0].closed)
     XCTAssertEqual(width(controller, 1), 960)
     XCTAssertEqual(controller.window?.isVisible, true)
@@ -278,7 +286,7 @@ final class MainWindowControllerTests: XCTestCase {
     let reused = made[1]
     XCTAssertTrue(reused.started)
 
-    controller.closePane(nil)
+    controller.appletDidExit(reused)
     XCTAssertTrue(reused.closed)
     reused.started = false
     reuse = reused
@@ -340,8 +348,8 @@ final class MainWindowControllerTests: XCTestCase {
   // MARK: Tabs
 
   /// Catches Cmd-W that closes a pane while its applet still has tabs. With two tabs it closes the
-  /// tab and keeps the pane. With one tab left it closes the pane. Closing the pane ends the applet
-  /// and so every tab in it.
+  /// tab and keeps the pane. With one tab left it closes the pane, which hides the applet with
+  /// every tab in it.
   func testCloseTakesATabFirstAndThePaneWhenOneTabIsLeft() async throws {
     let controller = try makeController()
     controller.openPane(.terminalShell, axis: .row)
@@ -358,7 +366,7 @@ final class MainWindowControllerTests: XCTestCase {
     controller.closePane(nil)
 
     XCTAssertEqual(controller.paneIDs.count, 1)
-    XCTAssertTrue(tabbed.closed)
+    XCTAssertEqual(tabbed.detachCount, 1)
     XCTAssertEqual(tabbed.tabsClosed, 1)
   }
 

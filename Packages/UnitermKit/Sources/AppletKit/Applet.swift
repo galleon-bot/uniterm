@@ -70,6 +70,11 @@ public protocol Applet: AnyObject {
   /// True when closing the applet would kill work that undo cannot bring back.
   var isRunningSomething: Bool { get }
 
+  /// What a confirmation dialog calls the parts of the applet that are running something. An
+  /// applet with tabs names each such tab, by title or by command. An applet that is not running
+  /// anything names nothing.
+  var runningLabels: [String] { get }
+
   var host: (any AppletHost)? { get set }
 
   func start()
@@ -95,6 +100,11 @@ public protocol Applet: AnyObject {
 
 extension Applet {
   public func apply(_ palette: ThemePalette) {}
+
+  /// An applet with one part running names itself by its title.
+  public var runningLabels: [String] {
+    isRunningSomething ? [title] : []
+  }
 }
 
 /// An applet that holds several tabs. The host routes the tab menu items and Cmd-W to it.

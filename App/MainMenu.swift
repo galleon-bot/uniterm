@@ -77,7 +77,7 @@ enum MainMenu {
     let menu = NSMenu(title: "Edit")
 
     menu.addItem(
-      withTitle: "Undo Close Pane", action: #selector(MainWindowController.undoClosePane(_:)),
+      withTitle: "Undo Close Pane", action: #selector(MainWindow.undoCloseOrEdit(_:)),
       keyEquivalent: "z")
     menu.addItem(.separator())
     menu.addItem(

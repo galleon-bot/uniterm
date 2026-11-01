@@ -47,15 +47,47 @@ public final class WindowSet {
   /// controller, so the set keeps it alive until the next turn of the main actor.
   private var closing: [MainWindowController] = []
 
-  /// The visible frame decides where a cascade wraps. It defaults to the window's screen.
+  private let confirmer: CloseConfirmer
+
+  /// The visible frame decides where a cascade wraps. It defaults to the window's screen. The
+  /// confirmer asks before a quit that would end something running.
   public init(
     visibleFrame: @escaping @MainActor (NSWindow) -> NSRect? = { window in
       (window.screen ?? NSScreen.main)?.visibleFrame
     },
+    confirmer: @escaping CloseConfirmer = CloseDialog.present,
     makeController: @escaping Factory
   ) {
     self.visibleFrame = visibleFrame
+    self.confirmer = confirmer
     self.makeController = makeController
+  }
+
+  /// Everything running in any window, hidden closed panes included. Quitting ends all of it.
+  public var runningTabLabels: [String] {
+    controllers.flatMap { $0.runningTabLabels }
+  }
+
+  /// Asks before a quit that would end something running. Returns true when the app may quit.
+  public func shouldQuit() async -> Bool {
+    let labels = runningTabLabels
+
+    guard !labels.isEmpty else { return true }
+
+    let request = CloseConfirmation(
+      title: "Quit uniterm?",
+      detail: "Quitting ends everything that is running in every window.", labels: labels,
+      confirmTitle: "Quit", cancelTitle: "Cancel")
+
+    return await confirmer(request, activeController?.window)
+  }
+
+  /// Ends the hidden closed panes of every window. A quit calls it, so no process outlives the app
+  /// as a pane the user cannot see.
+  public func hangUpHiddenPanes() {
+    for controller in controllers {
+      controller.hangUpHiddenPanes()
+    }
   }
 
   /// The identifier of the nth window ever opened. The first keeps the plain name. A number is

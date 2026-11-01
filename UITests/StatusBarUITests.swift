@@ -70,10 +70,10 @@ final class StatusBarUITests: UnitermUITestCase {
     XCTAssertGreaterThanOrEqual(rows.count, 2)
     XCTAssertEqual(
       rows.element(boundBy: 0).value as? String,
-      "info  uniterm: There is no closed pane to undo yet.")
+      "info  uniterm: There is no closed pane to undo.")
     XCTAssertEqual(
       rows.element(boundBy: 1).value as? String,
-      "info  uniterm: There is no closed pane to undo yet.")
+      "info  uniterm: There is no closed pane to undo.")
 
     bar.click()
     XCTAssertTrue(waitForGone(rows.firstMatch), "a second click left the history open")

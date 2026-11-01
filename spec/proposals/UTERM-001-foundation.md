@@ -228,7 +228,9 @@ Decision: a normalized N-ary tree with stable node IDs.
   siblings.
 - Every node has a stable ID. A node that survives a split, merge, or collapse keeps its ID. A node that is removed,
   such as a split that collapses, has its ID retired and never reused. A pane's ID never changes while the pane
-  exists. Nothing may address a node by its path in the tree, since normalization rewrites paths.
+  exists, and a closed pane kept alive for undo still exists. Its ID retires when the pane is discarded, and only then.
+  Amended 2026-11-01; see Decision Log. Nothing may address a node by its path in the tree, since normalization
+  rewrites paths.
 - Merge and collapse rules belong to the node kind. This proposal has two kinds, split and pane, and both normalize. A
   later kind may define its own rule.
 
@@ -794,7 +796,7 @@ Out of scope, for later proposals:
 
 ### M7: Undo close pane
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 - After closing a pane, undo reopens it in its former place in the tree
 - The restored terminal behaves as the settled undo decision says
@@ -817,9 +819,54 @@ Out of scope, for later proposals:
 - A pane reattached within the grace period keeps its ID. A pane reopened from its description gets a new ID
 - The number of panes kept alive at once is bounded
 - A pane that closed because its shell exited adds no keep-alive entry
-- A shell relaunched from a description starts in its OSC 7 directory only when that path is local and still exists.
-  Otherwise it starts in the tab's starting directory, then in the home directory
+- A shell relaunched from a description starts in its OSC 7 directory only when that path is absolute and still exists
+  on this machine. Otherwise it starts in the tab's starting directory, then in the home directory. Amended 2026-11-01;
+  see Decision Log.
 - A program-mode pane restored from its description shows its command and a Run action, and runs nothing until asked
+
+**As built:**
+
+- Starting bounds are a 10 second grace period, 3 grace slots, and an undo stack 20 deep. They are a policy value the
+  window takes at creation, with no setting. Undo, Cmd-Z, takes the newest close across both tiers. A pane still hidden
+  returns as the same applet with the same node ID. A pane past its grace period reopens from its description with a new
+  ID and a fresh session.
+- A pane closes into a grace slot when one is free. With none free, an idle hidden pane drops to its description first.
+  When every hidden pane is running something, a closing idle pane keeps only its description. A closing pane that is
+  running something asks first, and declining keeps it open. A pane whose applet exited on its own is discarded, with no
+  entry in either tier.
+- A pane is placed by its recorded neighbor's stable ID, the axis, the side, and the weight. When that neighbor is gone,
+  it goes on the recorded side of the root along the recorded axis, with an equal share when the weight does not fit.
+  An undo that does not fit the window is refused with a status message, and the entry stays for a larger window.
+- The window's grace segment shows the count and the seconds left, with a hang-up control beside it. Both belong to the
+  window, not to the message queue, so a message flood does not displace them. Hang-up ends every hidden applet at once
+  and keeps their descriptions on the stack. The deadline wakes at most once a second.
+- A hidden pane whose applet exits drops to its description. Closing the window hangs up the hidden panes and drops the
+  undo state. A quit hangs up the hidden panes of every window.
+- Closing a window by its red button, by Cmd-W on the last pane, or quitting asks when any visible or hidden pane is
+  running something. The dialog lists the running tabs by title, or by command in program mode, up to 8 and a count of
+  the rest. Cancel is the default button. Cancelling a last-pane close reattaches the hidden panes that are running.
+  A quit counts every window and asks once, and a second Cmd-Q while the question is open does not stack another.
+- Cmd-Z goes to the window, which undoes the edit in a focused text control and undoes the pane close otherwise. The
+  Edit menu item keeps the standard undo selector, so AppKit's own undo reaches the same place.
+- A restored shell starts in the reported directory when it is an absolute path and still a directory here. Otherwise
+  it starts in the tab's starting directory, then in the home directory. The description now carries each tab's starting
+  directory, and an older description without it still reads.
+- A program-mode description restores into a pane that shows the command and a Run button. It starts no session until
+  Run is pressed. A stored command that does not parse, or is missing, is refused as corrupt.
+- The pane tree parks the ID of every pane closed through it. Only a parked ID can be inserted again, and the window
+  retires it when it discards the pane through expiry, hang-up, exit, eviction, or a close that keeps only the
+  description. Insert refuses a retired ID, so a stale ID never reaches a different pane. A node that vanished in a
+  collapse was never parked.
+- The "local" in the OSC 7 check means an absolute path that exists on this machine, since the surface does not expose
+  the OSC 7 host. Residual risk: a remote working directory that also exists locally is accepted. The shell then starts
+  in the wrong directory, which is harmless.
+- When the last visible pane's applet exited and the user cancels the close, the hidden running panes come back. If
+  none fits, the dead pane stays so the window is not empty. It leaves when a hidden pane returns, for instance after
+  the window grows and the user undoes.
+- Mutation checks failed named tests and were undone: the grace slot bound off by one fails the slot and
+  idle-eviction tests. The package tests pass, 299 run with 4 skipped, in 12.0 seconds. The UI suite passes, 39
+  tests with no failure, in 301 seconds, including the undo and Cmd-Q tests. Left to the user: how the grace
+  segment and the Run prompt look, and a real vim buffer surviving an undo.
 
 ### M8: Layout persistence
 
@@ -990,12 +1037,36 @@ The proposal ends with the user looking at the finished app.
   none. (work-queue best guess)
 - 2026-11-01: An app-level error posted while no window is open is held and shown in the next window that opens, rather
   than shown in an alert. An alert would interrupt a user who closed every window on purpose. (work-queue best guess)
+- 2026-11-01: M7 best guesses. Starting bounds are a 10 second grace period, 3 grace slots, and an undo depth of 20. A
+  restored shell's directory is accepted when it is absolute and still a directory, since the surface passes only a
+  path and the host is not visible here. The undo item targets the window with the standard undo selector, so a text
+  control being edited gets Cmd-Z first. A declined close dialog leaves the pane open. Descriptions gained the tab's
+  starting directory. Superseded M5's note that a program-mode description is refused on restore: it now restores into
+  a Run prompt and runs nothing. (work-queue best guess)
+- 2026-11-01: Amended M7's check on the restored shell's directory. It said the OSC 7 directory is used "only when that
+  path is local and still exists". libghostty's surface passes a path and not the OSC 7 host, so "local" cannot be
+  checked. The check now says an absolute path that still exists on this machine. A remote directory that also exists
+  here is accepted, and the shell starts in the wrong but harmless directory. (work-queue best guess)
+- 2026-11-01: Amended "Pane tree shape". It said a removed node's ID is retired and never reused. A closed pane kept
+  alive for the undo grace period still exists, and undo must bring it back with its ID. The text now retires a closed
+  pane's ID only when the pane is discarded. ADR-02 carries the older wording and is left for the user to amend.
+  (work-queue best guess)
+- 2026-11-01: A dead last pane that stays because no hidden pane fits after a cancel leaves when a hidden pane returns.
+  The guard decision says cancel reattaches the hidden pane, so the window is kept usable until it can. (work-queue
+  best guess)
 - 2026-11-01: ADR candidate (cuts across the system): every applet implements one applet contract: hosted view,
   lifecycle, segments, detach and reattach, an inert versioned description, and a running-state query. Undecided.
   Found in M2. Extended 2026-11-01 in M5: the running-state query covers every tab of an applet, since the close
-  guards in M7 depend on it.
+  guards in M7 depend on it. Extended 2026-11-01 in M7: window close and quit count hidden panes too.
 - 2026-11-01: ADR candidate (cuts across the system): a terminal program never reads the clipboard without the user's
   confirmation naming its pane, and a denial sends it nothing. Undecided. Found in M2.
+- 2026-11-01: ADR candidate (cuts across the system, hard to reverse): undo close has two tiers. A closed pane first
+  stays alive and hidden for a grace period, under its own parked node ID, and then only its inert description
+  remains. It interacts with ADR-02, whose "never reused" wording the "Pane tree shape" amendment reads narrowly, and
+  with ADR-03. Undecided. Found in M7.
+- 2026-11-01: ADR candidate (cuts across the system): the main window answers the standard `undo:` selector. It undoes
+  the edit in a focused text control, and the pane close otherwise. The Edit menu keeps the standard selector.
+  Undecided. Found in M7.
 
 ## References
 

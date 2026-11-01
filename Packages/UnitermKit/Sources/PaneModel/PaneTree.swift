@@ -10,6 +10,41 @@ public enum PaneTreeError: Error, Equatable {
 
   /// The two nodes are not neighbors under one split.
   case notAdjacent(NodeID, NodeID)
+
+  /// The ID to bring back was never handed out by this tree.
+  case neverIssued(NodeID)
+
+  /// The ID to bring back belongs to a node that is gone for good: it was retired, or it was never
+  /// closed as a pane.
+  case retired(NodeID)
+
+  /// The pane to bring back is already in the tree.
+  case alreadyInTree(NodeID)
+}
+
+/// Which side of its neighbor a pane sits on. `before` is left of it in a row and above it in a
+/// column.
+public enum Side: Sendable, Equatable {
+  case before
+  case after
+}
+
+/// Where a closed pane sat, kept by stable IDs so it survives changes to the tree.
+///
+/// The neighbor is the pane's previous sibling, or its next one when it was first. It can be a
+/// split. The weight is the share the pane had of its parent split.
+public struct PanePlacement: Sendable, Equatable {
+  public let neighbor: NodeID
+  public let axis: Axis
+  public let side: Side
+  public let weight: Double
+
+  public init(neighbor: NodeID, axis: Axis, side: Side, weight: Double) {
+    self.neighbor = neighbor
+    self.axis = axis
+    self.side = side
+    self.weight = weight
+  }
 }
 
 public enum CloseOutcome: Sendable, Equatable {
@@ -32,6 +67,11 @@ public struct PaneTree: Sendable, Equatable {
   public private(set) var root: Node
   public let metrics: PaneMetrics
   private var allocator: NodeIDAllocator
+
+  /// Panes closed with `close(_:)` whose IDs can still come back through `insert(_:at:in:)`. An ID
+  /// leaves this set when the pane returns or when the caller retires it. A node that vanished in
+  /// a collapse is never in it.
+  private var parked: Set<NodeID> = []
 
   /// The largest ID ever handed out. A saved layout stores it.
   public var highWaterMark: UInt64 { allocator.highWaterMark }
@@ -131,10 +171,88 @@ public struct PaneTree: Sendable, Equatable {
     let removed = split.removing(target, focus: &focus)
 
     root = removed.normalizedRoot()
+    parked.insert(target)
 
     guard let focus else { preconditionFailure("a removed pane always names the pane after it") }
 
     return .closed(focus: focus)
+  }
+
+  // MARK: Placement
+
+  /// Where a pane sits now, in a form that `insert(_:at:in:)` can use after the tree has changed.
+  /// The only pane has no place to come back to, so it answers nil.
+  public func placement(of pane: NodeID) -> PanePlacement? {
+    root.placement(of: pane)
+  }
+
+  /// Lets go of a closed pane for good. Its ID is retired, and `insert(_:at:in:)` refuses it from
+  /// now on. Retiring an ID that is not parked changes nothing.
+  public mutating func retire(_ pane: NodeID) {
+    parked.remove(pane)
+  }
+
+  /// Brings a pane back. Pass the ID of a pane that was closed and not retired to keep it, or nil
+  /// to make a new pane with a fresh ID.
+  ///
+  /// The pane goes beside the placement's neighbor on its side. When the neighbor now sits in a
+  /// split of another axis, or is the root, the neighbor is wrapped in a new split along the
+  /// placement's axis. When the neighbor is gone, the pane goes to the edge of the whole tree on
+  /// the placement's side. The pane takes the placement's weight, and its siblings share the rest.
+  /// When that leaves a pane below the minimum, an equal share is tried. When that fails too, the
+  /// insert is refused. Nothing changes then, and no ID is used.
+  @discardableResult
+  public mutating func insert(
+    _ pane: NodeID?, at placement: PanePlacement, in size: CGSize
+  ) throws -> NodeID {
+    if let pane {
+      guard pane.rawValue > 0, pane.rawValue <= allocator.highWaterMark else {
+        throw PaneTreeError.neverIssued(pane)
+      }
+
+      guard !root.contains(pane) else { throw PaneTreeError.alreadyInTree(pane) }
+      guard parked.contains(pane) else { throw PaneTreeError.retired(pane) }
+    }
+
+    let recorded = placement.weight > 0 && placement.weight < 1
+    let weights: [Double?] = recorded ? [placement.weight, nil] : [nil]
+
+    for weight in weights {
+      var allocator = self.allocator
+      let id = pane ?? allocator.next()
+      let candidate = root.inserting(id, at: placement, weight: weight, allocator: &allocator)
+
+      guard fits(candidate, in: size) else { continue }
+
+      root = candidate
+      self.allocator = allocator
+      parked.remove(id)
+      return id
+    }
+
+    throw PaneTreeError.belowMinimumSize(placement.neighbor)
+  }
+
+  /// True when `insert(_:at:in:)` would succeed.
+  public func canInsert(_ pane: NodeID?, at placement: PanePlacement, in size: CGSize) -> Bool {
+    var copy = self
+    return (try? copy.insert(pane, at: placement, in: size)) != nil
+  }
+
+  /// True when every pane of `candidate` keeps its minimum at `size`, and the whole tree fits.
+  private func fits(_ candidate: Node, in size: CGSize) -> Bool {
+    let ideal = layout(in: size, clamped: false, of: candidate)
+    let minimum = metrics.minimumPaneSize
+
+    for id in candidate.paneIDs {
+      guard let frame = ideal.frames[id], frame.width >= minimum.width - Self.tolerance,
+        frame.height >= minimum.height - Self.tolerance
+      else { return false }
+    }
+
+    let needed = candidate.minimumSize(metrics)
+    return needed.width <= size.width + Self.tolerance
+      && needed.height <= size.height + Self.tolerance
   }
 
   // MARK: Divider
@@ -260,6 +378,107 @@ public struct PaneTree: Sendable, Equatable {
 // MARK: Recursive edits
 
 extension Node {
+  /// Where `target` sits, as a neighbor and a side. Returns nil when it is not a child of a split.
+  func placement(of target: NodeID) -> PanePlacement? {
+    guard case .split(let split) = self else { return nil }
+
+    if let index = split.children.firstIndex(where: { $0.node.id == target }),
+      case .pane = split.children[index].node
+    {
+      let weight = split.children[index].weight
+
+      if index > 0 {
+        return PanePlacement(
+          neighbor: split.children[index - 1].node.id, axis: split.axis, side: .after,
+          weight: weight)
+      }
+
+      return PanePlacement(
+        neighbor: split.children[index + 1].node.id, axis: split.axis, side: .before,
+        weight: weight)
+    }
+
+    for child in split.children {
+      if let found = child.node.placement(of: target) { return found }
+    }
+
+    return nil
+  }
+
+  /// This node with `pane` added as the placement describes. The result is a normalized root.
+  func inserting(
+    _ pane: NodeID, at placement: PanePlacement, weight: Double?, allocator: inout NodeIDAllocator
+  ) -> Node {
+    let axis = placement.axis
+    let side = placement.side
+
+    if id == placement.neighbor {
+      return wrapping(pane, axis: axis, side: side, weight: weight, allocator: &allocator)
+        .normalizedRoot()
+    }
+
+    if let found = inserting(
+      pane, beside: placement.neighbor, axis: axis, side: side, weight: weight,
+      allocator: &allocator)
+    {
+      return found.normalizedRoot()
+    }
+
+    if case .split(var split) = self, split.axis == axis {
+      split.addChild(pane, at: side == .before ? 0 : split.children.count, weight: weight)
+      let edited: Node = .split(split)
+      return edited.normalizedRoot()
+    }
+
+    return wrapping(pane, axis: axis, side: side, weight: weight, allocator: &allocator)
+      .normalizedRoot()
+  }
+
+  private func inserting(
+    _ pane: NodeID, beside neighbor: NodeID, axis: Axis, side: Side, weight: Double?,
+    allocator: inout NodeIDAllocator
+  ) -> Node? {
+    guard case .split(var split) = self else { return nil }
+
+    if let index = split.children.firstIndex(where: { $0.node.id == neighbor }) {
+      if split.axis == axis {
+        split.addChild(pane, at: side == .before ? index : index + 1, weight: weight)
+      } else {
+        split.children[index].node = split.children[index].node.wrapping(
+          pane, axis: axis, side: side, weight: weight, allocator: &allocator)
+      }
+
+      return .split(split)
+    }
+
+    for index in split.children.indices where split.children[index].node.contains(neighbor) {
+      guard
+        let replaced = split.children[index].node.inserting(
+          pane, beside: neighbor, axis: axis, side: side, weight: weight, allocator: &allocator)
+      else { return nil }
+
+      split.children[index].node = replaced
+      return .split(split)
+    }
+
+    return nil
+  }
+
+  /// A new split along `axis` that holds this node and the new pane. An unrecorded weight gives each
+  /// half.
+  private func wrapping(
+    _ pane: NodeID, axis: Axis, side: Side, weight: Double?, allocator: inout NodeIDAllocator
+  ) -> Node {
+    let share = weight ?? 0.5
+    let added = Child(node: .pane(Pane(id: pane)), weight: share)
+    let existing = Child(node: self, weight: 1 - share)
+
+    return .split(
+      Split(
+        id: allocator.next(), axis: axis,
+        children: side == .before ? [added, existing] : [existing, added]))
+  }
+
   /// Splits the pane `target` under this node. Returns nil when the pane is not here.
   func splitting(
     _ target: NodeID, axis: Axis, newPane: NodeID, allocator: inout NodeIDAllocator
@@ -341,6 +560,18 @@ extension Node {
 }
 
 extension Split {
+  /// Adds a pane child at `index`. The pane takes `weight`, and the other children share the rest in
+  /// proportion. Without a weight, the pane takes an equal share.
+  mutating func addChild(_ pane: NodeID, at index: Int, weight: Double?) {
+    let share = weight ?? 1 / Double(children.count + 1)
+
+    for position in children.indices {
+      children[position].weight *= 1 - share
+    }
+
+    children.insert(Child(node: .pane(Pane(id: pane)), weight: share), at: index)
+  }
+
   /// Removes the pane from this split or a split below it. The result may need normalizing.
   func removing(_ target: NodeID, focus: inout NodeID?) -> Node {
     var split = self

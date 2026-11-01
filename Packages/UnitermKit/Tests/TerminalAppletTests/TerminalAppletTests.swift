@@ -225,7 +225,9 @@ final class TerminalAppletTests: XCTestCase {
     session.onEvent?(.workingDirectoryChanged("/var/tmp"))
 
     let description = applet.describe()
-    let restored = try TerminalApplet(engine: engine, restoring: description)
+    let restored = try TerminalApplet(
+      engine: engine, restoring: description, directoryExists: { _ in true })
+    retained.append(restored)
     restored.start()
 
     XCTAssertEqual(engine.sessions.count, 2)
@@ -263,16 +265,151 @@ final class TerminalAppletTests: XCTestCase {
     XCTAssertEqual(TerminalApplet.directoryLabel("/tmp/a\nb", home: "/Users/pat"), "a b")
   }
 
-  /// ADR: a description never runs a program unasked. A program-mode description is refused until
-  /// program mode can show its command with a Run action.
-  func testProgramDescriptionDoesNotRestoreIntoARunningProgram() throws {
+  private func programDescription(
+    _ command: String? = "./deploy.sh --now", directory: String? = "/work"
+  ) throws -> AppletDescription {
+    try TerminalDescription(
+      mode: .program, command: command, tabs: [.init(workingDirectory: directory)]
+    ).appletDescription()
+  }
+
+  private func restoreProgram(
+    _ description: AppletDescription, engine: FakeEngine, host: RecordingHost
+  ) throws -> TerminalApplet {
+    let restored = try TerminalApplet(
+      engine: engine, restoring: description, directoryExists: { _ in true })
+    restored.host = host
+    retained.append(restored)
+    restored.start()
+    return restored
+  }
+
+  /// Catches a restore that runs the program unasked. Starting a restored program-mode applet makes
+  /// no session, shows the command with a Run button, and asks the host nothing. The applet is not
+  /// running anything, so closing it never needs a dialog.
+  func testProgramDescriptionRestoresIntoAPromptThatRunsNothing() throws {
+    let engine = FakeEngine()
+    let host = RecordingHost()
+
+    let restored = try restoreProgram(try programDescription(), engine: engine, host: host)
+
+    XCTAssertTrue(engine.sessions.isEmpty, "a session started without the user asking")
+    XCTAssertFalse(host.exited, "an applet waiting to run asked its pane to close")
+    XCTAssertFalse(restored.isRunningSomething)
+    XCTAssertTrue(restored.isAwaitingRun)
+
+    let prompt = try XCTUnwrap(
+      restored.view.subviews.compactMap { $0 as? TerminalRunPrompt }.first)
+    XCTAssertFalse(prompt.isHidden)
+    XCTAssertEqual(prompt.command, "./deploy.sh --now")
+  }
+
+  /// Catches a Run action that does not start the one program. Pressing Run makes exactly one
+  /// session. It runs the saved words in the saved directory, in program mode, and hides the prompt.
+  func testRunStartsTheSavedProgramOnce() throws {
+    let engine = FakeEngine()
+    let host = RecordingHost()
+    let restored = try restoreProgram(try programDescription(), engine: engine, host: host)
+    let prompt = try XCTUnwrap(
+      restored.view.subviews.compactMap { $0 as? TerminalRunPrompt }.first)
+
+    prompt.run()
+    prompt.run()
+
+    XCTAssertEqual(engine.sessions.count, 1)
+    XCTAssertEqual(engine.sessions[0].launch.program, ["./deploy.sh", "--now"])
+    XCTAssertEqual(engine.sessions[0].launch.workingDirectory, "/work")
+    XCTAssertTrue(prompt.isHidden)
+    XCTAssertFalse(restored.isAwaitingRun)
+    XCTAssertFalse(restored.canOpenTab)
+  }
+
+  /// Catches a description that forgets the command after a restore, so a second close and undo
+  /// would lose it.
+  func testARestoredProgramDescribesItselfWithTheSameCommand() throws {
+    let host = RecordingHost()
+    let restored = try restoreProgram(try programDescription(), engine: FakeEngine(), host: host)
+
+    let again = try TerminalDescription.decode(restored.describe())
+
+    XCTAssertEqual(again.mode, .program)
+    XCTAssertEqual(again.command, "./deploy.sh --now")
+  }
+
+  /// Catches a stored command that cannot be read and still restores. An unclosed quote and a
+  /// missing command are corrupt, and no session starts.
+  func testAProgramDescriptionWithoutAUsableCommandIsRefused() throws {
+    let engine = FakeEngine()
+
+    for command in ["echo 'open", nil] {
+      let description = try programDescription(command)
+
+      XCTAssertThrowsError(try TerminalApplet(engine: engine, restoring: description)) { error in
+        guard case .corrupt = error as? AppletRestoreError else {
+          return XCTFail("expected a corrupt description, got \(error)")
+        }
+      }
+    }
+
+    XCTAssertTrue(engine.sessions.isEmpty)
+  }
+
+  /// Catches a restored shell that starts in a directory the description cannot vouch for. Each
+  /// tab's reported directory wins when it exists. Otherwise its starting directory is next, and
+  /// the home directory is last. A path that is not absolute, such as one from a remote login, is
+  /// skipped even when something by that name exists.
+  func testRestoredShellsFollowTheDirectoryRule() throws {
     let engine = FakeEngine()
     let description = try TerminalDescription(
-      mode: .program, command: "./deploy.sh", tabs: [.init(workingDirectory: nil)]
+      mode: .shell, command: nil,
+      tabs: [
+        .init(workingDirectory: "/reported", startDirectory: "/start"),
+        .init(workingDirectory: "/gone", startDirectory: "/start"),
+        .init(workingDirectory: "/gone", startDirectory: "/also-gone"),
+        .init(workingDirectory: "me@host:/srv", startDirectory: nil),
+      ]
     ).appletDescription()
 
-    XCTAssertThrowsError(try TerminalApplet(engine: engine, restoring: description))
-    XCTAssertTrue(engine.sessions.isEmpty)
+    let existing: Set<String> = ["/reported", "/start", "me@host:/srv"]
+    let restored = try TerminalApplet(
+      engine: engine, restoring: description, directoryExists: { existing.contains($0) },
+      home: "/home/pat")
+    retained.append(restored)
+    restored.start()
+
+    XCTAssertEqual(
+      engine.sessions.map { $0.launch.workingDirectory },
+      ["/reported", "/start", "/home/pat", "/home/pat"])
+    XCTAssertTrue(engine.sessions.allSatisfy { $0.launch.program == nil })
+  }
+
+  /// Catches a description that drops the starting directory, so the fallback has nothing to use.
+  /// A tab launched in /start that has since reported /elsewhere describes both.
+  func testTheDescriptionCarriesTheStartingDirectory() throws {
+    let engine = FakeEngine()
+    let applet = TerminalApplet(engine: engine, launch: .loginShell(workingDirectory: "/start"))
+    retained.append(applet)
+    applet.start()
+    engine.sessions[0].onEvent?(.workingDirectoryChanged("/elsewhere"))
+
+    let described = try TerminalDescription.decode(applet.describe())
+
+    XCTAssertEqual(described.tabs[0].workingDirectory, "/elsewhere")
+    XCTAssertEqual(described.tabs[0].startDirectory, "/start")
+  }
+
+  /// Catches a description from before the starting directory existed that no longer reads.
+  func testADescriptionWithoutAStartingDirectoryStillReads() throws {
+    let payload: JSONValue = .object([
+      "mode": .string("shell"), "selectedTab": .number(0),
+      "tabs": .array([.object(["workingDirectory": .string("/old")])]),
+    ])
+
+    let decoded = try TerminalDescription.decode(
+      AppletDescription(type: "terminal", version: 1, payload: payload))
+
+    XCTAssertEqual(decoded.tabs[0].workingDirectory, "/old")
+    XCTAssertNil(decoded.tabs[0].startDirectory)
   }
 
   // MARK: Tabs
@@ -562,7 +699,8 @@ final class TerminalAppletTests: XCTestCase {
     applet.selectTab(at: 1)
 
     let description = applet.describe()
-    let restored = try TerminalApplet(engine: engine, restoring: description)
+    let restored = try TerminalApplet(
+      engine: engine, restoring: description, directoryExists: { _ in true })
     retained.append(restored)
     restored.start()
 

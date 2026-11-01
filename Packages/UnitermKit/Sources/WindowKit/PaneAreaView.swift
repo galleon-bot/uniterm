@@ -101,13 +101,41 @@ final class PaneAreaView: NSView {
     return created
   }
 
+  /// Brings a pane back, or opens a new one, where `placement` says. Pass the ID of a removed pane
+  /// to keep it, or nil for a new pane with a fresh ID. Throws when the pane does not fit. Focus
+  /// stays where it was, and the caller moves it.
+  @discardableResult
+  func insert(_ applet: any Applet, as id: NodeID?, at placement: PanePlacement) throws -> NodeID {
+    let created = try tree.insert(id, at: placement, in: bounds.size)
+
+    install(applet, as: created)
+    changed()
+    layoutSubtreeIfNeeded()
+    return created
+  }
+
+  /// Retires a removed pane's ID. Call it when the pane is discarded, so the ID never comes back.
+  func retire(_ pane: NodeID) {
+    tree.retire(pane)
+  }
+
+  /// True when `insert(_:as:at:)` would succeed now.
+  func canInsert(_ id: NodeID?, at placement: PanePlacement) -> Bool {
+    tree.canInsert(id, at: placement, in: bounds.size)
+  }
+
   /// Removes a pane and gives its space to its neighbors. Returns nil for the last pane, which
-  /// stays. The applet is returned for the caller to close.
+  /// stays. The applet is returned for the caller to close. The placement says where the pane sat,
+  /// so undo can bring it back.
   ///
   /// Focus moves only when the closed pane had it. Then `refocus` names the pane that takes over,
   /// and the caller gives it the keyboard. Closing any other pane leaves focus where it was.
-  func remove(_ pane: NodeID) throws -> (applet: any Applet, refocus: NodeID?)? {
+  func remove(_ pane: NodeID) throws -> (
+    applet: any Applet, refocus: NodeID?, placement: PanePlacement
+  )? {
     guard let view = paneViews[pane] else { throw PaneTreeError.unknownPane(pane) }
+
+    guard let placement = tree.placement(of: pane) else { return nil }
 
     guard case .closed(let focus) = try tree.close(pane) else { return nil }
 
@@ -123,7 +151,7 @@ final class PaneAreaView: NSView {
     changed()
     layoutSubtreeIfNeeded()
 
-    return (view.applet, hadFocus ? focus : nil)
+    return (view.applet, hadFocus ? focus : nil, placement)
   }
 
   private func install(_ applet: any Applet, as pane: NodeID) {

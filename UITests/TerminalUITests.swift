@@ -108,6 +108,37 @@ final class TerminalUITests: UnitermUITestCase {
     XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
   }
 
+  /// Catches a quit that ignores a running program. With `sleep` running, Cmd-Q asks and names the
+  /// pane. Cancel keeps the app and the program. A second Cmd-Q and Quit ends the app. A second
+  /// Cmd-Q while the question is open must not stack another one.
+  func testCommandQAsksWhileAProgramRunsAndCancelKeepsTheApp() {
+    let app = launchApp()
+    let window = app.windows["main-window"]
+    let terminal = waitForTerminal(in: app)
+
+    app.typeText("sleep 300\n")
+    Thread.sleep(forTimeInterval: 2)
+
+    app.typeKey("q", modifierFlags: .command)
+    let sheet = window.sheets.firstMatch
+    XCTAssertTrue(sheet.waitForExistence(timeout: 10), "quit never asked")
+    XCTAssertEqual(app.state, .runningForeground)
+
+    app.typeKey("q", modifierFlags: .command)
+    XCTAssertEqual(window.sheets.count, 1, "a second quit stacked another question")
+
+    sheet.buttons["Cancel"].click()
+    XCTAssertTrue(waitForNoSheet(in: window))
+    XCTAssertEqual(app.state, .runningForeground)
+    XCTAssertTrue(terminal.exists)
+
+    app.typeKey("q", modifierFlags: .command)
+    XCTAssertTrue(window.sheets.firstMatch.waitForExistence(timeout: 10))
+    window.sheets.firstMatch.buttons["Quit"].click()
+
+    XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
+  }
+
   /// Catches a shell exit that leaves an empty pane open.
   func testShellExitClosesThePane() {
     let app = launchApp()

@@ -36,6 +36,9 @@ public final class TerminalApplet: TabbedApplet {
     var workingDirectory: String?
     var failedExitCode: Int?
 
+    /// A program-mode tab restored from a description. It has no session until the user runs it.
+    var awaitingRun = false
+
     init(launch: TerminalLaunch, title: String) {
       self.launch = launch
       self.title = title
@@ -60,6 +63,7 @@ public final class TerminalApplet: TabbedApplet {
 
   private let container = TerminalContainerView()
   private let tabBar = TerminalTabBar()
+  private let runPrompt = TerminalRunPrompt()
   private let engine: any TerminalEngine
   private let mode: TerminalDescription.Mode
   private let commandLine: String?
@@ -90,21 +94,52 @@ public final class TerminalApplet: TabbedApplet {
       launches: [.program(words, workingDirectory: workingDirectory)], selected: 0)
   }
 
-  /// Restores an applet from a description. A shell description starts a fresh shell in each
-  /// tab's directory and runs nothing else.
-  public convenience init(engine: any TerminalEngine, restoring description: AppletDescription)
-    throws
-  {
+  /// Restores an applet from a description. A shell description starts a fresh shell in each tab.
+  /// A program description starts nothing. It shows the command with a Run button.
+  ///
+  /// Each tab starts in the directory its shell reported last, when that is an absolute path that
+  /// is still a directory here. Otherwise it starts in the tab's starting directory, and then in
+  /// the home directory.
+  public convenience init(
+    engine: any TerminalEngine, restoring description: AppletDescription,
+    directoryExists: (String) -> Bool = RestoreDirectory.isLocalDirectory,
+    home: String = NSHomeDirectory()
+  ) throws {
     let decoded = try TerminalDescription.decode(description)
 
-    guard decoded.mode == .shell else {
-      throw AppletRestoreError.unsupported("program-mode terminals are not restorable yet")
+    let directories = decoded.tabs.map {
+      RestoreDirectory.resolve(
+        reported: $0.workingDirectory, starting: $0.startDirectory, home: home,
+        exists: directoryExists)
     }
 
-    self.init(
-      engine: engine, mode: .shell, commandLine: nil, shellEnvironment: [:],
-      launches: decoded.tabs.map { .loginShell(workingDirectory: $0.workingDirectory) },
-      selected: decoded.selectedTab)
+    switch decoded.mode {
+    case .shell:
+      self.init(
+        engine: engine, mode: .shell, commandLine: nil, shellEnvironment: [:],
+        launches: directories.map { .loginShell(workingDirectory: $0) },
+        selected: decoded.selectedTab)
+
+    case .program:
+      guard let line = decoded.command else {
+        throw AppletRestoreError.corrupt("terminal description has a program with no command")
+      }
+
+      let words: [String]
+      do {
+        words = try ShellWords.split(line)
+      } catch {
+        throw AppletRestoreError.corrupt("terminal description has a command that does not parse")
+      }
+
+      self.init(
+        engine: engine, mode: .program, commandLine: line, shellEnvironment: [:],
+        launches: directories.map { .program(words, workingDirectory: $0) },
+        selected: decoded.selectedTab)
+
+      for tab in tabs { tab.awaitingRun = true }
+      refreshTabs()
+    }
   }
 
   private init(
@@ -124,6 +159,9 @@ public final class TerminalApplet: TabbedApplet {
 
     container.setAccessibilityIdentifier("terminal-applet")
     container.addSubview(tabBar)
+    container.addSubview(runPrompt)
+    runPrompt.isHidden = true
+    runPrompt.onRun = { [weak self] in self?.runPendingProgram() }
     container.onResize = { [weak self] in self?.layoutContents() }
 
     tabBar.onSelect = { [weak self] index in self?.selectTab(at: index) }
@@ -161,6 +199,8 @@ public final class TerminalApplet: TabbedApplet {
     tabs.filter { $0.isRunningSomething }.map { label(of: $0) }
   }
 
+  public var runningLabels: [String] { runningTabLabels }
+
   public func start() {
     guard !started else { return }
 
@@ -168,7 +208,7 @@ public final class TerminalApplet: TabbedApplet {
 
     var failure: (any Error)?
 
-    for tab in tabs where tab.session == nil {
+    for tab in tabs where tab.session == nil && !tab.awaitingRun {
       do {
         try startSession(for: tab)
       } catch {
@@ -180,7 +220,7 @@ public final class TerminalApplet: TabbedApplet {
       host?.applet(self, post: .error, text: "The terminal could not start: \(failure)")
     }
 
-    let live = tabs.filter { $0.session != nil }
+    let live = tabs.filter { $0.session != nil || $0.awaitingRun }
 
     guard !live.isEmpty else {
       host?.appletDidExit(self)
@@ -220,6 +260,11 @@ public final class TerminalApplet: TabbedApplet {
   }
 
   public func focus() {
+    if selectedTab?.awaitingRun == true {
+      runPrompt.window?.makeFirstResponder(runPrompt.runButton)
+      return
+    }
+
     guard let terminalView = selectedTab?.session?.view else { return }
 
     terminalView.window?.makeFirstResponder(terminalView)
@@ -227,12 +272,38 @@ public final class TerminalApplet: TabbedApplet {
 
   public func apply(_ palette: ThemePalette) {
     tabBar.apply(palette)
+    runPrompt.apply(palette)
+  }
+
+  /// True while the selected tab shows its command and waits for the user to run it.
+  var isAwaitingRun: Bool { selectedTab?.awaitingRun == true }
+
+  /// Runs the program of a restored program-mode tab, as the Run button does.
+  func runPendingProgram() {
+    guard started, let tab = selectedTab, tab.awaitingRun else { return }
+
+    do {
+      try startSession(for: tab)
+    } catch {
+      host?.applet(self, post: .error, text: "The program could not start: \(error)")
+      return
+    }
+
+    tab.awaitingRun = false
+
+    refreshTabs()
+    updateSegments()
+    host?.appletDidChange(self)
+    focus()
   }
 
   public func describe() -> AppletDescription {
     let description = TerminalDescription(
       mode: mode, command: commandLine,
-      tabs: tabs.map { TerminalDescription.Tab(workingDirectory: $0.workingDirectory) },
+      tabs: tabs.map {
+        TerminalDescription.Tab(
+          workingDirectory: $0.workingDirectory, startDirectory: $0.launch.workingDirectory)
+      },
       selectedTab: selectedIndex)
 
     do {
@@ -390,6 +461,9 @@ public final class TerminalApplet: TabbedApplet {
     tabBar.update(
       titles: tabs.map { $0.title }, selected: selectedIndex, canOpenTab: canOpenTab)
     tabBar.isHidden = tabs.count < 2
+
+    runPrompt.command = commandLine ?? ""
+    runPrompt.isHidden = !isAwaitingRun
     layoutContents()
   }
 
@@ -401,6 +475,8 @@ public final class TerminalApplet: TabbedApplet {
 
     let content = NSRect(
       x: 0, y: barHeight, width: bounds.width, height: max(0, bounds.height - barHeight))
+
+    runPrompt.frame = content
 
     for tab in tabs {
       tab.session?.view.frame = content

@@ -4,7 +4,7 @@ import Foundation
 /// The restorable state of a terminal applet.
 ///
 /// It is inert. Restoring a terminal starts a fresh shell in each tab's directory. It never runs a
-/// program. A program-mode terminal will keep its command here and show it with a Run action.
+/// program. A program-mode terminal keeps its command here and shows it with a Run action.
 public struct TerminalDescription: Codable, Equatable, Sendable {
   public enum Mode: String, Codable, Sendable {
     case shell
@@ -15,8 +15,14 @@ public struct TerminalDescription: Codable, Equatable, Sendable {
     /// The directory the shell reported last, or the directory the tab started in.
     public var workingDirectory: String?
 
-    public init(workingDirectory: String?) {
+    /// The directory the tab was launched in. A restore falls back to it when the reported
+    /// directory is gone or was never local. A description written before this field existed
+    /// reads as nil.
+    public var startDirectory: String?
+
+    public init(workingDirectory: String?, startDirectory: String? = nil) {
       self.workingDirectory = workingDirectory
+      self.startDirectory = startDirectory
     }
   }
 

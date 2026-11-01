@@ -22,7 +22,7 @@ The run is in progress. See the run state below.
 | M4 Status bar region | DONE | "Add the status bar region with docking, segments, and message history" |
 | M5 Terminal tabs and program mode | DONE | "Add terminal tabs and program mode" |
 | M6 Multiple windows | DONE | "Add multiple windows with per-window panes and status" |
-| M7 Undo close pane | QUEUED | |
+| M7 Undo close pane | DONE | "Add undo close pane with grace and description tiers and close guards" |
 | M8 Layout persistence | QUEUED | |
 | M9 User visual check | HELD: a check only the user can perform | |
 
@@ -394,6 +394,77 @@ They started on 2026-10-24, before this project existed, and use Rust `tempfile`
 test. They were reported to the user, and were not touched.
 
 Checks left to the user: the look of cascaded windows, and a real Dock click reopening a window.
+
+### M7: Undo close pane
+
+Commit: "Add undo close pane with grace and description tiers and close guards".
+
+Interruption: the coordinator session was interrupted during M7. The first implementer had written most of the code and
+tests but never reported. A new coordinator session resumed the run from the session report, the state file, and git.
+It confirmed that the run base was still an ancestor of `HEAD`, that M1 to M6 were committed, and that the uncommitted
+tree was M7's alone. A fresh implementer continued from that tree.
+- `pgrep` found no orphaned build or test processes.
+- `make build` passed on the tree as left. `make test-package` did not compile: a test wrote to a get-only property,
+  and two lint errors remained.
+- A scan of the diff found no leftover mutation-check edit.
+- An inventory against M7's checks found the code behind every check. What was missing was a UI test, the compile and
+  lint fixes, and the As built block.
+
+Checks:
+- The implementer ran `make fmt-check`, `make lint`, `make check`, `make build`, `make test-package`, and a build of
+  the UI test target, and all passed.
+- The coordinator's first UI run, before the review fixes, had 38 tests and 3 failures. Two were M7 regressions: Cmd-Z
+  with nothing to undo had gone silent. The third, the Settings appearance test, did not reproduce in 4 isolated runs.
+  It overlapped with the implementer's builds in the same DerivedData folder. Its cause is unresolved.
+- After the fixes, the coordinator reran both suites on a quiet tree. `make test-package` ran 299 tests with 0 failures
+  and the same 4 US-layout skips. `make test-app` ran 39 tests with 0 failures in 301 s. The appearance test passed.
+- `proposals.py check` and `proposals.py freeze` both print `[]`.
+- A mutation of the grace slot bound failed the slot and idle-eviction tests.
+
+Best guesses from the implementers:
+- The bounds are a 10 s grace, 3 slots, and an undo depth of 20. They are a policy value with no setting.
+- Cmd-Z takes the newest close across both tiers. An undo that does not fit the window is refused with a message, and
+  the entry stays.
+- When the recorded neighbor is gone, the pane goes on the recorded side of the root along the recorded axis.
+- With no grace slot free, an idle hidden pane drops to its description first. When every hidden pane is running, a
+  closing idle pane keeps only its description. Declining the full-slot dialog keeps the pane open.
+- The quit and window dialogs list up to 8 running tabs plus a count, with Cancel as the default.
+- `MainWindow` answers the standard `undo:` selector. Undo stays enabled with nothing to undo, and says so.
+- The surface does not expose the OSC 7 host. "Local" means an absolute path that exists here, and the check was
+  amended to say so. A remote cwd that also exists locally is accepted, and the shell starts in a wrong but harmless
+  directory.
+- ADR-02 says a removed node's ID is never reused, but a reattached pane keeps its ID. The run took the narrowest
+  reading: a hidden pane still exists, and its ID retires when the pane is discarded. "Pane tree shape" was amended,
+  and the pane tree now enforces it. Only a parked ID can be inserted again, and a retired ID is refused. ADR-02's text
+  was not edited. If the user reads ADR-02 literally, reattach must mint a new ID, and one M7 check changes.
+- A dead last pane stays after a cancelled close when no hidden pane fits, so the window is not empty. It leaves when a
+  hidden pane returns.
+- The description gained a per-tab starting directory. Older descriptions still read.
+- M7 supersedes M5's note that program-mode restore is refused. M5's As built text was left as a dated record.
+
+Review findings:
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | The OSC 7 check was looser in code than in text, and was not amended in place | Fixed by amendment |
+| 2 | M5's As built said program-mode restore is refused | Dismissed. As built is a dated record, and the Decision Log records the supersession |
+| 3 | A dead last pane could stay after a cancelled close | Confirmed by a failing test, fixed |
+| 4 | The Cmd-Q delegate wiring had no automated test | UI test added for Cmd-Q with a program running |
+| 5 | adr-impact, PLAUSIBLE: reattach reuses a removed ID against ADR-02 | Proposal amended, and the rule enforced in the pane tree with tests |
+| 6 | UI: Cmd-Z with nothing to undo posted nothing | Confirmed, fixed. A unit test asserts the message |
+| 7 | UI: Settings appearance test failed once | Not reproduced. Diagnosis unresolved |
+
+The retired-ID tree tests use the new `retire` API, so they could not run against the unfixed code. They pin the fix,
+not the bug.
+
+adr-impact: ADR-01, ADR-03, and ADR-04 are consistent. Two ADR candidates pass the bar and were recorded as Undecided:
+the two-tier undo model, and the window's `undo:` routing. The close-guard running-state rule folds into the existing
+applet-contract candidate. For the user: ADR-02's "never reused" wording is older than the amendment that reads it
+narrowly.
+
+Checks left to the user: how the grace segment and the Run prompt look, and a real vim buffer surviving an undo.
+
+Test cost: `swift test` takes 12.0 s of test time for 299 tests. The UI suite takes 301 s for 39 tests.
 
 ## Status
 
