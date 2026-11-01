@@ -688,6 +688,7 @@ The proposal ends with the user looking at the finished app.
 - 2026-10-31: ADR candidate (hard to reverse): the stored layout stays readable by later versions, and an unreadable
   file is kept aside. Declined: the user chose not to write it, and its Risks entry guards it.
 - 2026-10-31: Accepted.
+- 2026-10-31: Scheduled as M1-M9 in queue.md.
 
 ## References
 
