@@ -13,7 +13,8 @@ UTERM-001 stays `accepted`.
 
 For the user:
 - ADR-02 says a removed node's ID is never reused. The M7 amendment to "Pane tree shape" reads that narrowly: a closed
-  pane kept for undo still exists, and its ID retires when the pane is discarded. ADR-02's text was not edited.
+  pane kept for undo still exists, and its ID retires when the pane is discarded. After the run, the user confirmed
+  this reading, and ADR-02's wording was clarified to match.
 - OSC 52 clipboard writes are allowed without asking, and only reads ask. The unreachable write dialog was removed.
 - An unavailable layout folder opens one window that saves nothing, instead of quitting.
 - Six ADR candidates sit as Undecided in the proposal's Decision Log.

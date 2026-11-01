@@ -1124,8 +1124,8 @@ The proposal ends with the user looking at the finished app.
   here is accepted, and the shell starts in the wrong but harmless directory. (work-queue best guess)
 - 2026-11-01: Amended "Pane tree shape". It said a removed node's ID is retired and never reused. A closed pane kept
   alive for the undo grace period still exists, and undo must bring it back with its ID. The text now retires a closed
-  pane's ID only when the pane is discarded. ADR-02 carries the older wording and is left for the user to amend.
-  (work-queue best guess)
+  pane's ID only when the pane is discarded. (work-queue best guess) The user confirmed this reading, and ADR-02's
+  wording was clarified to match on 2026-11-01.
 - 2026-11-01: A dead last pane that stays because no hidden pane fits after a cancel leaves when a hidden pane returns.
   The guard decision says cancel reattaches the hidden pane, so the window is kept usable until it can. (work-queue
   best guess)
@@ -1139,8 +1139,8 @@ The proposal ends with the user looking at the finished app.
   Undecided. Found in M2. Extended 2026-11-01 in the row review for writes.
 - 2026-11-01: ADR candidate (cuts across the system, hard to reverse): undo close has two tiers. A closed pane first
   stays alive and hidden for a grace period, under its own parked node ID, and then only its inert description
-  remains. It interacts with ADR-02, whose "never reused" wording the "Pane tree shape" amendment reads narrowly, and
-  with ADR-03. Undecided. Found in M7.
+  remains. It interacts with ADR-02, whose wording now says a pane kept for undo keeps its ID, and with ADR-03.
+  Undecided. Found in M7.
 - 2026-11-01: ADR candidate (cuts across the system): the main window answers the standard `undo:` selector. It undoes
   the edit in a focused text control, and the pane close otherwise. The Edit menu keeps the standard selector.
   Undecided. Found in M7.

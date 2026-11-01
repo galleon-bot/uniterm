@@ -21,7 +21,8 @@ Every node in the pane tree has a stable ID.
 
 - A node that survives a split, merge, or collapse keeps its ID.
 - A removed node's ID is retired and never reused, including after a relaunch.
-- A pane's ID never changes while the pane exists.
+- A pane's ID never changes while the pane exists. A closed pane that is kept alive so undo can bring it back still
+  exists. It keeps its ID and may return under it. Its ID is retired when the pane is discarded.
 
 Nothing may address a node by its path in the tree, or by its index among its siblings.
 
