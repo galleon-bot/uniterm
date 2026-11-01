@@ -8,27 +8,6 @@ import XCTest
 @testable import WindowKit
 
 @MainActor
-private final class FakeApplet: Applet {
-  let typeID = "fake"
-  let view = NSView()
-  var title = "Fake"
-  var segments: [AppletSegment] = []
-  var isRunningSomething = false
-  weak var host: (any AppletHost)?
-  var started = false
-  var closed = false
-
-  func start() { started = true }
-  func close() { closed = true }
-  func detach() {}
-  func reattach() {}
-  func focus() {}
-  func describe() -> AppletDescription {
-    AppletDescription(type: "fake", version: 1, payload: .null)
-  }
-}
-
-@MainActor
 final class MainWindowControllerTests: XCTestCase {
   /// The applets the factory handed out, in order. The first one is the window's first pane.
   private var made: [FakeApplet] = []
@@ -45,7 +24,8 @@ final class MainWindowControllerTests: XCTestCase {
     choices = []
     reuse = nil
 
-    let controller = try MainWindowController(appearance: appearance) { [unowned self] choice in
+    let controller = try MainWindowController(appearance: appearance, settings: store) {
+      [unowned self] choice in
       if case .terminalProgram = choice {
         throw AppletChoiceError("no programs in this test")
       }

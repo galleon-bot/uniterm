@@ -101,6 +101,21 @@ enum MainMenu {
     menu.addItem(
       withTitle: "Clear Screen", action: #selector(TerminalMenuActions.clearTerminalScreen(_:)),
       keyEquivalent: "k")
+    menu.addItem(.separator())
+
+    let history = NSMenuItem(
+      title: "Show Message History",
+      action: #selector(MainWindowController.toggleMessageHistory(_:)),
+      keyEquivalent: "m")
+    history.keyEquivalentModifierMask = [.command, .shift]
+    menu.addItem(history)
+
+    // Escape belongs to the terminal, so the dismiss key is a chord that no program sees.
+    let dismiss = NSMenuItem(
+      title: "Dismiss Message", action: #selector(MainWindowController.dismissMessage(_:)),
+      keyEquivalent: "\u{8}")
+    dismiss.keyEquivalentModifierMask = [.command, .option]
+    menu.addItem(dismiss)
 
     item.submenu = menu
     return item

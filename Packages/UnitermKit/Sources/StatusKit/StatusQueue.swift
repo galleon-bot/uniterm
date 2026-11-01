@@ -7,7 +7,10 @@ import Foundation
 public struct StatusQueue: Sendable {
   private struct Pending: Sendable {
     var message: StatusMessage
-    var collapsedErrors: Int
+
+    /// Older errors folded into this one, oldest first. They are kept whole, so a pane close can
+    /// give back the ones that did not come from the closing pane.
+    var folded: [StatusMessage]
   }
 
   public let policy: StatusPolicy
@@ -45,7 +48,7 @@ public struct StatusQueue: Sendable {
       hasUnseenError = true
     }
 
-    pending.append(Pending(message: message, collapsedErrors: 0))
+    pending.append(Pending(message: message, folded: []))
     advance(at: now)
     return message
   }
@@ -87,6 +90,37 @@ public struct StatusQueue: Sendable {
     return true
   }
 
+  /// Drops the queued messages that a closed pane posted. They stay in the history. A message of
+  /// that pane that is already on the bar stays until its normal turn ends, since the user may
+  /// not have read it yet. Returns true when something left the queue.
+  ///
+  /// Errors from other sources that were folded into a dropped error are queued again, so the
+  /// close never hides an error from a pane that is still open.
+  @discardableResult
+  public mutating func removePending(fromPane id: UInt64) -> Bool {
+    var changed = false
+    var kept: [Pending] = []
+
+    for entry in pending {
+      let survivors = entry.folded.filter { $0.source.paneID != id }
+
+      if entry.message.source.paneID == id {
+        changed = true
+        kept += survivors.map { Pending(message: $0, folded: []) }
+      } else if survivors.count != entry.folded.count {
+        changed = true
+        var trimmed = entry
+        trimmed.folded = survivors
+        kept.append(trimmed)
+      } else {
+        kept.append(entry)
+      }
+    }
+
+    pending = kept
+    return changed
+  }
+
   public mutating func markHistorySeen() {
     hasUnseenError = false
   }
@@ -110,7 +144,7 @@ public struct StatusQueue: Sendable {
     normalizePending()
 
     let next = pending.removeFirst()
-    current = StatusDisplay(message: next.message, collapsedErrors: next.collapsedErrors)
+    current = StatusDisplay(message: next.message, collapsedErrors: next.folded.count)
     shownAt = now
   }
 
@@ -120,8 +154,9 @@ public struct StatusQueue: Sendable {
     let errorIndexes = pending.indices.filter { pending[$0].message.level == .error }
 
     if errorIndexes.count > 1, let newest = errorIndexes.last {
-      let folded = errorIndexes.dropLast().reduce(0) { $0 + 1 + pending[$1].collapsedErrors }
-      pending[newest].collapsedErrors += folded
+      for index in errorIndexes.dropLast() {
+        pending[newest].folded += pending[index].folded + [pending[index].message]
+      }
 
       let older = Set(errorIndexes.dropLast())
       pending = pending.enumerated().filter { !older.contains($0.offset) }.map(\.element)

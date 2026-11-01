@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     let controller: MainWindowController
     do {
-      controller = try MainWindowController(appearance: appearance) { choice in
+      controller = try MainWindowController(appearance: appearance, settings: settings) { choice in
         switch choice {
         case .terminalShell:
           return TerminalApplet(engine: engine)
@@ -100,6 +100,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     controller.showWindow(nil)
     NSApp.activate()
+
+    postDebugError(to: controller)
+  }
+
+  /// UI tests set `UNITERM_DEBUG_POST_ERROR` to get an error on the status bar without relying on
+  /// a feature that may change. Only debug builds honor it.
+  private func postDebugError(to controller: MainWindowController) {
+    #if DEBUG
+      if let text = ProcessInfo.processInfo.environment["UNITERM_DEBUG_POST_ERROR"] {
+        controller.statusCenter.post(level: .error, source: .uniterm, text: text)
+      }
+    #endif
   }
 
   func applicationWillTerminate(_ notification: Notification) {

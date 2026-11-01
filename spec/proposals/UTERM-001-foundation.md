@@ -75,7 +75,8 @@ changes to the status bar or the content area.
 - Each window has one status bar. It is always docked.
 - The bar is split into segments. A segment shows a small icon or one line of text, with light formatting such as color.
 - Anything in the window may post a message to the window's status bar. Messages queue.
-- The bar can expand to show more than one line, such as a history of past messages.
+- The bar can open a history panel of past messages. The panel floats over the content area and grows away from the
+  bar. Amended 2026-11-01; see Decision Log.
 
 ### Panes and applets
 
@@ -654,7 +655,7 @@ Out of scope, for later proposals:
 
 ### M4: Status bar region
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 - Each window has a status bar that docks at the top or the bottom
 - Changing the dock position does not change what the status bar shows
@@ -663,12 +664,39 @@ Out of scope, for later proposals:
 - An invalid dock position written with `defaults write` falls back to the default and posts a warning
 - An applet can post a message to its window's status bar, and messages queue
 - The status bar shows segments with an icon or one line of styled text
-- The status bar expands to show the history of messages
+- The status bar opens a history panel of messages that floats over the content area. Amended 2026-11-01; see Decision
+  Log.
 - An error is still shown after a burst of info messages arrives within its dwell time
 - Info messages clear back to idle after a timeout once the queue drains
 - The history is capped, and the oldest entries drop first
 - Applet segments keep the last focused pane's content while focus is in another region
 - Messages still queued from a closed pane leave the bar but stay in history
+
+**As built:**
+
+- A region has a fixed role and a separate dock edge. Docked regions stack inward from their edge, and the pane area
+  fills what is left. A later region joins without a change to the status bar or the pane area.
+- The status bar docks at the bottom by default. One global setting moves it to the top in every window, live, with a
+  row in the Settings window. A move keeps the same bar and the same segments. A top-docked bar starts below the title
+  bar, clear of the traffic lights, and the title bar still drags the window.
+- The bar shows the message area, a dismiss control while an error is showing, the unseen-error indicator when an error
+  is unseen, and the focused pane's applet segments, in that order. The leaf views are AppKit, with no SwiftUI.
+- Applet segments follow pane focus. They keep the last focused pane's content while the keyboard is in Settings or a
+  sheet.
+- The terminal applet fills two segments: its working directory and the exit code of a failed command.
+- Clicking the bar, or a menu item with Cmd-Shift-M, opens the history. It lists up to the 500 messages the model keeps,
+  newest first, with level, source, and text. Opening it clears the unseen-error indicator. The panel floats over the
+  pane area. See the 2026-11-01 Decision Log entries on M4.
+- An error is dismissed by the menu item with Cmd-Option-Delete, or by a click on the dismiss control. Other messages
+  clear themselves.
+- A pane close drops that pane's queued messages from the bar and keeps them in history. Errors from other panes that
+  were folded into a dropped error are queued again.
+- An unknown stored dock value falls back to the bottom and is never written back. The window posts one warning for each
+  new bad value.
+- The dwell, the idle timeout, and the history cap are M2's, with M2's tests.
+- The UI suite passes, 26 tests with no failure. Its first run failed the unseen-error test, whose query expected an
+  image. The indicator is exposed as a plain element, and the test now matches any element type. The look of the bar at
+  each edge and the history panel are checks for the user in M9.
 
 ### M5: Terminal tabs and program mode
 
@@ -849,6 +877,27 @@ The proposal ends with the user looking at the finished app.
   (m - 1) divider thicknesses. Exact sizes hold when dividers take no room. While a sheet is up, pane actions are
   disabled and Cmd-W does not cancel the picker. A split is also refused when the new tree's minimum size exceeds the
   current size. (work-queue best guess)
+- 2026-11-01: M4 best guesses. The status bar docks at the bottom by default, where M2's strip sat. The setting is
+  `statusBarPosition` with the values `top` and `bottom`. A region model has a role enum and a dock edge enum, and the
+  window stacks docked regions inward from each edge, with no registry. The history is a panel that floats over the pane
+  area, not a taller bar, so opening it resizes nothing and the minimum window size ignores it. Cmd-Shift-M toggles it.
+  A pane close drops only the messages still queued from that pane. The message on the bar finishes its turn, since the
+  user may not have read it, such as a shell's last error before it exits. The terminal applet's segments are its
+  directory and a failed exit code. The leaf views are AppKit, since nothing here needs SwiftUI. An invalid dock value
+  warns once for each new bad value, because every watched setting wakes the same observer. A good value in between
+  resets the rule. A pane close queues again any error from another pane that had folded into a dropped error.
+  (work-queue best guess)
+- 2026-11-01: Amended "Status bar" and M4's history check. The bullet said "The bar can expand to show more than one
+  line, such as a history of past messages", and the check said "The status bar expands to show the history of
+  messages". The built history is a panel that floats over the content area and grows away from the bar, so the bar
+  itself never changes height. Expanding the bar in place would resize the panes every time the history opens and
+  would make the window's minimum size depend on it. Escape and a click away do not close the panel. The bar and the
+  menu item toggle it. (work-queue best guess)
+- 2026-11-01: M4 dismissing. A Dismiss Message menu item with Cmd-Option-Delete, and a dismiss glyph beside an error
+  on the bar, clear an error. Escape is not used, since the terminal owns it. Info and warning messages clear
+  themselves, so the item and the glyph are live only while an error is showing. Dismissing does not clear the
+  unseen-error indicator, which only opening the history clears. The UI tests get their error from a debug-only
+  launch variable, since no durable error path exists yet. (work-queue best guess)
 - 2026-11-01: ADR candidate (cuts across the system): every applet implements one applet contract: hosted view,
   lifecycle, segments, detach and reattach, an inert versioned description, and a running-state query. Undecided.
   Found in M2.

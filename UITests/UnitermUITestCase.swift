@@ -34,8 +34,12 @@ class UnitermUITestCase: XCTestCase {
     try? FileManager.default.removeItem(atPath: scratch + "-terminal")
   }
 
-  func launchApp() -> XCUIApplication {
+  func launchApp(environment: [String: String] = [:]) -> XCUIApplication {
     let app = XCUIApplication()
+    for (key, value) in environment {
+      app.launchEnvironment[key] = value
+    }
+
     app.launchEnvironment["UNITERM_DEFAULTS_PATH"] = scratch
     app.launchEnvironment["UNITERM_TERMINAL_DIR"] = scratch + "-terminal"
     app.launchEnvironment["SHELL"] = "/bin/zsh"

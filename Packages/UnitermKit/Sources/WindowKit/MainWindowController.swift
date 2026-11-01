@@ -1,6 +1,7 @@
 import AppKit
 import AppletKit
 import PaneModel
+import Preferences
 import StatusKit
 import Theme
 
@@ -18,25 +19,30 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// The window's message queue. Anything in the window may post to it.
   public let statusCenter: StatusCenter
 
-  private let contentController: MainContentViewController
+  let contentController: MainContentViewController
   let paneArea: PaneAreaView
   private let appearance: AppearanceController
+  private let placement: StatusBarPlacement
   private let makeApplet: AppletFactory
   private var appearanceToken: UUID?
   private var statusToken: UUID?
   private var started = Set<ObjectIdentifier>()
   private var panesClosed = false
+  private var historyVisible = false
 
+  /// The settings store supplies the status bar position, which is global to every window.
   public init(
-    appearance: AppearanceController, statusCenter: StatusCenter = StatusCenter(),
-    makeApplet: @escaping AppletFactory
+    appearance: AppearanceController, settings: SettingsStore,
+    statusCenter: StatusCenter = StatusCenter(), makeApplet: @escaping AppletFactory
   ) throws {
     self.appearance = appearance
     self.statusCenter = statusCenter
     self.makeApplet = makeApplet
+    placement = StatusBarPlacement(store: settings, statusCenter: statusCenter)
 
     paneArea = PaneAreaView(firstApplet: try makeApplet(.terminalShell))
-    contentController = MainContentViewController(paneView: paneArea)
+    contentController = MainContentViewController(
+      paneView: paneArea, statusBarEdge: DockEdge(placement.position))
 
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
@@ -58,7 +64,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     for applet in paneArea.applets { applet.host = self }
 
     paneArea.onTreeChange = { [weak self] in self?.updateMinimumSize() }
+    paneArea.onFocusChange = { [weak self] in self?.refreshStatusBar() }
     contentController.onLayout = { [weak self] in self?.updateMinimumSize() }
+    contentController.statusBar.onActivate = { [weak self] in self?.toggleMessageHistory(nil) }
+    contentController.statusBar.onDismiss = { [weak self] in self?.dismissMessage(nil) }
+    placement.onChange = { [weak self] position in
+      self?.contentController.move(.statusBar, to: DockEdge(position))
+    }
     updateMinimumSize()
 
     appearanceToken = appearance.addObserver { [weak self] palette in
@@ -66,10 +78,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
 
     statusToken = statusCenter.addObserver { [weak self] in
-      guard let self else { return }
-
-      contentController.showStatus(self.statusCenter.display)
+      self?.statusDidChange()
     }
+
+    refreshStatusBar()
   }
 
   isolated deinit {
@@ -101,8 +113,52 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     paneArea.apply(palette)
   }
 
+  // MARK: Status bar
+
+  /// The segments the bar shows now. The window owns the message area and the unseen-error
+  /// indicator. The applet of the focused pane fills the rest. The pane model decides which pane
+  /// that is, not the first responder, so the segments stay put while the keyboard is in the
+  /// Settings window or a sheet.
+  var statusBarSegments: [BarSegment] {
+    StatusBarContent.segments(
+      display: statusCenter.display, hasUnseenError: statusCenter.hasUnseenError,
+      applet: paneArea.applet(for: paneArea.focusedPane)?.segments ?? [])
+  }
+
+  private func refreshStatusBar() {
+    contentController.statusBar.show(statusBarSegments)
+  }
+
+  private func statusDidChange() {
+    if historyVisible, statusCenter.hasUnseenError {
+      statusCenter.markHistorySeen()
+      return
+    }
+
+    refreshStatusBar()
+
+    if historyVisible {
+      contentController.history.show(statusCenter.history)
+    }
+  }
+
+  /// Opens or closes the history. Opening it marks the errors as seen.
+  func setHistoryVisible(_ visible: Bool) {
+    guard visible != historyVisible else { return }
+
+    historyVisible = visible
+    contentController.setHistoryVisible(visible)
+
+    if visible {
+      contentController.history.show(statusCenter.history)
+      statusCenter.markHistorySeen()
+    }
+  }
+
+  var isHistoryVisible: Bool { historyVisible }
+
   /// The window never shrinks below what the tree needs. The tree's minimum is for the pane area
-  /// alone, so the title bar and the status strip add to it.
+  /// alone, so the title bar and the docked regions add to it.
   private func updateMinimumSize() {
     guard let window else { return }
 
@@ -181,6 +237,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       #selector(closePane(_:)):
       return paneActionsEnabled
 
+    case #selector(toggleMessageHistory(_:)):
+      item.title = historyVisible ? "Hide Message History" : "Show Message History"
+      return true
+
+    case #selector(dismissMessage(_:)):
+      return statusCenter.display?.message.level == .error
+
     default:
       return true
     }
@@ -217,6 +280,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
       started.remove(ObjectIdentifier(removed.applet))
       removed.applet.close()
+      statusCenter.paneClosed(id: pane.rawValue)
 
       if let next = removed.refocus {
         paneArea.focus(next)
@@ -277,6 +341,18 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     paneArea.focusNeighbor(.down)
   }
 
+  /// Opens the message history over the pane area, or closes it. The status bar's click does the
+  /// same.
+  @objc public func toggleMessageHistory(_ sender: Any?) {
+    setHistoryVisible(!historyVisible)
+  }
+
+  /// Clears the error on the bar. An error stays until a newer message replaces it or the user
+  /// does this. Other messages clear themselves, so there is nothing to dismiss.
+  @objc public func dismissMessage(_ sender: Any?) {
+    statusCenter.dismissCurrent()
+  }
+
   @objc public func undoClosePane(_ sender: Any?) {
     statusCenter.post(level: .info, source: .uniterm, text: "There is no closed pane to undo yet.")
   }
@@ -310,7 +386,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     closePane(pane, appletEnded: true)
   }
 
-  public func appletDidChange(_ applet: any Applet) {}
+  /// Only the focused pane's applet shows in the bar, so a change in any other applet is not
+  /// the bar's business until that pane takes focus.
+  public func appletDidChange(_ applet: any Applet) {
+    guard applet === paneArea.applet(for: paneArea.focusedPane) else { return }
+
+    refreshStatusBar()
+  }
 
   public func applet(_ applet: any Applet, confirm request: AppletConfirmation) async -> Bool {
     let alert = NSAlert()

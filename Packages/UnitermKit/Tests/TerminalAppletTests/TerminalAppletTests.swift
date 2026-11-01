@@ -232,6 +232,37 @@ final class TerminalAppletTests: XCTestCase {
     XCTAssertEqual(engine.sessions[1].launch.workingDirectory, "/var/tmp")
   }
 
+  /// Catches segments that go stale, or a change that does not tell the host.
+  func testSegmentsFollowTheDirectoryAndTheLastExitCode() {
+    let (applet, _, host, session) = makeApplet()
+    XCTAssertEqual(applet.segments, [])
+
+    session.onEvent?(.workingDirectoryChanged("/var/tmp"))
+    XCTAssertEqual(applet.segments, [AppletSegment(symbolName: "folder", text: "tmp")])
+    XCTAssertEqual(host.changed, 1)
+
+    session.onEvent?(.commandFinished(exitCode: 2, duration: .seconds(1)))
+    XCTAssertEqual(
+      applet.segments,
+      [
+        AppletSegment(symbolName: "folder", text: "tmp"),
+        AppletSegment(symbolName: "xmark.circle", text: "2", style: .error),
+      ])
+    XCTAssertEqual(host.changed, 2)
+
+    session.onEvent?(.commandFinished(exitCode: 0, duration: .seconds(1)))
+    XCTAssertEqual(applet.segments, [AppletSegment(symbolName: "folder", text: "tmp")])
+    XCTAssertEqual(host.changed, 3)
+  }
+
+  /// Catches a directory label that shows a long path, or the home folder as its own name.
+  func testDirectoryLabelShowsTheLastComponentAndTildeForHome() {
+    XCTAssertEqual(TerminalApplet.directoryLabel("/Users/pat", home: "/Users/pat"), "~")
+    XCTAssertEqual(TerminalApplet.directoryLabel("/Users/pat/src/app", home: "/Users/pat"), "app")
+    XCTAssertEqual(TerminalApplet.directoryLabel("/", home: "/Users/pat"), "/")
+    XCTAssertEqual(TerminalApplet.directoryLabel("/tmp/a\nb", home: "/Users/pat"), "a b")
+  }
+
   /// ADR: a description never runs a program unasked. A program-mode description is refused until
   /// program mode can show its command with a Run action.
   func testProgramDescriptionDoesNotRestoreIntoARunningProgram() throws {

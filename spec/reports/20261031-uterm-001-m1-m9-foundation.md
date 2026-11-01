@@ -18,7 +18,7 @@ The run is in progress. See the run state below.
 | M1 App skeleton and theme tokens | DONE | "Add the app skeleton, pinned Ghostty build, and theme tokens" |
 | M2 Terminal applet in a single pane | DONE | "Add the terminal applet behind a libghostty surface protocol" |
 | M3 Pane tree | DONE | "Add the normalized pane tree with splits, dividers, and focus" |
-| M4 Status bar region | QUEUED | |
+| M4 Status bar region | DONE | "Add the status bar region with docking, segments, and message history" |
 | M5 Terminal tabs and program mode | QUEUED | |
 | M6 Multiple windows | QUEUED | |
 | M7 Undo close pane | QUEUED | |
@@ -233,6 +233,57 @@ Checks left to the user: the focus ring's and the dividers' look on screen, the 
 divider.
 
 Test cost: `swift test` takes 8.0 s of test time for 145 tests. The 25 pane-model tests take 0.004 s.
+
+### M4: Status bar region
+
+Commit: "Add the status bar region with docking, segments, and message history".
+
+Checks:
+- The implementer ran `make fmt-check`, `make lint`, `make check`, `make build`, `make test-package`, and a build of
+  the UI test target, and all passed.
+- The coordinator reran `make test-package` independently: 191 tests, 0 failures, and the same 4 US-layout skips.
+- The coordinator ran the UI suite. The first run had 24 tests and 1 failure. The unseen-error test queried
+  `window.images`, but XCUITest exposes the icon-only segment as a plain element. The failed run's accessibility
+  hierarchy showed the indicator present with a 15 by 10 size. The rerun had 26 tests, 0 failures, and took 187 s.
+- `proposals.py check` and `proposals.py freeze` both print `[]`.
+
+Best guesses from the implementer:
+- The bar docks at the bottom by default, from one global `statusBarPosition` setting with values `top` and `bottom`.
+- The region model is a role, a dock edge, and an inward stacking order. A later region joins by adding a role and a
+  view.
+- History is a floating 240 pt panel that grows away from the bar. The proposal's "expand" wording was amended to say
+  so. Clicking the bar or pressing Cmd-Shift-M toggles it.
+- Closing a pane drops its queued messages. The message already on the bar finishes its turn. Folded errors from other
+  panes are queued again.
+- The terminal applet's segments are the working directory and a failing exit code.
+- The segments are AppKit views.
+- An invalid dock position warns once per distinct bad value, and a valid value resets the rule.
+- Dismissing an error uses a "Dismiss Message" menu item (Cmd-Option-Delete) or a close glyph on the error. Both are
+  live only while an error shows. Dismissing does not clear the unseen-error indicator.
+- UI tests get an error from a DEBUG-only launch variable, since the program-mode refusal goes away in M5.
+
+Review findings:
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | Dismissing an error was settled but not built | Built, as a run best guess |
+| 2 | Closing a pane could lose other panes' folded errors | Confirmed by a failing test, fixed |
+| 3 | The proposal said "expand", but the code shows a floating panel | Text amended in place |
+| 4 | "Warns once per distinct value" was untested | Tests added and mutation-checked |
+| 5 | The error UI test depended on the program-mode refusal | Replaced by a DEBUG-only hook |
+| 6 | Real sleeps in tests, and a duplicate process test | Sleeps removed. Both process tests kept, with their distinct jobs stated |
+| 7-9 | As built shape, test doc comments, a dead region case | Fixed |
+
+adr-impact: no conflicts and no supersessions. The implementer's region-model candidate fails the ADR bar, since it is
+one component's internals.
+
+Checks left to the user: the bar's look at each edge, the empty band under the title bar when docked on top, the history
+panel on screen, and the Cmd-Shift-M binding.
+
+Process note: the implementer waited 15 minutes on cg's allowlist for `xcrun xcresulttool`. The user added it to
+`.cg.yaml`, and later added `codesign -d` and `plutil -p`.
+
+Test cost: `swift test` takes 10.5 s of test time for 191 tests. The UI suite takes 187 s for 26 tests.
 
 ## Status
 

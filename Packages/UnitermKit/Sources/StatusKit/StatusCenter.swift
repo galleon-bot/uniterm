@@ -63,6 +63,13 @@ public final class StatusCenter {
     }
   }
 
+  /// A pane closed. Its queued messages leave the bar and stay in the history.
+  public func paneClosed(id: UInt64) {
+    if queue.removePending(fromPane: id) {
+      didChange()
+    }
+  }
+
   public func markHistorySeen() {
     queue.markHistorySeen()
     didChange()

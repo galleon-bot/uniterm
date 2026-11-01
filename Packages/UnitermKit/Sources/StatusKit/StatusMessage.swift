@@ -27,6 +27,13 @@ public enum StatusSource: Sendable, Equatable {
     case .uniterm: return "uniterm"
     }
   }
+
+  /// The pane that posted, or nil for any other source.
+  public var paneID: UInt64? {
+    guard case .pane(let id, _) = self else { return nil }
+
+    return id
+  }
 }
 
 public struct StatusMessage: Sendable, Equatable, Identifiable {

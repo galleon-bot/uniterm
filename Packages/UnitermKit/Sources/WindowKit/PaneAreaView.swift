@@ -15,7 +15,14 @@ final class PaneAreaView: NSView {
   }
 
   private(set) var tree: PaneTree
-  private(set) var focusedPane: NodeID
+  private(set) var focusedPane: NodeID {
+    didSet {
+      if focusedPane != oldValue { onFocusChange?() }
+    }
+  }
+
+  /// Runs when the focused pane changes, so the status bar can show that pane's applet.
+  var onFocusChange: (() -> Void)?
 
   /// Runs when the tree changes shape, so the window can follow the new minimum size.
   var onTreeChange: (() -> Void)?

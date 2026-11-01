@@ -67,6 +67,31 @@ final class StatusCenterTests: XCTestCase {
     XCTAssertEqual(center.display?.message.text, "b")
   }
 
+  /// Catches a pane close that edits the queue and leaves the old wakeup in place.
+  ///
+  /// The wakeup is at 1.5 while b waits. With b gone it moves to a's idle timeout at 5.
+  func testPaneClosedReschedulesTheWakeupAndNotifies() {
+    let clock = ManualClock()
+    let scheduler = ManualScheduler()
+    let center = StatusCenter(clock: clock, scheduler: scheduler.schedule)
+    var count = 0
+    center.addObserver { count += 1 }
+
+    center.post(level: .info, source: .uniterm, text: "a")
+    center.post(level: .info, source: .pane(id: 3, name: "zsh"), text: "b")
+    XCTAssertEqual(scheduler.scheduled.last?.delay, 1.5)
+    XCTAssertEqual(count, 2)
+
+    center.paneClosed(id: 3)
+
+    XCTAssertEqual(count, 3)
+    XCTAssertEqual(scheduler.scheduled.last?.delay, 5)
+    XCTAssertEqual(center.history.map(\.text), ["a", "b"])
+
+    center.paneClosed(id: 3)
+    XCTAssertEqual(count, 3, "a close with nothing queued is not a change")
+  }
+
   func testObserversHearEveryChange() {
     let clock = ManualClock()
     let scheduler = ManualScheduler()

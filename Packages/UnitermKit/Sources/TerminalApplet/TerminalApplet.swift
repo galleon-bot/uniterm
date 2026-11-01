@@ -23,6 +23,7 @@ public final class TerminalApplet: Applet {
   private var launch: TerminalLaunch
   private var session: (any TerminalSession)?
   private var workingDirectory: String?
+  private var failedExitCode: Int?
   private var detached = false
 
   public init(engine: any TerminalEngine, launch: TerminalLaunch = .loginShell()) {
@@ -116,15 +117,11 @@ public final class TerminalApplet: Applet {
 
     case .workingDirectoryChanged(let path):
       workingDirectory = path
+      rebuildSegments()
 
     case .commandFinished(let exitCode, _):
-      if let exitCode, exitCode != 0 {
-        segments = [AppletSegment(symbolName: "xmark.circle", text: "\(exitCode)", style: .error)]
-      } else {
-        segments = []
-      }
-
-      host?.appletDidChange(self)
+      failedExitCode = exitCode.flatMap { $0 != 0 ? $0 : nil }
+      rebuildSegments()
 
     case .notification(let title, let body):
       let text = [title, body].map { Self.sanitized($0) }.filter { !$0.isEmpty }.joined(
@@ -142,6 +139,33 @@ public final class TerminalApplet: Applet {
     case .exited:
       host?.appletDidExit(self)
     }
+  }
+
+  /// The terminal's state is its directory and the exit code of the last command when it failed.
+  /// The directory shows as its last component, or `~` for the home folder.
+  private func rebuildSegments() {
+    var result: [AppletSegment] = []
+
+    if let workingDirectory {
+      result.append(
+        AppletSegment(
+          symbolName: "folder", text: Self.directoryLabel(workingDirectory), style: .normal))
+    }
+
+    if let failedExitCode {
+      result.append(
+        AppletSegment(symbolName: "xmark.circle", text: "\(failedExitCode)", style: .error))
+    }
+
+    segments = result
+    host?.appletDidChange(self)
+  }
+
+  static func directoryLabel(_ path: String, home: String = NSHomeDirectory()) -> String {
+    if path == home { return "~" }
+
+    let last = (path as NSString).lastPathComponent
+    return sanitized(last.isEmpty ? path : last, limit: 40)
   }
 
   /// A request is never answered without the user's say. With no host to ask, it is refused.
