@@ -1,36 +1,42 @@
 import AppKit
 import AppletKit
+import PaneModel
 import StatusKit
 import Theme
 
-/// Makes the applet that a new pane runs. The window controller owns what it returns.
-public typealias AppletFactory = @MainActor () -> any Applet
+/// Makes the applet that a new pane runs. It throws when it cannot start the choice. The window
+/// controller owns what it returns.
+public typealias AppletFactory = @MainActor (AppletChoice) throws -> any Applet
 
 /// Hosts one window with a full-size content view. Content extends under the title bar, and the
-/// standard traffic lights stay. The content area holds one pane that runs one applet.
+/// standard traffic lights stay. The content area holds a tree of panes, and each pane runs one
+/// applet.
 @MainActor
-public final class MainWindowController: NSWindowController, NSWindowDelegate, AppletHost {
+public final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation,
+  AppletHost
+{
   /// The window's message queue. Anything in the window may post to it.
   public let statusCenter: StatusCenter
 
   private let contentController: MainContentViewController
+  let paneArea: PaneAreaView
   private let appearance: AppearanceController
-  private let applet: any Applet
-  private let paneID: UInt64 = 1
+  private let makeApplet: AppletFactory
   private var appearanceToken: UUID?
   private var statusToken: UUID?
-  private var paneClosed = false
+  private var started = Set<ObjectIdentifier>()
+  private var panesClosed = false
 
   public init(
     appearance: AppearanceController, statusCenter: StatusCenter = StatusCenter(),
-    makeApplet: AppletFactory
-  ) {
+    makeApplet: @escaping AppletFactory
+  ) throws {
     self.appearance = appearance
     self.statusCenter = statusCenter
+    self.makeApplet = makeApplet
 
-    let applet = makeApplet()
-    self.applet = applet
-    contentController = MainContentViewController(paneView: applet.view)
+    paneArea = PaneAreaView(firstApplet: try makeApplet(.terminalShell))
+    contentController = MainContentViewController(paneView: paneArea)
 
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
@@ -40,7 +46,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     window.title = "uniterm"
     window.titlebarAppearsTransparent = true
     window.titleVisibility = .hidden
-    window.minSize = NSSize(width: 480, height: 320)
     window.isReleasedWhenClosed = false
     window.setAccessibilityIdentifier("main-window")
     window.contentViewController = contentController
@@ -50,7 +55,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     super.init(window: window)
 
     window.delegate = self
-    applet.host = self
+    for applet in paneArea.applets { applet.host = self }
+
+    paneArea.onTreeChange = { [weak self] in self?.updateMinimumSize() }
+    contentController.onLayout = { [weak self] in self?.updateMinimumSize() }
+    updateMinimumSize()
 
     appearanceToken = appearance.addObserver { [weak self] palette in
       self?.apply(palette)
@@ -81,13 +90,141 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
   public override func showWindow(_ sender: Any?) {
     super.showWindow(sender)
 
-    applet.start()
-    applet.focus()
+    contentController.view.layoutSubtreeIfNeeded()
+    startPendingApplets()
+    paneArea.focus(paneArea.focusedPane)
   }
 
   private func apply(_ palette: ThemePalette) {
     window?.backgroundColor = palette[.base].nsColor
     contentController.apply(palette)
+    paneArea.apply(palette)
+  }
+
+  /// The window never shrinks below what the tree needs. The tree's minimum is for the pane area
+  /// alone, so the title bar and the status strip add to it.
+  private func updateMinimumSize() {
+    guard let window else { return }
+
+    let tree = paneArea.minimumSize
+    let minimum = NSSize(
+      width: tree.width, height: tree.height + contentController.chromeHeight)
+
+    if window.contentMinSize != minimum {
+      window.contentMinSize = minimum
+    }
+  }
+
+  private func startPendingApplets() {
+    for applet in paneArea.applets where started.insert(ObjectIdentifier(applet)).inserted {
+      applet.start()
+    }
+  }
+
+  // MARK: Panes
+
+  /// The panes in reading order. Tests and the UI read it.
+  var paneIDs: [NodeID] { paneArea.tree.paneIDs }
+
+  var focusedPane: NodeID { paneArea.focusedPane }
+
+  /// Splits the focused pane and starts the chosen applet in the new one. Returns nil when the
+  /// pane is too small, or the applet could not start. Either way the status bar says why.
+  @discardableResult
+  func openPane(_ choice: AppletChoice, axis: Axis) -> NodeID? {
+    contentController.view.layoutSubtreeIfNeeded()
+
+    let applet: any Applet
+    do {
+      applet = try makeApplet(choice)
+    } catch {
+      statusCenter.post(
+        level: .error, source: .uniterm,
+        text: "The pane did not open: \(error.localizedDescription)"
+      )
+      return nil
+    }
+
+    applet.host = self
+
+    let created: NodeID
+    do {
+      created = try paneArea.split(axis, adding: applet)
+    } catch {
+      applet.close()
+      postNoRoom()
+      return nil
+    }
+
+    startPendingApplets()
+    paneArea.focus(created)
+    return created
+  }
+
+  private func postNoRoom() {
+    statusCenter.post(
+      level: .warning, source: .uniterm, text: "There is not enough room to split this pane.")
+  }
+
+  /// A sheet, such as the picker or a clipboard question, holds the window's attention. Pane
+  /// actions wait until it is answered. Cmd-W does not cancel a sheet, and Escape does.
+  private var paneActionsEnabled: Bool {
+    window?.attachedSheet == nil
+  }
+
+  public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    switch item.action {
+    case #selector(splitRight(_:)), #selector(splitDown(_:)),
+      #selector(focusNextPane(_:)), #selector(focusPreviousPane(_:)),
+      #selector(focusPaneLeft(_:)), #selector(focusPaneRight(_:)),
+      #selector(focusPaneUp(_:)), #selector(focusPaneDown(_:)),
+      #selector(closePane(_:)):
+      return paneActionsEnabled
+
+    default:
+      return true
+    }
+  }
+
+  private func requestSplit(_ axis: Axis) {
+    guard let window, paneActionsEnabled else { return }
+
+    contentController.view.layoutSubtreeIfNeeded()
+
+    guard paneArea.canSplit(axis) else {
+      postNoRoom()
+      return
+    }
+
+    NewPaneSheet.present(on: window) { [weak self] choice in
+      self?.openPane(choice, axis: axis)
+    }
+  }
+
+  /// Closes one pane. Its space goes to its neighbors. The last pane closes the window, through
+  /// `performClose` when the user asked, and straight away when its applet ended on its own.
+  private func closePane(_ pane: NodeID, appletEnded: Bool) {
+    do {
+      guard let removed = try paneArea.remove(pane) else {
+        if appletEnded {
+          window?.close()
+        } else {
+          window?.performClose(nil)
+        }
+
+        return
+      }
+
+      started.remove(ObjectIdentifier(removed.applet))
+      removed.applet.close()
+
+      if let next = removed.refocus {
+        paneArea.focus(next)
+      }
+    } catch {
+      // The pane is already gone, as when its applet exits twice. There is nothing left to close.
+      return
+    }
   }
 
   // MARK: Menu actions
@@ -96,37 +233,81 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     statusCenter.post(level: .info, source: .uniterm, text: "Tabs are not available yet.")
   }
 
-  @objc public func splitPane(_ sender: Any?) {
-    statusCenter.post(level: .info, source: .uniterm, text: "Splits are not available yet.")
+  @objc public func splitRight(_ sender: Any?) {
+    requestSplit(.row)
+  }
+
+  @objc public func splitDown(_ sender: Any?) {
+    requestSplit(.column)
+  }
+
+  @objc public func focusNextPane(_ sender: Any?) {
+    guard paneActionsEnabled else { return }
+
+    paneArea.focusNext()
+  }
+
+  @objc public func focusPreviousPane(_ sender: Any?) {
+    guard paneActionsEnabled else { return }
+
+    paneArea.focusPrevious()
+  }
+
+  @objc public func focusPaneLeft(_ sender: Any?) {
+    guard paneActionsEnabled else { return }
+
+    paneArea.focusNeighbor(.left)
+  }
+
+  @objc public func focusPaneRight(_ sender: Any?) {
+    guard paneActionsEnabled else { return }
+
+    paneArea.focusNeighbor(.right)
+  }
+
+  @objc public func focusPaneUp(_ sender: Any?) {
+    guard paneActionsEnabled else { return }
+
+    paneArea.focusNeighbor(.up)
+  }
+
+  @objc public func focusPaneDown(_ sender: Any?) {
+    guard paneActionsEnabled else { return }
+
+    paneArea.focusNeighbor(.down)
   }
 
   @objc public func undoClosePane(_ sender: Any?) {
     statusCenter.post(level: .info, source: .uniterm, text: "There is no closed pane to undo yet.")
   }
 
-  /// Closes the pane. The pane is the only one in the window, so the window closes too.
+  /// Closes the focused pane. With one pane left, the window closes too.
   @objc public func closePane(_ sender: Any?) {
-    window?.performClose(sender)
+    guard paneActionsEnabled else { return }
+
+    closePane(paneArea.focusedPane, appletEnded: false)
   }
 
   // MARK: Window
 
   public func windowWillClose(_ notification: Notification) {
-    guard !paneClosed else { return }
+    guard !panesClosed else { return }
 
-    paneClosed = true
-    applet.close()
+    panesClosed = true
+    for applet in paneArea.applets { applet.close() }
   }
 
   // MARK: Applet host
 
   public func applet(_ applet: any Applet, post level: StatusLevel, text: String) {
-    statusCenter.post(
-      level: level, source: .pane(id: paneID, name: applet.title), text: text)
+    let id = paneArea.paneID(for: applet)?.rawValue ?? 0
+    statusCenter.post(level: level, source: .pane(id: id, name: applet.title), text: text)
   }
 
   public func appletDidExit(_ applet: any Applet) {
-    window?.close()
+    guard let pane = paneArea.paneID(for: applet) else { return }
+
+    closePane(pane, appletEnded: true)
   }
 
   public func appletDidChange(_ applet: any Applet) {}

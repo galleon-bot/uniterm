@@ -17,7 +17,7 @@ The run is in progress. See the run state below.
 |-----------|------------|--------|
 | M1 App skeleton and theme tokens | DONE | "Add the app skeleton, pinned Ghostty build, and theme tokens" |
 | M2 Terminal applet in a single pane | DONE | "Add the terminal applet behind a libghostty surface protocol" |
-| M3 Pane tree | QUEUED | |
+| M3 Pane tree | DONE | "Add the normalized pane tree with splits, dividers, and focus" |
 | M4 Status bar region | QUEUED | |
 | M5 Terminal tabs and program mode | QUEUED | |
 | M6 Multiple windows | QUEUED | |
@@ -180,6 +180,59 @@ Process notes:
 - Debug runs left 15 orphaned `sleep 1000` processes. They exit on their own after about 17 minutes.
 
 Test cost: `swift test` takes 7.4 s of test time for 100 tests. The UI suite takes 52 s.
+
+### M3: Pane tree
+
+Commit: "Add the normalized pane tree with splits, dividers, and focus".
+
+Checks:
+- The implementer ran `make fmt-check`, `make lint`, `make check`, `make build`, a build of the UI test target, and
+  `make test-package`, and all passed.
+- The coordinator reran `make test-package` independently: 145 tests, 0 failures, and the same 4 US-layout skips.
+- The coordinator ran the UI suite with `make test-app`. The first run had 21 tests and 3 failures. All 3 waited on
+  `pane-3`, but the allocator gives the first split pane 2 and split 3, so the second new pane is pane 4. The tests now
+  wait on the pane count and order. The rerun had 21 tests, 0 failures, and took 152 s.
+- `proposals.py check` and `proposals.py freeze` both print `[]`.
+- The implementer mutation-checked 14 model and controller rules. Each mutation failed a named test. One mutation first
+  passed, because the focus-marker logic was duplicated. That logic was merged, and the mutation then failed.
+
+Best guesses from the implementer:
+- Axes are named `row` and `column`. "Split Right" is Cmd-D and "Split Down" is Cmd-Shift-D, following Ghostty and
+  iTerm2.
+- The minimum pane size is 200 by 100 points, and a divider is 5 points thick.
+- Closing a pane gives half its weight to each adjacent sibling, or all of it to a single neighbor. Focus goes to the
+  nearest pane only when the closed pane had focus.
+- A split is refused when either new pane would fall below the minimum, or when the resulting tree's minimum exceeds the
+  current size. A refusal burns no ID.
+- The window minimum follows the tree. The old 480 by 320 floor is gone.
+- Every split opens the applet picker, and Return accepts the terminal in shell mode. Program mode collects a command
+  but refuses to open until M5.
+- Cmd-] and Cmd-[ move focus in reading order, and Cmd-Option-arrow moves it by direction. While a sheet is up, the pane
+  actions are disabled. Escape cancels the picker, and Cmd-W does not.
+- Focus follows the window's first responder on `NSWindow.didUpdate`.
+
+Deviations: the merge check was amended. Divider thickness makes exact sizes impossible, so a merged pane may shift by
+c·(m−1)·(1−w)·d, which is under (m−1) divider thicknesses. Sizes stay exact with zero thickness.
+
+Review findings:
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | Focus jumped when an unfocused pane's applet exited | Confirmed by a failing test, fixed |
+| 2 | A reused applet identity could skip `start()` | Confirmed as a design bug by a failing test, fixed |
+| 3 | The amended merge bound was wrong for 3 or more children | Wording fixed. A test checks the hand-computed shifts |
+| 4 | A split could squeeze siblings below the minimum | The reviewer's example was not a bug. A different case was, and it was fixed with a failing test first |
+| 5 | Menu actions stayed live under the picker sheet | Confirmed by a failing test, fixed |
+| 6 | No test that vertical focus keys reach uniterm from a focused terminal | UI test added |
+| 7-10 | Test comment numbers, a duplicate test, a UI wait, comment craft | Fixed |
+
+adr-impact: no conflicts and no supersessions. Restoring a layout must reseed the ID allocator from its saved high-water
+mark. That is for M8.
+
+Checks left to the user: the focus ring's and the dividers' look on screen, the resize cursor, and a real mouse drag of a
+divider.
+
+Test cost: `swift test` takes 8.0 s of test time for 145 tests. The 25 pane-model tests take 0.004 s.
 
 ## Status
 

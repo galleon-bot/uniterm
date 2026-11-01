@@ -46,4 +46,50 @@ class UnitermUITestCase: XCTestCase {
     launched.append(app)
     return app
   }
+
+  // MARK: Waiting
+
+  func waitForTerminal(in app: XCUIApplication) -> XCUIElement {
+    let terminal = app.windows["main-window"].textViews["terminal"]
+    XCTAssertTrue(terminal.waitForExistence(timeout: 15))
+
+    // Keys typed before the shell reads its terminal can be lost. The fixture's zsh prompt ends in
+    // "% ", so wait for it.
+    XCTAssertTrue(
+      waitFor(terminal, timeout: 40) { $0.contains("% ") }, "the shell never showed a prompt")
+    return terminal
+  }
+
+  func waitFor(
+    _ element: XCUIElement, timeout: TimeInterval, _ condition: @escaping (String) -> Bool
+  ) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+
+    while Date() < deadline {
+      if let value = element.value as? String, condition(value) {
+        return true
+      }
+
+      Thread.sleep(forTimeInterval: 0.25)
+    }
+
+    return false
+  }
+
+  func firstMatch(_ pattern: String, in text: String) -> String? {
+    guard let expression = try? NSRegularExpression(pattern: pattern),
+      let match = expression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+      match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: text)
+    else { return nil }
+
+    return String(text[range])
+  }
+
+  func waitForNoSheet(in window: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+    let gone = NSPredicate(format: "exists == false")
+    let sheet = window.sheets.firstMatch
+    return XCTWaiter().wait(
+      for: [XCTNSPredicateExpectation(predicate: gone, object: sheet)], timeout: timeout)
+      == .completed
+  }
 }

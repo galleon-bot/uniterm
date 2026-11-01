@@ -2,15 +2,24 @@ import AppKit
 import StatusKit
 import Theme
 
-/// The window's content: one pane, with a placeholder strip for the current status message.
+/// The window's content: the pane area, with a placeholder strip for the current status message.
 ///
 /// The content lies inside the safe area, so it never covers the traffic lights. Later work
-/// replaces the single pane with the pane tree, and the strip with the status bar region.
+/// replaces the strip with the status bar region.
 @MainActor
 final class MainContentViewController: NSViewController {
   private let chrome = ChromeView()
   private let strip = StatusStripView()
   private let paneView: NSView
+
+  /// Runs after every layout pass, since the safe area that sets the window's minimum size can
+  /// change with it.
+  var onLayout: (() -> Void)?
+
+  /// The height of everything in the window that is not the pane area.
+  var chromeHeight: CGFloat {
+    chrome.safeAreaInsets.top + StatusStripView.height
+  }
 
   init(paneView: NSView) {
     self.paneView = paneView
@@ -45,6 +54,11 @@ final class MainContentViewController: NSViewController {
     ])
 
     view = chrome
+  }
+
+  override func viewDidLayout() {
+    super.viewDidLayout()
+    onLayout?()
   }
 
   func apply(_ palette: ThemePalette) {

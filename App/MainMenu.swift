@@ -3,8 +3,9 @@ import TerminalSurface
 import WindowKit
 
 /// uniterm's menu. It owns every key binding. A focused terminal never keeps a key for itself:
-/// Cmd-Z, Cmd-W, Cmd-T, Cmd-D, and Cmd-Q reach these items first. Items with a nil target find
-/// their receiver on the responder chain, from the focused terminal up to the window controller.
+/// Cmd-Z, Cmd-W, Cmd-T, Cmd-D, Cmd-Shift-D, Cmd-[ and Cmd-], Cmd-Option-arrows, and Cmd-Q reach
+/// these items first. Items with a nil target find their receiver on the responder chain, from the
+/// focused terminal up to the window controller.
 @MainActor
 enum MainMenu {
   static func make(target: AppDelegate) -> NSMenu {
@@ -46,8 +47,14 @@ enum MainMenu {
     menu.addItem(
       withTitle: "New Tab", action: #selector(MainWindowController.newTab(_:)), keyEquivalent: "t")
     menu.addItem(
-      withTitle: "Split Pane", action: #selector(MainWindowController.splitPane(_:)),
+      withTitle: "Split Right", action: #selector(MainWindowController.splitRight(_:)),
       keyEquivalent: "d")
+
+    let splitDown = NSMenuItem(
+      title: "Split Down", action: #selector(MainWindowController.splitDown(_:)),
+      keyEquivalent: "d")
+    splitDown.keyEquivalentModifierMask = [.command, .shift]
+    menu.addItem(splitDown)
     menu.addItem(.separator())
     menu.addItem(
       withTitle: "Close Pane", action: #selector(MainWindowController.closePane(_:)),
@@ -105,6 +112,36 @@ enum MainMenu {
 
     menu.addItem(
       withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+    menu.addItem(.separator())
+    menu.addItem(
+      withTitle: "Focus Next Pane", action: #selector(MainWindowController.focusNextPane(_:)),
+      keyEquivalent: "]")
+    menu.addItem(
+      withTitle: "Focus Previous Pane",
+      action: #selector(MainWindowController.focusPreviousPane(_:)), keyEquivalent: "[")
+    menu.addItem(.separator())
+
+    let directions: [(String, Selector, Int)] = [
+      (
+        "Focus Pane Left", #selector(MainWindowController.focusPaneLeft(_:)), NSLeftArrowFunctionKey
+      ),
+      (
+        "Focus Pane Right", #selector(MainWindowController.focusPaneRight(_:)),
+        NSRightArrowFunctionKey
+      ),
+      ("Focus Pane Up", #selector(MainWindowController.focusPaneUp(_:)), NSUpArrowFunctionKey),
+      (
+        "Focus Pane Down", #selector(MainWindowController.focusPaneDown(_:)), NSDownArrowFunctionKey
+      ),
+    ]
+
+    for (title, action, key) in directions {
+      let direction = NSMenuItem(
+        title: title, action: action,
+        keyEquivalent: String(UnicodeScalar(UInt32(key)).map(Character.init) ?? " "))
+      direction.keyEquivalentModifierMask = [.command, .option]
+      menu.addItem(direction)
+    }
 
     item.submenu = menu
     NSApp.windowsMenu = menu

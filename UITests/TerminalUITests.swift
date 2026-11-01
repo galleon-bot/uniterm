@@ -58,7 +58,8 @@ final class TerminalUITests: UnitermUITestCase {
   }
 
   /// Catches Ghostty's built-in bindings catching keys before uniterm. With the terminal focused,
-  /// Cmd-T, Cmd-D, and Cmd-Z reach uniterm's menu. Each answers with a status message.
+  /// Cmd-T and Cmd-Z reach uniterm's menu and answer with a status message. Cmd-D and Cmd-Shift-D
+  /// reach it too, and each opens the new-pane sheet.
   func testCommandKeysReachUnitermWhileTheTerminalIsFocused() {
     let app = launchApp()
     let window = app.windows["main-window"]
@@ -69,7 +70,16 @@ final class TerminalUITests: UnitermUITestCase {
     XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("Tabs are not available yet.") })
 
     app.typeKey("d", modifierFlags: .command)
-    XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("Splits are not available yet.") })
+    XCTAssertTrue(
+      window.sheets.firstMatch.waitForExistence(timeout: 5), "Cmd-D never opened the sheet")
+    app.typeKey(.escape, modifierFlags: [])
+    XCTAssertTrue(waitForNoSheet(in: window))
+
+    app.typeKey("d", modifierFlags: [.command, .shift])
+    XCTAssertTrue(
+      window.sheets.firstMatch.waitForExistence(timeout: 5), "Cmd-Shift-D never opened the sheet")
+    app.typeKey(.escape, modifierFlags: [])
+    XCTAssertTrue(waitForNoSheet(in: window))
 
     app.typeKey("z", modifierFlags: .command)
     XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("no closed pane to undo") })
@@ -120,43 +130,5 @@ final class TerminalUITests: UnitermUITestCase {
     app.typeKey("k", modifierFlags: .command)
 
     XCTAssertTrue(waitFor(terminal, timeout: 10) { !$0.contains("C:42:") })
-  }
-
-  // MARK: Helpers
-
-  private func waitForTerminal(in app: XCUIApplication) -> XCUIElement {
-    let terminal = app.windows["main-window"].textViews["terminal"]
-    XCTAssertTrue(terminal.waitForExistence(timeout: 15))
-
-    // Keys typed before the shell reads its terminal can be lost. The fixture's zsh prompt ends in
-    // "% ", so wait for it.
-    XCTAssertTrue(
-      waitFor(terminal, timeout: 40) { $0.contains("% ") }, "the shell never showed a prompt")
-    return terminal
-  }
-
-  private func waitFor(
-    _ element: XCUIElement, timeout: TimeInterval, _ condition: @escaping (String) -> Bool
-  ) -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-
-    while Date() < deadline {
-      if let value = element.value as? String, condition(value) {
-        return true
-      }
-
-      Thread.sleep(forTimeInterval: 0.25)
-    }
-
-    return false
-  }
-
-  private func firstMatch(_ pattern: String, in text: String) -> String? {
-    guard let expression = try? NSRegularExpression(pattern: pattern),
-      let match = expression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-      match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: text)
-    else { return nil }
-
-    return String(text[range])
   }
 }

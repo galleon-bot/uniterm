@@ -598,7 +598,7 @@ Out of scope, for later proposals:
 
 ### M3: Pane tree
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 - A pane splits horizontally and vertically, and splits nest
 - Dragging a divider resizes the panes on either side
@@ -607,8 +607,50 @@ Out of scope, for later proposals:
 - Opening a new pane asks which applet to start, and offers program mode with a command
 - Closing a pane closes its applet and gives its space to its neighbors
 - When a split merges into its parent, each child's weight is scaled by the merged split's weight, so no pane changes
-  size
+  size. A divider takes room, so a pane merged from a split of m children can shift by less than (m - 1) divider
+  thicknesses. Amended 2026-11-01; see Decision Log.
 - The window's minimum size follows from the tree, so shrinking the window never pushes a pane below its minimum
+
+**As built:**
+
+- The pane tree is a pure model with no AppKit. Its weights sum to 1 in every split. A split lays its children along a
+  row or a column. The menu calls the two splits Split Right and Split Down.
+- A pane is at least 200 points wide and 100 points high. A divider is 5 points thick. A split is refused when either
+  of its two panes would end up below that size at the sizes the weights give. It is also refused when the new tree's
+  minimum size does not fit the current size, since the new divider shifts every sibling and the layout would then
+  squeeze the two panes. A refusal changes nothing, uses no ID, and posts a warning to the status bar.
+- Closing a pane gives half of its weight to the sibling on each side. A pane with one neighbor gives all of it to that
+  neighbor. Focus moves to the neighbor nearest the closed pane. A divider drag stops where either side would drop below
+  its subtree's minimum. Every expected value in the model tests was worked out by hand. Each mutation of the model
+  that was tried made a named test fail.
+- A merge scales the merged children's weights, so each pane keeps its share. A divider takes room that weights do not
+  count, so with divider thickness a merged pane moves. A child of weight c in a merged split of m children and weight
+  w shifts by c * (m - 1) * (1 - w) divider thicknesses, which is under (m - 1). A test checks the formula's values
+  with a thickness of 10. The other merge tests use zero thickness to show exact sizes.
+- A new pane takes a fresh ID. A split that is created for it takes the next one. IDs rise by one, a refused split
+  burns none, and the model starts from a saved high-water mark when one is given. The persisted form is M8's.
+- The window's minimum content size is the tree's minimum plus the title bar and the status strip. It has no fixed
+  floor, so a single pane's window can shrink to 200 points wide. It grows and shrinks as panes come and go. A split
+  is only allowed when the new tree's minimum fits the current size, so a split never forces the window to grow.
+- Dividers drag with the mouse and show a resize cursor. The pane views are laid out from the model's frames, rounded
+  to whole points. The focused pane shows a 2 point ring when the window has more than one pane. A click inside a pane
+  moves the mark, since the mark follows the window's first responder.
+- Key bindings, all in uniterm's menu: Cmd-D splits right, Cmd-Shift-D splits down, Cmd-W closes the focused pane,
+  Cmd-] and Cmd-[ focus the next and previous pane in reading order, and Cmd-Option with an arrow key focuses the
+  nearest pane in that direction. Ghostty and iTerm2 use the same keys. Terminal has no splits.
+- Every split asks which applet to start, in a sheet. The default is the terminal in shell mode, so Cmd-D then Return
+  opens a shell. The sheet also offers program mode with a command field, and Open waits for a command. Program mode
+  does not start yet, since the terminal applet has no program launch. Choosing it opens no pane and posts an error to
+  the status bar. M5 owns the launch.
+- A shell that exits closes its own pane, and the last pane closes the window as before. Focus moves to a neighbor
+  only when the closed pane had it, so an exit in a background pane never takes the keyboard. Closing a pane asks
+  nothing, since M7 owns the close guard.
+- While a sheet is up, such as the picker or a clipboard question, every pane action is disabled: split, close, and the
+  focus moves. Cmd-W does not cancel the picker. Escape does.
+- The UI suite passes, 21 tests with no failure. It covers splits, focus, dividers, close, the window minimum, a refused
+  split, and the picker. Its first run failed 3 tests that waited on a pane ID the allocator never issues. The tests now
+  wait on the pane count and order. The look of the focus ring and dividers on screen, the resize cursor, and a real
+  mouse drag of a divider are checks for the user.
 
 ### M4: Status bar region
 
@@ -798,6 +840,15 @@ The proposal ends with the user looking at the finished app.
   emits "prompt marks" through the protocol, which read as every OSC 133 mark. libghostty's C API passes only
   command-finished to its embedder, so the text now names that mark. The running-state query still follows the OSC 133
   prompt marks. (work-queue best guess)
+- 2026-11-01: M3 best guesses. The pane tree is its own module. A split lays children along a row or a column, and
+  the menu says Split Right and Split Down. A pane is at least 200 by 100 points, and a divider is 5 points. Closing a
+  pane gives half of its space to each adjacent sibling. Every split asks which applet to start, and Return accepts the
+  shell default. Program mode is collected and refused until M5. The window's minimum size is the tree's minimum, with
+  no fixed floor. Key bindings follow Ghostty and iTerm2. Amended the merge check. It said "so no pane changes size".
+  A divider takes room that weights do not count, so a pane merged from a split of m children shifts by less than
+  (m - 1) divider thicknesses. Exact sizes hold when dividers take no room. While a sheet is up, pane actions are
+  disabled and Cmd-W does not cancel the picker. A split is also refused when the new tree's minimum size exceeds the
+  current size. (work-queue best guess)
 - 2026-11-01: ADR candidate (cuts across the system): every applet implements one applet contract: hosted view,
   lifecycle, segments, detach and reattach, an inert versioned description, and a running-state query. Undecided.
   Found in M2.

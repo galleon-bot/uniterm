@@ -71,9 +71,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     NSApp.mainMenu = MainMenu.make(target: self)
 
-    let controller = MainWindowController(appearance: appearance) {
-      TerminalApplet(engine: engine)
+    let controller: MainWindowController
+    do {
+      controller = try MainWindowController(appearance: appearance) { choice in
+        switch choice {
+        case .terminalShell:
+          return TerminalApplet(engine: engine)
+
+        case .terminalProgram:
+          throw AppletChoiceError("Program mode is not available yet.")
+        }
+      }
+    } catch {
+      logger.error("the first pane did not start: \(String(describing: error))")
+      NSApp.terminate(nil)
+      return
     }
+
     mainWindowController = controller
 
     let sync = TerminalPaletteSync(engine: engine) { [weak self] error in
