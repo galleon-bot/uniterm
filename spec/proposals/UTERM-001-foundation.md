@@ -1,13 +1,26 @@
 # UTERM-001: Foundation
 
-**Status:** draft
+**Status:** accepted
 **Created:** 2026-10-31
 **Updated:** 2026-10-31
+
+## Dependencies
+
+- None
 
 ## Impacts
 
 - UTERM-002, UTERM-011 — "Regions are separate from position": the palette and widget bar join as regions
 - UTERM-003, UTERM-004 — "Panes and applets": scripts and control address panes and applets
+- UTERM-003 — "Pane tree shape": the host API must address panes by stable ID, never by tree path, since
+  normalization rewrites paths
+- UTERM-004 — "Pane tree shape": normalization may merge a program's requested subtree into its parent, and a leaf pane
+  has nothing beneath it. Trust should anchor on an explicit owner mark that a layout request creates, not on tree shape.
+  A grouping node kind may define its own merge rule
+- UTERM-004 — "What layout persistence restores": its "Saved layouts" question would ride on the per-applet description
+  version, or bump the schema version for a new node kind
+- UTERM-003, UTERM-004 — "Status message model": a posted message records its source, which scripts and exec stderr
+  must supply
 - UTERM-005 through UTERM-010 — "Panes and applets": every applet implements the applet contract
 - UTERM-012 — "Terminal surface behind an internal protocol": blocks need shell integration through that boundary
 
@@ -37,8 +50,8 @@ uniterm is a Swift app for macOS 26 and later. AppKit owns the windows, the pane
 allowed for small leaf views, such as status bar segments.
 
 Rationale: a nested split tree that hosts AppKit views is easier in AppKit. Those views include a Metal terminal
-surface, and later a web view, a QuickLook view, and a map. Targeting macOS 26 allows the newest AppKit APIs. It also
-matches the Swift 6.2 toolchain that the community libghostty packages require.
+surface, and later a web view, a QuickLook view, and a map. Targeting macOS 26 allows the newest AppKit APIs. Ghostty's
+macOS build also needs Xcode 26 and the macOS 26 SDK.
 
 ### Window chrome
 
@@ -89,13 +102,295 @@ what they launch and whether new tabs are allowed.
 The terminal applet talks to libghostty through an internal protocol owned by uniterm. No libghostty type appears
 outside that boundary.
 
-Rationale: libghostty's API is not stable. The boundary limits churn to one module. It also keeps a fallback to
-SwiftTerm possible. See Risks.
+The protocol sits at the terminal-session level: spawn, input, resize, and events for title, working directory,
+prompt marks, notifications, clipboard requests, and exit. It does not sit at the VT level. libghostty's surface spawns
+the child process and owns the pty, so a VT-level protocol could not host it. Amended 2026-10-31; see Decision Log.
+
+Rationale: libghostty's API is not stable. `ghostty.h` calls itself Ghostty's internal embedder API, built for its own
+macOS app, and points external embedders to libghostty-vt. The boundary limits churn to one module. It also keeps a
+fallback to SwiftTerm possible. See Risks.
 
 ### Theming
 
-The default theme is Catppuccin Latte. A dark Catppuccin theme ships too. Colors are defined as named tokens in one
-place. Applets and regions read the tokens, never raw colors.
+The light theme is Catppuccin Latte. A dark Catppuccin theme ships too. Colors are defined as named tokens in one
+place. Applets and regions read the tokens, never raw colors. Amended 2026-10-31; see Decision Log.
+
+### Dark theme flavor and switching
+
+Original questions: which dark flavor, Frappé, Macchiato, or Mocha; and whether the theme follows the system
+appearance, an explicit setting, or both.
+
+Decision: the dark theme is Catppuccin Mocha. An appearance setting offers System, Light (Latte), and Dark (Mocha). It
+defaults to System. The window chrome, every region, and the terminal palette all follow it, and switch live.
+
+Rationale: following the system with an override is the macOS convention. An explicit-only setting keeps Latte when the
+system turns dark at night. System-only gives no way to choose dark inside uniterm. Latte and Mocha are Catppuccin's
+usual pair, and Mocha has the most contrast. Offering every dark flavor is a knob no user has asked for.
+
+### Build system
+
+Original question: SwiftPM plus a bundling script, a checked-in Xcode project, or a generated Xcode project from
+XcodeGen or Tuist?
+
+Decision: a checked-in Xcode project with synchronized folders, with feature code in a local SwiftPM package.
+
+- The `.xcodeproj` holds only the app target and a UI test target. Synchronized folder groups mean adding a source file
+  does not edit `project.pbxproj`.
+- Feature code lives in a local package. Its targets are separate modules. The terminal surface module is the only
+  target that depends on GhosttyKit.
+- Signing and entitlements are project settings.
+- `make build` and `make test` wrap `xcodebuild` and `swift test`.
+
+Rationale: it meets the Swift standard's rule that signing lives in project settings, not the Makefile. It has a target
+for `XCUIApplication` UI tests, which window drag and divider drag want. Module boundaries are `Package.swift` text,
+easy to review. A SwiftPM-plus-script build signs in the Makefile and has no UI test target. XcodeGen and Tuist add a
+tool whose Xcode 26 support is unconfirmed. They also discard settings changed in the Xcode UI on the next regeneration.
+They solve `project.pbxproj` churn that synchronized folders already avoid.
+
+### What undo close restores
+
+Original question: keep the closed applet alive for a grace period, restore the layout and relaunch, or let each applet
+define it? Also, how many closes undo remembers, and for how long.
+
+Decision: two tiers, defined by the applet contract.
+
+- The contract has a detach and reattach pair, and a restorable description.
+- A closed pane's applet is detached and kept alive, hidden, for a short grace period. A window segment shows it. Undo
+  within the grace period reattaches the exact session.
+- After the grace period, the applet is torn down. Only its description stays, on a per-window undo stack of the last N
+  closes. Undo then reopens the pane from the description.
+- A description is inert state, never a launch recipe. A terminal in shell mode relaunches a fresh shell in each tab's
+  working directory. A terminal in program mode reopens showing its command and a Run action. It does not run the
+  command until the user asks.
+- The undo stack belongs to its window and closes with it. Closing the last pane closes the window. Undoing a closed
+  window is out of scope.
+
+Rationale: the grace tier gives an exact undo for an accidental close, including an unsaved editor buffer. The
+description tier still restores the layout and working directories after the grace period. Persistence (M8) reuses the
+same description, so this is not built for undo alone. An inert description keeps undo, and later relaunch, from
+running `./deploy.sh` or a migration a second time.
+
+### How to get libghostty
+
+Original question: use a community prebuilt package, vendor Ghostty and build the xcframework from source, or wait for
+the first-party Swift package?
+
+Decision: build in-tree from pinned source, with a kept dependency cache.
+
+- The repo pins Ghostty by commit hash.
+- `make build` builds GhosttyKit.xcframework and Ghostty's terminfo and shell-integration resources. It links the
+  xcframework as a local SwiftPM binary target.
+- The built artifact lives in a git-ignored cache. The cache key is the Ghostty commit, the Zig version, and the Xcode
+  and SDK versions.
+- A manifest in the artifact records the same values. The build fails when the manifest disagrees with the pin or the
+  toolchain.
+- The script fetches Ghostty's Zig dependencies into a cache that uniterm keeps. It does not rely on Zig's global
+  cache. A cold rebuild of the current pin then works without the upstream URLs.
+- The resources ship inside the `.app`, where libghostty finds them.
+- No patch mechanism exists until the first patch does.
+
+Zig and Xcode 26 are needed only on a machine with a cold cache: the first build, and every upgrade.
+
+Rationale: every byte traces to a pinned commit. It is the same GhosttyKit path that Ghostty's own app uses. It ships
+terminfo and shell integration, which TERM, OSC 7 working directories, and UTERM-012's OSC 133 blocks need. A pin cannot
+stop resolving later.
+
+- `loeschg/GhosttyKit` ships a binary that cannot be traced to its source, into the process that sees every keystroke.
+  It also ships no resources.
+- `rijieli/libghostty-spm` has withdrawn 15 tags, so an exact pin can stop resolving.
+- Hosting a prebuilt artifact needs a repository host, storage, credentials, and CI. The project has none of these, and
+  no one else would consume the artifact.
+- The first-party package has no ship date. It targets libghostty-vt plus a Swift renderer, a different API layer.
+
+The fallback in every case is SwiftTerm, behind the same internal protocol.
+
+### Pane tree shape
+
+Original question: binary tree, where each split node has two children and one ratio, or N-ary tree, where each split
+node has many children along one axis with a ratio per child?
+
+Decision: a normalized N-ary tree with stable node IDs.
+
+- A split node has two or more children along one axis. Each child has a weight.
+- Splitting a pane along its parent's axis inserts a sibling. Any number of rows or columns is one node.
+- A split node left with one child collapses into its parent. A child with the same axis as its parent merges into the
+  parent.
+- A divider drag moves space between the two adjacent children only. Closing a pane gives its space to its adjacent
+  siblings.
+- Every node has a stable ID. A node that survives a split, merge, or collapse keeps its ID. A node that is removed,
+  such as a split that collapses, has its ID retired and never reused. A pane's ID never changes while the pane
+  exists. Nothing may address a node by its path in the tree, since normalization rewrites paths.
+- Merge and collapse rules belong to the node kind. This proposal has two kinds, split and pane, and both normalize. A
+  later kind may define its own rule.
+
+Rationale: in a binary tree, `[[A | B] | C]` and `[A | [B | C]]` look the same. Closing B gives all its space to A in
+the first and to C in the second. The user cannot predict which. An unnormalized N-ary tree has the same flaw after
+closes, since leftover nesting changes how a divider drag spreads space. Normalization makes behavior depend on what the
+user sees, not on split history. Stable IDs are needed now by undo (M7) and persistence (M8).
+
+Dissent left standing: the critic ranked a variant that also builds UTERM-004's owner-tagged group kind now. That is a
+scope addition with no caller in this proposal. The per-kind rule above leaves room for it.
+
+### Naming
+
+Original question: "pane", "applet", and "region" are working names. Better names may still be found.
+
+Decision: keep pane, applet, and region. The rest of the vocabulary is:
+
+- **Split**: a node in the pane tree that holds two or more children along one axis
+- **Tab**: one of an applet's switchable sessions, such as a terminal tty
+- **Segment**: one slot of the status bar
+- **Message**: one posted status bar entry
+
+UTERM-004 names its own grouping concept.
+
+Rationale: none of these names clash with Swift, AppKit, SwiftUI, or libghostty types. "Area" means width times height
+in layout code. "Tool" overlaps with the toolbar and with script commands. "App" shadows SwiftUI's `App` protocol.
+
+### Status message model
+
+Original questions: whether messages carry a priority, a level, or both; how long a message stays; who owns a segment.
+
+Decision:
+
+- A message carries a level: info, warning, or error. The level sets its style. There is no priority.
+- A message records its source: a pane, an applet, a script, or uniterm itself. The bar and the history show it.
+- Each message shows for at least a minimum dwell time, then the next queued one replaces it.
+- When the backlog grows, the bar skips to the newest message. Skipped messages stay in history.
+- Errors are never skipped. A backlog of errors collapses to the newest error plus a count.
+- An error stays until a newer message replaces it or the user dismisses it.
+- A window segment shows an unseen-error indicator until the user opens the history.
+- The window owns its segments, such as the message area. The focused pane's applet fills a set of applet segments,
+  such as mode or line:col. They change when focus changes.
+
+Rationale: a plain FIFO cannot show the write-up's "mode", "line:col", or "ok/error". It also falls minutes behind
+when an exec pane floods stderr. A priority field would be set to the maximum by every untrusted poster, so it buys
+nothing over the level. Segments claimed by unfocused applets overflow a one-line bar and show line:col for a pane
+that does not have focus. Recording the source keeps an untrusted program from posting text that passes for uniterm's
+own, and tells the user which pane failed.
+
+### Where settings live
+
+Original question: settings already exist, such as the status bar dock position, the appearance setting, and later
+UTERM-002's palette mode and position. Where are they stored, how does the user change them, and how do they relate to
+the layout file?
+
+Decision: UserDefaults, changed in a Settings window.
+
+- Global settings live in the app's UserDefaults domain.
+- A standard Settings window opens with Cmd-,. It is an AppKit window. SwiftUI forms may sit inside it as leaf views.
+- The status bar dock position is one global setting. Changing it moves the status bar in every open window at once.
+- A value written from outside, such as with `defaults write`, applies live. An invalid value falls back to the default
+  and posts a warning to the status bar.
+- Settings never live in the layout file.
+
+Rationale: UserDefaults is the macOS convention, with typed values, atomic writes, and one writer. A text config file
+needs a parser that keeps the user's comments when the app rewrites it. It also has two writers, the app and the
+user's editor. A shared settings-and-layout file would lose every setting whenever layout recovery resets the file. A
+per-window dock position makes the Settings value a default for new windows only, so changing it would appear to do
+nothing. No one has asked for per-window docking.
+
+Leaves undone: settings are not a commented dotfile to keep in version control. Moving them to another machine means
+`defaults export` and `defaults import`.
+
+### Whether uniterm reads the user's Ghostty config
+
+Original question: if the terminal surface loads `~/.config/ghostty`, its `theme` and `palette` lines override
+uniterm's tokens. Its font and keybinding lines would also apply. Should uniterm read it?
+
+Decision: read none. uniterm builds the libghostty config entirely from its own settings and tokens.
+
+- The user's Ghostty files have no effect.
+- uniterm clears Ghostty's built-in keybindings. Ghostty binds Cmd-Z, Cmd-W, Cmd-T, Cmd-D, and Cmd-Q by default, even
+  with no file loaded. Left in place, they would catch uniterm's undo and close before uniterm sees them.
+- uniterm owns every key binding. Terminal-local actions, such as copy, paste, select all, font zoom, and clear screen,
+  are uniterm bindings that call into the surface through the terminal surface protocol.
+- libghostty loads config only from a file. uniterm writes a generated file, private to the user, in its own directory.
+  It escapes or rejects every value it writes.
+
+Rationale: under this option every settled decision holds by construction. Reading Ghostty's file, or a uniterm-owned
+file in Ghostty syntax, lets keys such as `term`, `shell-integration`, `command`, and `working-directory` break M2's
+checks, OSC 7 and OSC 133, and the inert undo description. A deny list can never be complete across Ghostty versions.
+Sharing Ghostty.app's file is also a contract between two apps that upgrade on their own schedules.
+
+Leaves undone: Ghostty options that uniterm does not expose are out of reach. Fonts use libghostty's defaults. A font
+or option such as `macos-option-as-alt` becomes a uniterm setting when a user asks for it.
+
+Dissent left standing: the critic suggested exposing font family and size as settings now. That is a scope addition
+with no stated need. Font zoom covers size within a session.
+
+### What layout persistence restores, and in what format
+
+Original questions: what is restored, given that windows, frames, the pane tree, applet types, and region docking are
+the minimum, with terminal working directories, tab titles, and scrollback as candidates; the file format and its
+location; and how it is versioned.
+
+Decision: a uniterm-owned JSON file that holds descriptions only.
+
+- **What is restored**: every window's frame and screen, its pane tree with stable node IDs, axes, and weights, each
+  pane's applet type, and that applet's restorable description. The terminal's description already carries each tab's
+  working directory.
+- **What is not restored**: region docking, which is a global setting. Tab titles, since a fresh shell resets them.
+  Scrollback. Hidden grace-tier panes and the undo stack.
+- **Location and writes**: one file in `~/Library/Application Support/uniterm/`. It is written atomically, as a temp
+  file then a rename, and is never readable by other users. It is saved after a short debounce on every layout change,
+  and synchronously on quit.
+- **Versioning**: a top-level integer schema version. Each applet description carries its own per-applet-type
+  version. A reader upgrades older schema versions step by step. A new node kind bumps the schema version.
+- **Recovery**: a newer or unreadable schema moves the file aside and starts a default layout. A single description
+  that is unknown, corrupt, or newer becomes a placeholder pane that keeps its raw description and writes it back
+  unchanged.
+- **Restore policy**: launch restores the saved layout every time. It does not follow the macOS "Close windows when
+  quitting an application" setting.
+- **Crash-loop guard**: a launch marker is set before restore and cleared once launch succeeds. After a bounded number
+  of crashed launches in a row, the file is moved aside and a default layout starts.
+- **Single writer**: only one running instance writes the file. A second instance never overwrites the first one's
+  layout.
+
+Version skew: the file is stored data shared by versions of the one app.
+
+- Old file, new app: the step-by-step upgrade reads it.
+- New file, old app: the old app moves the file aside and starts a default layout. A later upgrade reads the
+  downgraded layout, not the kept-aside file. Left undone: a downgrade-then-upgrade round trip loses the newer layout.
+  This is accepted. The kept-aside file stays on disk for manual recovery.
+
+Rationale: the file meets the settled mitigation of a version field and a kept-aside file. AppKit state restoration
+cannot keep a file aside, silently discards an archive that fails to decode, and follows a system setting that may
+restore nothing after Cmd-Q. Saving on quit only loses the layout on a crash or force quit, the moment users most want
+it back. A property list is as correct, but harder to read and diff. Scrollback is a scope addition. It would write
+terminal output, which often holds secrets, to disk. Replaying it would also open an escape-sequence injection path.
+
+### Guarding a close that would kill running processes
+
+Original question: closing the last pane closes the window, and undoing a closed window is out of scope. So a
+single-pane window running vim with an unsaved buffer dies on Cmd-W, with no undo. M7 also mentions a running-process
+check on quit that no decision defines.
+
+Decision: confirm wherever undo cannot restore the session. Amended 2026-10-31; see Decision Log.
+
+- Closing a window, including by closing its last pane, asks first when an affected terminal tab is running something.
+  The affected tabs include the window's hidden grace-tier panes.
+- Quitting asks under the same rule, across every window.
+- Closing a single terminal tab asks when that tab is running something. Tab closes are not undoable.
+- Closing a pane in a window that stays open does not ask, since the grace tier can undo it. When no grace slot is
+  free for a pane that is running something, the close asks instead.
+- Closing an applet's last tab is a pane close, and follows the pane rule.
+- "Running something" is libghostty's `needs_confirm_quit`, reached through the terminal surface protocol. It is true
+  unless the cursor sits at an idle shell prompt, which shell integration marks with OSC 133.
+- The dialog lists the affected panes and tabs, by title, and by command for program mode.
+
+Rationale: the guard sits on every close that destroys a running session with no exact undo available, and nowhere
+else. Asking on
+every close makes the user confirm a reversible action and trains them to dismiss the dialog. Leaving an empty window
+after the last pane breaks the convention that Terminal, Ghostty, and iTerm2 share, and adds a zero-pane tree state.
+Keeping closed windows alive narrows the out-of-scope statement on window undo, and a hidden window has no visible
+indicator.
+
+Leaves undone: a closed pane whose grace period runs out is hung up without a dialog. So an accidental close that goes
+unnoticed, such as while the user works in another window, loses a program that does not save on SIGHUP. This is
+accepted, since a dialog on every pane close would make the user confirm a reversible action. A background job started with `&` at an idle prompt
+reports nothing, so it is hung up without a dialog. Ghostty behaves the same. A prompt without OSC 133 marks, such as a remote shell over ssh, always asks. That
+fails safe.
 
 ### Scope
 
@@ -117,85 +412,38 @@ Out of scope, for later proposals:
 
 ## Design Decisions (Open)
 
-### How to get libghostty
-
-Options:
-
-- **A community prebuilt package**, such as `loeschg/GhosttyKit` or `rijieli/libghostty-spm`. Fastest start. It depends
-  on a third party tracking Ghostty. `rijieli/libghostty-spm` has withdrawn tagged releases before.
-- **Vendor Ghostty and build the xcframework from source.** Full control over the version. It needs a Zig toolchain in
-  the build.
-- **Wait for the first-party Swift package** that Mitchell Hashimoto announced in July 2026. It was not confirmed shipped
-  as of 2026-10-31.
-
-The fallback in every case is SwiftTerm, behind the same internal protocol.
-
-### Build system
-
-Options:
-
-- **SwiftPM plus a script** that assembles the `.app` bundle. Plain text, easy to diff. Bundling, signing, and
-  entitlements need custom work.
-- **An Xcode project.** Native app bundling and signing. The project file is hard to review and merge.
-- **A generated Xcode project**, from XcodeGen or Tuist. Reviewable spec files, with Xcode's bundling. It adds a tool.
-
-### Pane tree shape
-
-Options:
-
-- **Binary tree.** Each split node has exactly two children and one ratio. Simple to reason about. Three equal columns
-  need nested splits.
-- **N-ary tree.** Each split node has many children along one axis, with a ratio per child. Matches how users think of
-  rows and columns. Resizing and removing children is more complex.
-
-### What undo close restores
-
-A terminal's process dies when its pane closes. Options:
-
-- **Keep the closed applet alive, hidden, for a grace period.** Undo returns the exact session. Closed processes keep
-  running briefly, which may surprise the user.
-- **Restore the layout and relaunch.** Undo reopens the pane, with the shell in the same working directory. The process
-  and scrollback are lost.
-- **Applet-defined.** Each applet says what it can restore. The terminal picks one of the above.
-
-Also open: how many closes undo remembers, and for how long.
-
-### What layout persistence restores, and in what format
-
-- What is restored: windows, frames, the pane tree, applet types, and region docking are the minimum. Terminal working
-  directories, tab titles, and scrollback are candidates.
-- The file format and its location, and how it is versioned.
-
-### Dark theme flavor and switching
-
-- Which dark flavor: Frappé, Macchiato, or Mocha.
-- Whether the theme follows the system appearance, uses an explicit setting, or both.
-
-### Status message model
-
-- Whether messages carry a priority, a level such as info or error, or both.
-- How long a message stays before the next one in the queue replaces it.
-- Who owns a segment: fixed segments per window, segments an applet claims, or both.
-
-### Naming
-
-"Pane", "applet", and "region" are working names. They avoid clashes with Swift and AppKit names such as `View`. Better
-names may still be found. Settle them before M3, since type names follow from them.
-
 ## Risks
 
 - **libghostty's API changes between releases** — likelihood: high, impact: medium.
-  Mitigation: pin an exact version. Keep every libghostty call behind the internal terminal surface protocol. Keep
-  SwiftTerm as a tested fallback path if an upgrade becomes too costly.
+  Mitigation: pin an exact Ghostty commit. Keep every libghostty call behind the internal terminal surface protocol,
+  which sits at the session level. That keeps a SwiftTerm fallback possible if an upgrade becomes too costly. No
+  milestone builds or tests the fallback.
+- **The embedder API is Ghostty's internal one and may be withdrawn or restricted** — likelihood: low, impact: high.
+  `ghostty.h` calls itself built for Ghostty's own macOS app, and points external embedders to libghostty-vt.
+  Mitigation: the session-level protocol lets SwiftTerm, or the first-party package once it ships, replace libghostty
+  in one module. Ghostty's own app depends on the same API, which makes sudden removal unlikely.
+- **An Xcode update leaves the pinned Ghostty commit unbuildable** — likelihood: medium, impact: medium.
+  Zig and new Apple SDKs have broken each other before, and the build refuses an artifact made with another Xcode.
+  Mitigation: the repo records the Xcode version the pin was built with. `make build` names that version when the
+  toolchain differs. Xcode upgrades go with a deliberate Ghostty pin bump, not an App Store update.
+- **`TERM=xterm-ghostty` breaks programs on ssh hosts that lack its terminfo** — likelihood: high, impact: medium.
+  Mitigation: the generated Ghostty config enables shell integration's `ssh-env` feature. It sets a fallback TERM for
+  ssh sessions started from a shell. Program mode bypasses the shell wrapper, so a program-mode `ssh` needs its own
+  fallback. M2 and M5 check both.
 - **The applet contract becomes the base for every later applet** — likelihood: medium, impact: high.
   Mitigation: the contract is internal, not published. Exercise it with the terminal in M2 and M5 before other applets
   build on it. Expect to revise it when the second applet arrives.
 - **The persisted layout format is a stored format that later versions must read** — likelihood: high, impact: medium.
-  Mitigation: give the file a version field from the first release. On a version it cannot read, uniterm starts with a
-  default layout and keeps the old file aside.
+  Mitigation: give the file a version field from the first release. Upgrade older versions step by step. On a version
+  it cannot read, or after repeated crashed launches, uniterm starts with a default layout and keeps the old file
+  aside. Accepted: a downgrade-then-upgrade round trip loses the newer layout. The kept-aside file stays for manual
+  recovery.
 - **Undo close keeps live processes the user thinks are gone** — likelihood: medium, impact: medium.
-  Mitigation: settled with the undo option above. If processes are kept alive, the grace period is short and shown in
-  the status bar.
+  Mitigation: the grace period is short and shown in a window segment that stays visible during a message flood. The
+  segment offers an action that hangs the processes up at once. The number of hidden panes is bounded.
+- **The layout file stores working directories and program-mode commands** — likelihood: medium, impact: low.
+  A command line can carry a secret, such as `mysql -pSECRET`. The file also reaches Time Machine backups.
+  Accepted: the file is never readable by other users. The exposure matches the shell's own history file.
 - **Full-size content conflicts with title bar dragging and the traffic lights** — likelihood: medium, impact: low.
   Mitigation: M1 checks that the window drags, and that the traffic lights stay clickable and unobscured.
 - **The proposal is large and may stall before a usable app exists** — likelihood: medium, impact: medium.
@@ -213,6 +461,18 @@ names may still be found. Settle them before M3, since type names follow from th
 - The window drags by its top edge, and content does not cover the traffic lights
 - Catppuccin Latte and the dark theme are defined as named color tokens in one place
 - `make test` runs and passes
+- The Ghostty build fails unless the Zig version matches the pinned version exactly
+- The libghostty manifest records the Xcode and SDK versions, and the build fails when they differ
+- An interrupted or concurrent Ghostty build never leaves a partial artifact under a valid cache key
+- A cold rebuild of the pinned Ghostty commit succeeds with the network off, using the kept dependency cache
+- On a cold checkout, the xcframework path is a fixed location that `make build` fills. Opening the project before
+  that shows an error that names `make build`
+- A rebuilt GhosttyKit artifact is picked up without a manual cache clear
+- `make test` runs both `swift test` and `xcodebuild test`. Without a GUI session or Accessibility permission, it
+  reports that instead of hanging
+- The package and the app target use the same Swift language mode
+- Changing the appearance setting or the system appearance updates window chrome without a relaunch
+- Cmd-, opens an AppKit Settings window that changes the appearance setting
 
 ### M2: Terminal applet in a single pane
 
@@ -221,8 +481,27 @@ names may still be found. Settle them before M3, since type names follow from th
 - The window's content area hosts one pane running the terminal applet
 - The terminal starts the user's default login shell and accepts keyboard input
 - The terminal resizes with the window, and the shell sees the new size
-- No libghostty type is visible outside the terminal surface module
+- No libghostty type is visible outside the terminal surface module. The module uses `internal import GhosttyKit`, and
+  `make build` fails when another module imports GhosttyKit
+- Ghostty's terminfo and shell-integration resources sit under `Contents/Resources`, where libghostty finds them
+- Changing the appearance updates the palette of every running terminal surface
+- With the terminal focused, Cmd-Z, Cmd-W, Cmd-T, Cmd-D, and Cmd-Q reach uniterm, not Ghostty's built-in bindings
+- Copy, paste, select all, font zoom, and clear screen work in the terminal through uniterm's bindings
+- A setting value that contains a newline or other unsafe character cannot add lines to the generated Ghostty config
+- The generated Ghostty config is written atomically and is separate for each running instance
+- An OSC 52 clipboard read is never answered without the user's confirmation
+- An OSC 9 or OSC 777 notification posts to the status bar, with the pane as its source
+- App Sandbox is off, and the shell can read and write `$HOME`
+- The terminal surface protocol carries the running-state query, terminal actions, live palette updates, focus, and
+  the hosted view, with no libghostty type
+- Through the terminal surface protocol, "running something" is false at an idle prompt and true while vim runs
+- The generated Ghostty config never sets `confirm-close-surface` to false
+- An ssh session to a host without the `xterm-ghostty` terminfo entry gets a working fallback TERM
+- `make build` names the recorded Xcode version when the installed one differs
 - When the shell exits, the pane closes
+- In the launched app, `$TERM` is `xterm-ghostty`, and `infocmp` finds it in the bundled terminfo
+- Shell integration emits OSC 133 prompt marks and OSC 7 working directories through the terminal surface protocol
+- The app carries the license notices for Ghostty and the libraries it bundles
 
 ### M3: Pane tree
 
@@ -232,8 +511,11 @@ names may still be found. Settle them before M3, since type names follow from th
 - Dragging a divider resizes the panes on either side
 - A split that would push a pane below its minimum size is refused
 - Keyboard focus moves between panes, and the focused pane is visible
-- Opening a new pane asks which applet to start
+- Opening a new pane asks which applet to start, and offers program mode with a command
 - Closing a pane closes its applet and gives its space to its neighbors
+- When a split merges into its parent, each child's weight is scaled by the merged split's weight, so no pane changes
+  size
+- The window's minimum size follows from the tree, so shrinking the window never pushes a pane below its minimum
 
 ### M4: Status bar region
 
@@ -241,9 +523,17 @@ names may still be found. Settle them before M3, since type names follow from th
 
 - Each window has a status bar that docks at the top or the bottom
 - Changing the dock position does not change what the status bar shows
+- A top-docked status bar does not sit under the traffic lights or break dragging by the top edge
+- A fallback for an unknown stored setting value is never written back over that value
+- An invalid dock position written with `defaults write` falls back to the default and posts a warning
 - An applet can post a message to its window's status bar, and messages queue
 - The status bar shows segments with an icon or one line of styled text
 - The status bar expands to show the history of messages
+- An error is still shown after a burst of info messages arrives within its dwell time
+- Info messages clear back to idle after a timeout once the queue drains
+- The history is capped, and the oldest entries drop first
+- Applet segments keep the last focused pane's content while focus is in another region
+- Messages still queued from a closed pane leave the bar but stay in history
 
 ### M5: Terminal tabs and program mode
 
@@ -254,6 +544,12 @@ names may still be found. Settle them before M3, since type names follow from th
 - The tab bar is hidden when the applet has one tab
 - A terminal applet in program mode runs a given executable in one tab, with no new-tab action
 - Closing a pane closes every tab in its applet
+- Cmd-W in an applet with several tabs closes the current tab only
+- Closing a tab that is running something asks first. Closing a tab at an idle prompt does not ask
+- Closing an applet's last tab follows the pane rule: no dialog in a window that stays open, and a dialog when it
+  would close the window
+- A program-mode `ssh`, by name or full path, to a host without the `xterm-ghostty` terminfo entry gets a working
+  TERM. Other routes, such as `mosh` or a wrapper script, are not covered
 
 ### M6: Multiple windows
 
@@ -262,6 +558,7 @@ names may still be found. Settle them before M3, since type names follow from th
 - The user can open more than one window
 - Each window has its own pane tree and its own status bar
 - A status message posted in one window does not appear in another
+- Changing the dock position in Settings moves the status bar in every open window at once
 
 ### M7: Undo close pane
 
@@ -270,14 +567,59 @@ names may still be found. Settle them before M3, since type names follow from th
 - After closing a pane, undo reopens it in its former place in the tree
 - The restored terminal behaves as the settled undo decision says
 - Undo behaves as settled when the closed pane's neighbors have since changed
+- Undo places the pane by a neighbor's stable ID, the axis, the side, and the weight. When that neighbor is gone, undo
+  falls back to a defined placement
+- The grace period shows in a window segment that stays visible during a message flood
+- The grace segment offers an action that hangs up the hidden processes at once
+- Cmd-Z in a focused editable text control undoes the edit, not a pane close
+- A hidden pane whose processes all exit during the grace period drops to its description
+- Closing the window or quitting during the grace period hangs up the hidden processes. Quit counts them in its
+  running-process check
+- Closing a window that has a hidden pane running something asks first
+- Closing a window or quitting with vim running in any tab asks first, and the dialog names the affected tabs
+- Closing a pane in a window that stays open asks only when no grace slot is free and the pane is running something
+- When slots are full, an idle hidden pane drops to its description to free a slot before any dialog is shown
+- A multi-tab pane counts as running something when any of its tabs is
+- When the last visible pane closes and a hidden pane is running something, the window-close dialog appears. Cancel
+  reattaches the hidden pane
+- A pane reattached within the grace period keeps its ID. A pane reopened from its description gets a new ID
+- The number of panes kept alive at once is bounded
+- A pane that closed because its shell exited adds no keep-alive entry
+- A shell relaunched from a description starts in its OSC 7 directory only when that path is local and still exists.
+  Otherwise it starts in the tab's starting directory, then in the home directory
+- A program-mode pane restored from its description shows its command and a Run action, and runs nothing until asked
 
 ### M8: Layout persistence
 
 **Status:** NOT STARTED
 
-- Quitting and relaunching restores every window's frame, pane tree, applet types, and region docking
+- Quitting and relaunching restores every window's frame, pane tree, applet types, and applet descriptions
 - The saved file carries a version field
 - A saved file with an unreadable version leads to a default layout, and the old file is kept aside
+- Layout restores after Cmd-Q whatever the macOS "Close windows when quitting" setting says
+- A crash during restore, repeated past the bound, leads to a default layout with the old file kept aside
+- A second running instance never overwrites the first instance's layout
+- The saved file and every temp file are never readable by other users
+- Changing the layout and quitting at once still restores the change
+- A window whose saved screen is gone opens fully on a visible screen
+- A corrupt or newer description becomes a placeholder pane, and its raw bytes are written back unchanged
+- Restored node IDs never collide with IDs made after restore, and IDs retired before quit are never reissued
+- Repeated keep-asides do not overwrite each other, and the number kept is bounded
+- Relaunched shells follow M7's working-directory rule, and program-mode panes run nothing
+- AppKit window restoration never opens a second copy of a restored window
+- A saved layout with zero windows opens one default window
+- A restored tree whose minimum size exceeds the visible screen still opens usable
+
+### M9: User visual check
+
+**Status:** NOT STARTED
+
+The proposal ends with the user looking at the finished app.
+
+- The user reviews the font, the font size, and the colors in both Latte and Mocha, and the result is recorded in the
+  As built block
+- The user reviews the window chrome, the status bar at the top and at the bottom, and a nested pane layout, and the
+  result is recorded in the As built block
 
 ## Decision Log
 
@@ -285,8 +627,77 @@ names may still be found. Settle them before M3, since type names follow from th
   terminal.
 - 2026-10-31: Set macOS 26 as the minimum version.
 - 2026-10-31: Put multiple windows, terminal tabs, undo close, and layout persistence in this proposal's scope.
+- 2026-10-31: Review start: 8 milestones, 9 settled decisions, 6 risks, 0 live-after lines or row gates; 6
+  out-of-scope items (palette, widget bar, Janet, control and trust, shell blocks, other applets); full review of the
+  8 open questions, autonomous mode, at commit 03e40bc.
+- 2026-10-31: libghostty is built in-tree from a pinned Ghostty commit, with a kept Zig dependency cache and a
+  manifest check. Converged in 2 passes. (autonomous)
+- 2026-10-31: Restated the Platform rationale's tie to Swift 6.2 community packages as Ghostty's Xcode 26 requirement,
+  since the prebuilt packages were rejected. (autonomous)
+- 2026-10-31: Pane tree is a normalized N-ary tree with stable node IDs and per-kind merge rules. Converged in 1 pass.
+  (autonomous)
+- 2026-10-31: Kept the names pane, applet, and region. Named split, tab, segment, and message. Converged in 1 pass.
+  (autonomous)
+- 2026-10-31: Status messages carry a level and a source, with no priority. Errors are never skipped, and an
+  unseen-error indicator shows. The window and the focused applet own segments. Converged in 1 pass. (autonomous)
+- 2026-10-31: Build with a checked-in Xcode project using synchronized folders, with feature code in a local SwiftPM
+  package. Converged in 1 pass. (autonomous)
+- 2026-10-31: Undo close has two tiers: a hidden live session for a short grace period, then an inert description on a
+  per-window stack. Program mode never re-runs its command on undo. Converged in 1 pass. (autonomous)
+- 2026-10-31: The dark theme is Mocha. An appearance setting offers System, Light, and Dark, and defaults to System.
+  Converged in 1 pass. (autonomous)
+- 2026-10-31: Amended Theming. It said "The default theme is Catppuccin Latte." It now says Latte is the light theme,
+  since the appearance setting defaults to System. (autonomous)
+- 2026-10-31: Added two open questions found in round 2's critique: where settings live, and whether uniterm reads the
+  user's Ghostty config. (autonomous)
+- 2026-10-31: Settings live in UserDefaults and change in an AppKit Settings window. The dock position is one global
+  setting. Converged in 1 pass. (autonomous)
+- 2026-10-31: uniterm reads no Ghostty config. It clears Ghostty's built-in keybindings and owns every key binding.
+  Converged in 1 pass. (autonomous)
+- 2026-10-31: Layout persists to a uniterm-owned JSON file of descriptions only. It always restores, and it has a
+  crash-loop guard, a single writer, and a stated skew analysis. No scrollback or tab titles. Converged in 1 pass.
+  (autonomous)
+- 2026-10-31: Coherence review: added the open question on guarding closes that kill running processes. Restated the
+  pane-tree stable-ID rule, since a removed split's ID cannot survive. Amended "Terminal surface behind an internal
+  protocol": the protocol sits at the session level, since libghostty owns the pty, and `ghostty.h` is Ghostty's
+  internal embedder API. Before, it did not say at what level the protocol sits. Added constraint notes to UTERM-003's
+  pane-ID question and a "What anchors trust" open question to UTERM-004. Routed the other findings to milestone
+  checks. (autonomous)
+- 2026-10-31: Closes ask first wherever undo cannot restore the session: window close, quit, and tab close, counting
+  hidden grace-tier panes. Pane closes do not ask. Converged in 1 pass. (autonomous)
+- 2026-10-31: Amended the close guard after the re-check. It said pane closes in a window that stays open never ask.
+  Now they ask when no grace slot is free and the pane is running something, since the grace tier is bounded.
+  Closing an applet's last tab follows the pane rule. Accepted that an unnoticed grace expiry hangs up without a
+  dialog. (autonomous)
+- 2026-10-31: Risk review: the libghostty churn risk no longer claims a tested SwiftTerm fallback. Added risks for the
+  internal embedder API (low, high, mitigated), Xcode updates (medium, medium, mitigated), `xterm-ghostty` over ssh
+  (high, medium, mitigated with `ssh-env`), and stored commands (medium, low, accepted). Updated the layout-format and
+  undo risks to match the settled decisions. Accepted the downgrade-then-upgrade layout loss. (autonomous)
+- 2026-10-31: Amended M8's first check. It said relaunch restores "region docking". It now says applet descriptions,
+  since docking is a global setting and settings never live in the layout file. (autonomous)
+- 2026-10-31: Review gate: kept all. The user kept the close guard, window undo out of scope, no font settings (13pt
+  suits them), and leaving the group node kind to UTERM-004. Added M9, a final visual check by the user. Asked that
+  UTERM-004 define the group node kind.
+- 2026-10-31: ADR candidate (cuts across the system): libghostty is reached only through the session-level terminal
+  surface protocol. Written as ADR-01.
+- 2026-10-31: ADR candidate (cuts across the system): pane tree nodes are addressed by stable ID, and retired IDs are
+  never reused. Written as ADR-02.
+- 2026-10-31: ADR candidate (cuts across the system): restored state never runs a program unasked. Written as ADR-03.
+- 2026-10-31: ADR candidate (cuts across the system): uniterm owns every key binding and its terminal config. Written
+  as ADR-04.
+- 2026-10-31: ADR candidate (hard to reverse): the stored layout stays readable by later versions, and an unreadable
+  file is kept aside. Declined: the user chose not to write it, and its Risks entry guards it.
+- 2026-10-31: Accepted.
+- 2026-10-31: Scheduled as M1-M9 in queue.md.
 
 ## References
+
+- [ADR-01](../adr/ADR-01-libghostty-behind-terminal-surface-protocol.md): libghostty is reached only through the
+  terminal surface protocol
+- [ADR-02](../adr/ADR-02-pane-tree-nodes-have-stable-ids.md): pane tree nodes are addressed by stable ID
+- [ADR-03](../adr/ADR-03-restored-state-never-runs-a-program.md): restored state never runs a program unasked
+- [ADR-04](../adr/ADR-04-uniterm-owns-key-bindings-and-terminal-config.md): uniterm owns every key binding and its
+  terminal config
 
 - Original write-up: `~/projects/private_specs/uniterm/spec/research/original-writeup.md`
 - [Ghostty](https://ghostty.org/docs/about): libghostty is not yet a stable API

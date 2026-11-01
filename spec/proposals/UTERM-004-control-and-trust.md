@@ -55,6 +55,12 @@ A program may control panes only in its own window.
 A trusted program may request a layout for its own subtree. For example, it may ask for three panes holding a slide, a
 set of notes, and a chart.
 
+### Group node kind
+
+This proposal defines a group node kind for UTERM-001's pane tree. A layout request creates a group. The group records
+its owner and never merges into its parent. UTERM-001's pane tree lets a node kind define its own merge rule. Its
+layout file bumps the schema version for a new node kind. The details are part of "What anchors trust" below.
+
 ## Design Decisions (Open)
 
 ### How uniterm knows which pane a program runs in
@@ -80,6 +86,14 @@ Options:
 
 The write-up notes that exec might be a separate dimension from control. Options: one level among three, or a separate
 setting that combines with the others.
+
+### What anchors trust
+
+Raised by the UTERM-001 review on 2026-10-31. The settled "Trust follows the pane tree" reads trust from tree shape.
+UTERM-001 settled a normalized N-ary pane tree. In it, a leaf pane has nothing beneath it. A program's requested
+subtree can also merge into a same-axis parent. And a user split can put new panes under a program's pane. Trust
+likely needs an explicit owner mark that a layout request creates, with a grouping node kind that does not merge. This
+may revise the settled decision.
 
 ### Saved layouts
 
@@ -132,6 +146,7 @@ setting that combines with the others.
 ## Decision Log
 
 - 2026-10-31: Drafted from the original write-up without an interview. The open questions hold everything undecided.
+- 2026-10-31: This proposal defines the group node kind, at the user's request during the UTERM-001 review.
 
 ## References
 
