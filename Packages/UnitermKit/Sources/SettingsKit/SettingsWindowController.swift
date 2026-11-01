@@ -1,0 +1,33 @@
+import AppKit
+import Preferences
+
+/// The Settings window, opened with Cmd-,. It is an AppKit window. SwiftUI forms may join it later
+/// as leaf views.
+@MainActor
+public final class SettingsWindowController: NSWindowController {
+  public init(store: SettingsStore) {
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 420, height: 120),
+      styleMask: [.titled, .closable],
+      backing: .buffered,
+      defer: false)
+    window.title = "Settings"
+    window.isReleasedWhenClosed = false
+    window.setAccessibilityIdentifier("settings-window")
+    window.contentViewController = AppearanceSettingViewController(store: store)
+    window.center()
+
+    super.init(window: window)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  public func present() {
+    NSApp.activate()
+    showWindow(nil)
+    window?.makeKeyAndOrderFront(nil)
+  }
+}

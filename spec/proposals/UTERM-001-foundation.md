@@ -177,7 +177,8 @@ the first-party Swift package?
 
 Decision: build in-tree from pinned source, with a kept dependency cache.
 
-- The repo pins Ghostty by commit hash.
+- The repo pins Ghostty by commit hash, and by a hash over the extracted source tree. The build fails when the tree does
+  not match, so a regenerated tarball cannot change the source unnoticed.
 - `make build` builds GhosttyKit.xcframework and Ghostty's terminfo and shell-integration resources. It links the
   xcframework as a local SwiftPM binary target.
 - The built artifact lives in a git-ignored cache. The cache key is the Ghostty commit, the Zig version, and the Xcode
@@ -188,8 +189,14 @@ Decision: build in-tree from pinned source, with a kept dependency cache.
   cache. A cold rebuild of the current pin then works without the upstream URLs.
 - The resources ship inside the `.app`, where libghostty finds them.
 - No patch mechanism exists until the first patch does.
+- Zig 0.15 cannot link against the macOS 26 SDK, whose libSystem stub lists only arm64e. The build runs Zig against the
+  macOS 15.4 SDK from the Command Line Tools. The pin records it as `ZIG_SDK_VERSION`. Xcode's own tools keep the
+  current SDK.
+- Xcode 26's libtool silently drops the archive members that Zig writes. The build combines the loose objects instead.
+  Both workarounds live in the build script, not in Ghostty's source.
 
-Zig and Xcode 26 are needed only on a machine with a cold cache: the first build, and every upgrade.
+Zig, the Command Line Tools with the macOS 15 SDK, Xcode 26, and its Metal toolchain are needed only on a machine with a
+cold cache: the first build, and every upgrade. Amended 2026-10-31; see Decision Log.
 
 Rationale: every byte traces to a pinned commit. It is the same GhosttyKit path that Ghostty's own app uses. It ships
 terminfo and shell integration, which TERM, OSC 7 working directories, and UTERM-012's OSC 133 blocks need. A pin cannot
@@ -454,7 +461,7 @@ Out of scope, for later proposals:
 
 ### M1: App skeleton and theme tokens
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 - `make build` produces a `.app` bundle that launches on macOS 26
 - The app opens one window with a full-size content view and working traffic lights
@@ -473,6 +480,37 @@ Out of scope, for later proposals:
 - The package and the app target use the same Swift language mode
 - Changing the appearance setting or the system appearance updates window chrome without a relaunch
 - Cmd-, opens an AppKit Settings window that changes the appearance setting
+
+**As built:**
+
+- Pinned Ghostty v1.3.1, commit `332b2aefc6e72d363aa93ab6ecfc86eeeeb5ed28`, built with Zig 0.15.2, Xcode 26.6
+  (17F113), and SDK 26.5. The v1.3.0 fallback was not needed. The build needed two workarounds and the Metal toolchain
+  component. See the 2026-10-31 Decision Log entry on the libghostty build.
+- `make ghostty-offline-check` sets the artifact aside and rebuilds it with the network off, from the kept source and
+  the kept Zig package cache. A control run first shows that Zig cannot fetch a package through the dead proxy. The
+  check only renames the original artifact and restores it on failure or SIGINT. `make ci` runs it.
+- The build lock is a kernel `flock`, so a killed build leaves no stale lock. A `kill -9` in the middle of a build left
+  nothing under the artifact key and one leftover work directory, which the next build removed. A SIGINT in the middle
+  of the offline check restored the original artifact. Bad Zig and Xcode pins fail with a message.
+- A rebuilt artifact is picked up with no cache clear. Rebuilding changed the library bytes, and the next `make build`
+  reprocessed the xcframework and relinked the app without touching DerivedData.
+- The tarball from codeload hashed the same on two downloads, but nothing guarantees it. The pin holds a tree hash
+  instead, and the build fails on a mismatch. The libtool workaround fails when an archive has repeated member names.
+- Xcode ignores hardened runtime for ad hoc signing, so the dev build runs without it. The setting is on for a real
+  signing identity.
+- The app builds against a static `libghostty` through the terminal surface module. The app logs the linked version at
+  launch. The module declares the C++ runtime and the system frameworks the static library needs, since a binary
+  target carries no link settings.
+- The Settings window uses AppKit controls only. No SwiftUI is used yet.
+- The UI tests read a throwaway plist inside the runner's container, so they never write the developer's preferences.
+  An out-of-process `defaults write` cannot be proven by a UI test. The sandboxed runner's write never reaches the
+  unsandboxed app as a change notification, and the runner cannot write the app's real domain. A write from a separate
+  process is proven in `swift test`, against the settings store. The window's reaction to a `defaults write` was checked
+  by hand on a launched binary. That reaction is the one gap in automated coverage.
+- The UI tests ran in a background session on the developer's machine, and `make test` passed there. The report for a
+  missing GUI session or missing Accessibility permission was not exercised.
+- Left to the user: a live change of the system appearance with the setting on System, and opening the project in the
+  Xcode UI on a cold checkout. The cold-checkout error was seen from `xcodebuild`, not from the Xcode UI.
 
 ### M2: Terminal applet in a single pane
 
@@ -689,6 +727,16 @@ The proposal ends with the user looking at the finished app.
   file is kept aside. Declined: the user chose not to write it, and its Risks entry guards it.
 - 2026-10-31: Accepted.
 - 2026-10-31: Scheduled as M1-M9 in queue.md.
+- 2026-10-31: Amended "How to get libghostty". It said Zig and Xcode 26 are the only extra tools on a cold cache. The
+  Ghostty build also needs the macOS 15 SDK from the Command Line Tools, since Zig 0.15.2 fails to link against the
+  macOS 26 SDK. It needs Xcode's Metal toolchain component. It also replaces Xcode's libtool, which drops Zig's archive
+  members and leaves `ghostty_info` out of the combined library. The build script carries both workarounds as PATH
+  shims, so Ghostty's source stays untouched. `ghostty.pin` gained `ZIG_SDK_VERSION`. The pin also gained
+  `GHOSTTY_TREE_SHA256`, since the commit hash alone did not check the downloaded bytes. (work-queue best guess)
+- 2026-10-31: M1 best guesses. The bundle identifier is `dev.uniterm.app`. The package modules are Theme, Preferences,
+  WindowKit, SettingsKit, and TerminalSurface. The Settings window is plain AppKit. The package target links the
+  Ghostty xcframework through a symlink inside the package, which keeps the binary path under the package root.
+  Dev builds sign ad hoc. (work-queue best guess)
 
 ## References
 
