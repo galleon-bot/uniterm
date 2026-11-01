@@ -11,6 +11,10 @@
 		7A0000000000000000000020 /* SettingsKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7A000000000000000000001C /* SettingsKit */; };
 		7A0000000000000000000021 /* TerminalSurface in Frameworks */ = {isa = PBXBuildFile; productRef = 7A000000000000000000001D /* TerminalSurface */; };
 		7A0000000000000000000022 /* WindowKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7A000000000000000000001E /* WindowKit */; };
+		7A0000000000000000000030 /* Theme in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0000000000000000000034 /* Theme */; };
+		7A0000000000000000000031 /* StatusKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0000000000000000000035 /* StatusKit */; };
+		7A0000000000000000000032 /* TerminalApplet in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0000000000000000000036 /* TerminalApplet */; };
+		7A0000000000000000000033 /* AppletKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0000000000000000000037 /* AppletKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +67,10 @@
 				7A0000000000000000000020 /* SettingsKit in Frameworks */,
 				7A0000000000000000000021 /* TerminalSurface in Frameworks */,
 				7A0000000000000000000022 /* WindowKit in Frameworks */,
+				7A0000000000000000000030 /* Theme in Frameworks */,
+				7A0000000000000000000031 /* StatusKit in Frameworks */,
+				7A0000000000000000000032 /* TerminalApplet in Frameworks */,
+				7A0000000000000000000033 /* AppletKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -105,6 +113,7 @@
 				7A000000000000000000000A /* Sources */,
 				7A000000000000000000000B /* Frameworks */,
 				7A000000000000000000000C /* Resources */,
+				7A0000000000000000000038 /* Copy Ghostty resources and licenses */,
 			);
 			buildRules = (
 			);
@@ -119,6 +128,10 @@
 				7A000000000000000000001C /* SettingsKit */,
 				7A000000000000000000001D /* TerminalSurface */,
 				7A000000000000000000001E /* WindowKit */,
+				7A0000000000000000000034 /* Theme */,
+				7A0000000000000000000035 /* StatusKit */,
+				7A0000000000000000000036 /* TerminalApplet */,
+				7A0000000000000000000037 /* AppletKit */,
 			);
 			productName = uniterm;
 			productReference = 7A0000000000000000000006 /* uniterm.app */;
@@ -227,6 +240,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
 			shellScript = "\"${SRCROOT}/scripts/build-ghostty.sh\" verify && touch \"${DERIVED_FILE_DIR}/ghostty-verified\"\n";
+		};
+		7A0000000000000000000038 /* Copy Ghostty resources and licenses */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/ghostty.pin",
+				"$(SRCROOT)/Packages/UnitermKit/Frameworks/GhosttyKit.xcframework/Info.plist",
+			);
+			name = "Copy Ghostty resources and licenses";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/terminfo/78/xterm-ghostty",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\nresources=\"${SRCROOT}/Packages/UnitermKit/Frameworks/GhosttyResources\"\ndest=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nmkdir -p \"$dest\"\nrsync -a --delete \"$resources/ghostty/\" \"$dest/ghostty/\"\nrsync -a --delete \"$resources/terminfo/\" \"$dest/terminfo/\"\nrsync -a --delete \"${SRCROOT}/Licenses/\" \"$dest/Licenses/\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -427,6 +461,22 @@
 		7A000000000000000000001E /* WindowKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = WindowKit;
+		};
+		7A0000000000000000000034 /* Theme */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Theme;
+		};
+		7A0000000000000000000035 /* StatusKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = StatusKit;
+		};
+		7A0000000000000000000036 /* TerminalApplet */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TerminalApplet;
+		};
+		7A0000000000000000000037 /* AppletKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AppletKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

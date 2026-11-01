@@ -103,8 +103,9 @@ The terminal applet talks to libghostty through an internal protocol owned by un
 outside that boundary.
 
 The protocol sits at the terminal-session level: spawn, input, resize, and events for title, working directory,
-prompt marks, notifications, clipboard requests, and exit. It does not sit at the VT level. libghostty's surface spawns
-the child process and owns the pty, so a VT-level protocol could not host it. Amended 2026-10-31; see Decision Log.
+command-finished marks, notifications, clipboard requests, and exit. It does not sit at the VT level. libghostty's
+surface spawns the child process and owns the pty, so a VT-level protocol could not host it. Amended 2026-10-31 and
+2026-11-01; see Decision Log.
 
 Rationale: libghostty's API is not stable. `ghostty.h` calls itself Ghostty's internal embedder API, built for its own
 macOS app, and points external embedders to libghostty-vt. The boundary limits churn to one module. It also keeps a
@@ -514,7 +515,7 @@ Out of scope, for later proposals:
 
 ### M2: Terminal applet in a single pane
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 - The window's content area hosts one pane running the terminal applet
 - The terminal starts the user's default login shell and accepts keyboard input
@@ -538,8 +539,62 @@ Out of scope, for later proposals:
 - `make build` names the recorded Xcode version when the installed one differs
 - When the shell exits, the pane closes
 - In the launched app, `$TERM` is `xterm-ghostty`, and `infocmp` finds it in the bundled terminfo
-- Shell integration emits OSC 133 prompt marks and OSC 7 working directories through the terminal surface protocol
+- Shell integration emits OSC 7 working directories and OSC 133 command-finished marks through the terminal surface
+  protocol. The running-state query follows the OSC 133 prompt marks. libghostty passes no other prompt mark to its
+  embedder. Amended 2026-11-01; see Decision Log.
 - The app carries the license notices for Ghostty and the libraries it bundles
+
+**As built:**
+
+- The terminal sits behind a session-level protocol with a libghostty engine. No libghostty type is public, and the
+  build fails when any other module reaches GhosttyKit. Leaking an import into another module, and re-exporting it from
+  the terminal module, each made the check fail.
+- uniterm reads no Ghostty config file. It writes its own config to a per-instance file in a private folder, by temp
+  file and rename. The config comes from an allow list of keys. A value outside a small safe alphabet is rejected, not
+  escaped. The close guard setting accepts only `true`.
+- libghostty's built-in bindings are cleared. A test asks libghostty about Cmd-Z, Cmd-W, Cmd-T, Cmd-D, and Cmd-Q and
+  gets no. With the clear removed, that test failed. uniterm's menu owns the keys, and the focused terminal answers Copy,
+  Paste, Select All, font zoom, and Clear Screen on the responder chain. A test drives that path in-process.
+- A palette change reaches every running surface. A test fails when the update call is removed. libghostty has no call
+  to read a surface's colors, so the color on screen is a check for the user.
+- Resources and licenses ship in the app bundle. In the launched app the shell reports `TERM=xterm-ghostty`, and
+  `infocmp` finds the bundled entry. The notices cover Ghostty, its fonts, the libraries its build fetched, and
+  Catppuccin. Three libraries ship no license file and are named in the notices.
+- `make build` names the recorded Xcode version when another is installed. M1's toolchain check does it, and it was not
+  run against a different Xcode here.
+- The App Sandbox is off, checked in the project and on the built app. A spawned shell writes and reads a file in
+  `$HOME`.
+- ssh: the config enables `ssh-env`. In an integrated zsh, a program that ssh starts sees `TERM=xterm-256color` while
+  the shell has `xterm-ghostty`. The probe used ssh's ProxyCommand, so no remote host was used.
+- Status message bounds: minimum dwell 1.5 s, info and warning clear to idle after 5 s once the queue is empty, a backlog
+  above 3 skips to the newest, history holds 500, and errors fold into the newest error with a count. Warnings follow the
+  info rules. The window shows the current message in a 22 pt strip until M4 replaces it.
+- OSC 9 and OSC 777 post as info with the pane as source. Notification text drops control characters and is capped at 200
+  characters. libghostty allows one notification per second.
+- An OSC 52 read, an unsafe paste, and a confirmed OSC 52 write each ask the user in an alert that names the pane, with
+  Cancel as the default. A denied request still completes with empty data, since libghostty keeps the request until the
+  embedder answers. A test shows the program receives nothing before the answer and nothing after a denial.
+- The applet description is versioned and wrapped so an unreadable one can be kept and written back. Shell mode restores
+  a fresh shell in the tab's directory. A program-mode description is refused until M5.
+- `send(text:)` pastes, so a shell with bracketed paste does not run a pasted newline. Tests press Return through the
+  hosted view.
+- Tests that spawn a shell isolate it from the developer's dotfiles with a fixture `ZDOTDIR`, an empty
+  `SSH_AUTH_SOCK`, and no `SSH_ASKPASS`. `ZDOTDIR` must be in the process environment, since a launch variable overrides
+  the integration's own and the shell then never reports a prompt. `login(1)` resets `HOME`, so `HOME` does not isolate.
+  Every UI test launches the app the same way, through one helper. Production starts the user's real login shell.
+- A trace of closing a session whose shell ignores SIGHUP found no main-thread hang. libghostty tracks `login(1)`, which
+  exits on SIGHUP, so the close returns at once. The shell and its children survive, as `nohup` work does. A test guards
+  the close time.
+- Not built: the close guard, which M7 owns, so Cmd-W and Cmd-Q close without asking even with vim running. Also not
+  built: opening links, the scrollbar, and the selection clipboard.
+- A shell that exits within 250 ms of launch leaves libghostty's error screen in the pane, waiting for a key.
+- The UI suite passed in one run on a quiet desktop, 11 tests with no failure, after the shared launch helper landed.
+  Earlier runs each failed one different test with "Failed to activate application" or a snapshot timeout. The cause was
+  never isolated. The shared helper ends the app after each test and activates it before typing.
+- XCUITest delivered `'` with the Control flag on the US Extended layout, so UI tests type no apostrophes. A test drives
+  the apostrophe key through the real key path, and the user confirmed that a real keyboard types `'` and `"`.
+- Left to the user: one real ssh session to a host without the `xterm-ghostty` terminfo entry, a live system appearance
+  change reaching the terminal palette, and the on-screen colors after a palette change.
 
 ### M3: Pane tree
 
@@ -737,6 +792,17 @@ The proposal ends with the user looking at the finished app.
   WindowKit, SettingsKit, and TerminalSurface. The Settings window is plain AppKit. The package target links the
   Ghostty xcframework through a symlink inside the package, which keeps the binary path under the package root.
   Dev builds sign ad hoc. (work-queue best guess)
+- 2026-11-01: M2 best guesses. The session protocol is `TerminalEngine` and `TerminalSession`, and the applet contract
+  lives in AppletKit. The config builder takes an allow list of keys and rejects unsafe values. The close guard stays
+  with M7. Amended "Terminal surface behind an internal protocol" and one of M2's checks. Both said shell integration
+  emits "prompt marks" through the protocol, which read as every OSC 133 mark. libghostty's C API passes only
+  command-finished to its embedder, so the text now names that mark. The running-state query still follows the OSC 133
+  prompt marks. (work-queue best guess)
+- 2026-11-01: ADR candidate (cuts across the system): every applet implements one applet contract: hosted view,
+  lifecycle, segments, detach and reattach, an inert versioned description, and a running-state query. Undecided.
+  Found in M2.
+- 2026-11-01: ADR candidate (cuts across the system): a terminal program never reads the clipboard without the user's
+  confirmation naming its pane, and a denial sends it nothing. Undecided. Found in M2.
 
 ## References
 

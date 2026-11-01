@@ -1,26 +1,47 @@
 import AppKit
+import StatusKit
 import Theme
 
-/// The window's content. Later work replaces the placeholder with the pane tree.
+/// The window's content: one pane, with a placeholder strip for the current status message.
 ///
-/// The content lies inside the safe area, so it never covers the traffic lights.
+/// The content lies inside the safe area, so it never covers the traffic lights. Later work
+/// replaces the single pane with the pane tree, and the strip with the status bar region.
 @MainActor
 final class MainContentViewController: NSViewController {
   private let chrome = ChromeView()
-  private let placeholder = NSTextField(labelWithString: "uniterm")
+  private let strip = StatusStripView()
+  private let paneView: NSView
+
+  init(paneView: NSView) {
+    self.paneView = paneView
+    super.init(nibName: nil, bundle: nil)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
 
   override func loadView() {
     chrome.setAccessibilityElement(true)
     chrome.setAccessibilityRole(.group)
     chrome.setAccessibilityIdentifier("content-area")
-    placeholder.font = .systemFont(ofSize: 28, weight: .semibold)
-    placeholder.setAccessibilityIdentifier("content-label")
-    placeholder.translatesAutoresizingMaskIntoConstraints = false
-    chrome.addSubview(placeholder)
 
+    paneView.translatesAutoresizingMaskIntoConstraints = false
+    strip.translatesAutoresizingMaskIntoConstraints = false
+    chrome.addSubview(paneView)
+    chrome.addSubview(strip)
+
+    let guide = chrome.safeAreaLayoutGuide
     NSLayoutConstraint.activate([
-      placeholder.centerXAnchor.constraint(equalTo: chrome.safeAreaLayoutGuide.centerXAnchor),
-      placeholder.centerYAnchor.constraint(equalTo: chrome.safeAreaLayoutGuide.centerYAnchor),
+      paneView.topAnchor.constraint(equalTo: guide.topAnchor),
+      paneView.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+      paneView.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
+      paneView.bottomAnchor.constraint(equalTo: strip.topAnchor),
+      strip.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+      strip.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
+      strip.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
+      strip.heightAnchor.constraint(equalToConstant: StatusStripView.height),
     ])
 
     view = chrome
@@ -28,6 +49,10 @@ final class MainContentViewController: NSViewController {
 
   func apply(_ palette: ThemePalette) {
     chrome.apply(palette)
-    placeholder.textColor = palette[.text].nsColor
+    strip.apply(palette)
+  }
+
+  func showStatus(_ display: StatusDisplay?) {
+    strip.show(display)
   }
 }

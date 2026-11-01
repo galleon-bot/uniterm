@@ -37,7 +37,7 @@ ghostty: ## Build the pinned GhosttyKit and link it into the package (needs Zig,
 	scripts/build-ghostty.sh
 
 .PHONY: build
-build: ghostty ## Build uniterm.app
+build: check-ghosttykit-imports ghostty ## Build uniterm.app
 	$(XCODEBUILD) build
 
 .PHONY: clean
@@ -81,8 +81,17 @@ lint: fmt-check ## Lint Swift sources and check the scripts parse
 	for script in scripts/*.sh; do bash -n "$$script" || exit 1; done
 
 .PHONY: check
-check: ## Check that the package and the app share one Swift language mode
+check: check-ghosttykit-imports ## Check the Swift language mode, the GhosttyKit boundary, and that the sandbox is off
 	scripts/check-swift-mode.sh
+	scripts/check-sandbox-off.sh
+
+.PHONY: check-ghosttykit-imports
+check-ghosttykit-imports: ## Fail when any module but TerminalSurface can reach GhosttyKit
+	scripts/check-ghosttykit-imports.sh
+
+.PHONY: licenses
+licenses: ## Collect the license notices for Ghostty and its libraries into Licenses/
+	scripts/collect-licenses.sh
 
 .PHONY: ci
 ci: fmt-check lint check test ghostty-offline-check ## Run what CI runs. Includes the 4-minute offline Ghostty rebuild

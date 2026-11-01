@@ -8,14 +8,7 @@ import XCTest
 /// runner's write never reaches the app as a change notification, and the runner cannot write the
 /// app's real domain. The store's reaction to such a write is covered in the package tests.
 @MainActor
-final class WindowChromeUITests: XCTestCase {
-  private var defaultsPath = ""
-
-  override func setUp() async throws {
-    continueAfterFailure = false
-    defaultsPath = NSTemporaryDirectory() + "uniterm-ui-\(UUID().uuidString)"
-  }
-
+final class WindowChromeUITests: UnitermUITestCase {
   /// Catches a content view that covers the traffic lights, or lights that stop working under a
   /// full-size content view.
   func testTrafficLightsStayVisibleClickableAndUncovered() {
@@ -31,13 +24,13 @@ final class WindowChromeUITests: XCTestCase {
       XCTAssertTrue(button.isHittable, "a traffic light is covered or disabled")
     }
 
-    let label = window.staticTexts["content-label"]
-    XCTAssertTrue(label.exists)
+    let terminal = window.textViews["terminal"]
+    XCTAssertTrue(terminal.waitForExistence(timeout: 10))
     for button in [close, minimize, zoom] {
-      XCTAssertFalse(label.frame.intersects(button.frame), "content overlaps a traffic light")
+      XCTAssertFalse(terminal.frame.intersects(button.frame), "content overlaps a traffic light")
     }
     XCTAssertGreaterThan(
-      label.frame.minY, close.frame.maxY - 1, "content starts above the title bar")
+      terminal.frame.minY, close.frame.maxY - 1, "content starts above the title bar")
   }
 
   /// Catches a full-size content view that eats mouse-downs in the title bar, so the window no
@@ -84,11 +77,25 @@ final class WindowChromeUITests: XCTestCase {
     XCTAssertEqual(control.radioButtons["System"].value as? Int, 1)
   }
 
-  private func launchApp() -> XCUIApplication {
-    let app = XCUIApplication()
-    app.launchEnvironment["UNITERM_DEFAULTS_PATH"] = defaultsPath
-    app.launch()
-    return app
+  /// Catches a Cmd-W that does nothing when Settings is the key window. The Close item targets the
+  /// pane, so the Settings window answers it. The main window stays open.
+  func testCommandWClosesTheSettingsWindowAndNotTheMainWindow() {
+    let app = launchApp()
+    let window = app.windows["main-window"]
+    XCTAssertTrue(window.waitForExistence(timeout: 10))
+
+    app.typeKey(",", modifierFlags: .command)
+    let settings = app.windows["settings-window"]
+    XCTAssertTrue(settings.waitForExistence(timeout: 5))
+
+    app.typeKey("w", modifierFlags: .command)
+
+    let gone = NSPredicate(format: "exists == false")
+    XCTAssertEqual(
+      XCTWaiter().wait(
+        for: [XCTNSPredicateExpectation(predicate: gone, object: settings)], timeout: 5),
+      .completed)
+    XCTAssertTrue(window.exists)
   }
 
   private func waitForValue(_ expected: String, of element: XCUIElement) -> Bool {

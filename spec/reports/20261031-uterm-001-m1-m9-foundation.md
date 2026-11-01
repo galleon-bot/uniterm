@@ -10,13 +10,13 @@ The run is in progress. See the run state below.
 
 ## Run state
 
-- Code repo base commit for the run and for the row: `92da487` ("Schedule UTERM-001 M1-M9 as the first queue row")
+- Base commit for the run and for the row: "Schedule UTERM-001 M1-M9 as the first queue row"
 - Specs commits: the specs live in the code repo, so the milestone commits are the specs commits
 
 | Milestone | Run status | Commit |
 |-----------|------------|--------|
-| M1 App skeleton and theme tokens | DONE | see M1 |
-| M2 Terminal applet in a single pane | QUEUED | |
+| M1 App skeleton and theme tokens | DONE | "Add the app skeleton, pinned Ghostty build, and theme tokens" |
+| M2 Terminal applet in a single pane | DONE | "Add the terminal applet behind a libghostty surface protocol" |
 | M3 Pane tree | QUEUED | |
 | M4 Status bar region | QUEUED | |
 | M5 Terminal tabs and program mode | QUEUED | |
@@ -48,7 +48,7 @@ These come from the approved plan at `/Users/ripta/.claude/plans/harmonic-herdin
 
 ### M1: App skeleton and theme tokens
 
-Commit: see the next amendment. A report cannot hold the SHA of the commit that carries it.
+Commit: "Add the app skeleton, pinned Ghostty build, and theme tokens".
 
 Checks:
 - `make fmt-check`, `make lint`, `make check`, `make build`, and `make test` all pass. `make test` ran 12 package
@@ -109,6 +109,77 @@ offline rebuild take about 4 minutes each. The Zig cache is 483 MB.
 
 Leftovers: a hook blocked the implementer's `rm -r`. The git-ignored `.cache/scratch`, `.cache/ghostty-src`, and
 `.cache/ghostty/lock` are dead and can be deleted by hand.
+
+### M2: Terminal applet in a single pane
+
+Commit: "Add the terminal applet behind a libghostty surface protocol".
+
+Checks:
+- The implementer ran `make fmt-check`, `make lint`, `make check`, `make build`, and `make test-package`, and all
+  passed.
+- The coordinator reran `make test-package` independently: 100 tests, 0 failures, 4 skipped. The 4 skips are the
+  key-translation tests that assert US-layout codepoints. The user's layout is US Extended.
+- The coordinator ran the UI suite once on a quiet desktop with `make test-app`: 11 tests, 0 failures, 52 s. The screen
+  captured by the resize test showed `A:34x119:` before the resize and `B:25x82:` after it.
+- The user typed `echo 'a' "b"` on a real keyboard in the built app and saw `a b`.
+- `proposals.py check` and `proposals.py freeze` both print `[]`.
+
+Best guesses from the implementer:
+- The new modules are StatusKit, AppletKit, and TerminalApplet. The protocols are `TerminalEngine` and
+  `TerminalSession`.
+- libghostty's C API surfaces only the OSC 133 command-finished mark. The protocol carries a `commandFinished` event,
+  plus a running-state query that follows the prompt marks. The proposal's protocol decision and one M2 check were
+  amended to match. ADR-01 says "prompt marks", and adr-impact judged it consistent. ADR-01 was not edited.
+- The config builder rejects unsafe values instead of escaping them. It uses an allow list of keys and a safe value
+  alphabet.
+- The config file is per instance, at `~/Library/Application Support/uniterm/terminal/ghostty-<pid>.conf`. Stale files
+  from dead pids are removed at engine start.
+- The C callbacks hop to the main actor asynchronously. A surface freed inside its own close callback would be a use
+  after free.
+- The clipboard alert names the pane, with Cancel as the default. A denial completes with empty data.
+- The status bounds are a 1.5 s dwell, a 5 s idle timeout, a skip above a backlog of 3, and a history of 500.
+- Cmd-T, Cmd-D, and Cmd-Z post "not available yet" until their milestones land.
+- `UNITERM_TERMINAL_DIR` is honored only in DEBUG builds.
+
+Deviations: none beyond the amendment above. The close guard is M7's, so Cmd-W and Cmd-Q do not ask yet.
+
+Review findings, first round:
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | `WindowChromeUITests` ran the developer's real shell | Fixed with a shared launch helper |
+| 2 | Cmd-W no longer closed Settings, a regression from M1 | Fixed. A unit test fails without the fix |
+| 3 | UI flakes, with a suspected main-thread hang on close | Hang not confirmed. Diagnosis unresolved. Teardown and activation added |
+| 4 | The palette test passed vacuously | Fixed. It fails when the update call is removed |
+| 5 | The vim test never confirmed vim was up | Fixed |
+| 6 | The apostrophe cause was unproven, and the real key path was untested | Fixed. A real key-path test and a user check were added |
+| 7 | Amendment markers were missing, and As built held a path list | Fixed |
+| 8 | A milestone name in a code comment, and a dense test doc | Fixed |
+| 9 | No evidence for the sandbox and `$HOME` check or the menu path | Fixed |
+| 10 | The ssh probe read `~/.ssh/config` | Fixed with `-F /dev/null` |
+| 11 | Minor config-store and test-comment items | Fixed |
+
+User-raised issues during M2:
+- The UI test typed `'`, which arrived as `;5u`. XCUITest delivered the key with the Control flag (`flags=262144`).
+  The real key path is correct, and the user confirmed it on a real keyboard. Why XCUITest adds Control on US Extended
+  is unresolved.
+- Tests that spawned a shell ran the user's dotfiles and prompted for an SSH passphrase. Every shell a test spawns is
+  now isolated.
+
+adr-impact: no conflicts and no supersessions. Two ADR candidates were recorded as Undecided in the proposal's Decision
+Log: the applet contract, and the clipboard-read confirmation policy.
+
+Checks left to the user:
+- One real ssh session to a host without the `xterm-ghostty` terminfo entry.
+- A live system appearance change reaching the terminal palette.
+- The on-screen colors after a palette change.
+
+Process notes:
+- The implementer ran `git checkout App/AppDelegate.swift` mid-work, which discarded its own edits. It rewrote the
+  file, and the reviewer found it coherent.
+- Debug runs left 15 orphaned `sleep 1000` processes. They exit on their own after about 17 minutes.
+
+Test cost: `swift test` takes 7.4 s of test time for 100 tests. The UI suite takes 52 s.
 
 ## Status
 
