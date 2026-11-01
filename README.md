@@ -35,6 +35,7 @@ Prerequisites:
 Commands:
 
 - `make build` builds the pinned libghostty, then `uniterm.app`, into `.build/DerivedData`.
+- `make run` builds, then runs the app in the foreground, so its logs and any crash show in the terminal.
 - `make test` runs the package tests and the app UI tests. UI tests need a logged-in desktop session and Accessibility
   permission for the terminal.
 - `make fmt`, `make fmt-check`, `make lint`, and `make check` format and check the sources.

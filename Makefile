@@ -40,6 +40,12 @@ ghostty: ## Build the pinned GhosttyKit and link it into the package (needs Zig,
 build: check-ghosttykit-imports ghostty ## Build uniterm.app
 	$(XCODEBUILD) build
 
+# Runs the binary in the foreground, not through `open`, so the shell owns the process and sees its logs
+# and any crash. The app uses the real settings and saves its layout to Application Support.
+.PHONY: run
+run: build ## Build, then run uniterm.app in the foreground
+	$(DERIVED_DATA)/Build/Products/$(CONFIGURATION)/uniterm.app/Contents/MacOS/uniterm
+
 .PHONY: clean
 clean: ## Remove Xcode and SwiftPM build output. Keeps the Ghostty cache
 	rm -rf .build/DerivedData .build/SourcePackages .build/swiftpm
