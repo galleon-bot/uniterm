@@ -74,6 +74,8 @@ The choice also shapes UTERM-004's trust model, since the app must know who is c
 
 - Function names and namespaces.
 - How panes are identified: stable IDs, paths in the tree, or both.
+  Constraint from UTERM-001 "Pane tree shape": normalization rewrites tree paths, so only stable IDs are durable. A
+  removed node's ID is retired and never reused.
 
 ### REPL features
 

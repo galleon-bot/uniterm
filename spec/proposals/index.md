@@ -2,7 +2,7 @@
 
 | Proposal | Description | Status |
 |----------|-------------|--------|
-| [UTERM-001](UTERM-001-foundation.md) | Windows, regions, pane tree, status bar, and the libghostty terminal applet | draft |
+| [UTERM-001](UTERM-001-foundation.md) | Windows, regions, pane tree, status bar, and the libghostty terminal applet | accepted |
 | [UTERM-002](UTERM-002-command-palette.md) | Floating or docked command palette with tab search | draft |
 | [UTERM-003](UTERM-003-janet-scripting.md) | Embedded Janet, host API, `uniterm run`, and the REPL applet | draft |
 | [UTERM-004](UTERM-004-control-and-trust.md) | Control levels, pane trust, exec panes, and layout requests | draft |
