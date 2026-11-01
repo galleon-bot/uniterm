@@ -142,6 +142,8 @@ final class PaneTreeUITests: UnitermUITestCase {
     openPane(in: app, keys: "d", modifiers: .command)
     XCTAssertTrue(window.groups["pane-2"].waitForExistence(timeout: 20))
     XCTAssertLessThan(window.groups["pane-1"].frame.width, whole - 100)
+    XCTAssertTrue(
+      waitFor(window.groups["pane-2"].textViews["terminal"], timeout: 40) { $0.contains("% ") })
 
     app.typeKey("w", modifierFlags: .command)
 
@@ -154,10 +156,10 @@ final class PaneTreeUITests: UnitermUITestCase {
     XCTAssertEqual(window.groups["pane-1"].frame.width, whole, accuracy: 2)
   }
 
-  /// Catches an undo that does not bring the pane back where it was: after Cmd-W closes the second
-  /// pane, the grace segment shows in the bar, and Cmd-Z puts pane 2 back beside pane 1 with its
-  /// ID and its shell.
-  func testUndoBringsBackTheClosedPaneAndTheGraceSegmentShowsMeanwhile() {
+  /// Catches an undo that does not reopen the pane where it was: after Cmd-W closes the second
+  /// pane, no segment promises a kept session, and Cmd-Z opens a new pane beside pane 1. The old ID
+  /// is retired, so the reopened pane is pane 4, and it runs a fresh shell.
+  func testUndoReopensTheClosedPaneFromItsDescription() {
     let app = launchApp()
     let window = app.windows["main-window"]
     _ = waitForTerminal(in: app)
@@ -169,16 +171,16 @@ final class PaneTreeUITests: UnitermUITestCase {
 
     app.typeKey("w", modifierFlags: .command)
     XCTAssertTrue(waitUntilGone(window.groups["pane-2"], timeout: 15))
-    XCTAssertTrue(
-      window.staticTexts["status-grace"].waitForExistence(timeout: 5),
-      "the grace segment never showed")
+    XCTAssertFalse(window.staticTexts["status-grace"].exists)
 
     app.typeKey("z", modifierFlags: .command)
 
-    XCTAssertTrue(window.groups["pane-2"].waitForExistence(timeout: 15), "undo never returned it")
+    XCTAssertTrue(window.groups["pane-4"].waitForExistence(timeout: 15), "undo never reopened it")
+    XCTAssertFalse(window.groups["pane-2"].exists, "the retired ID came back")
     XCTAssertTrue(waitForPaneCount(2, in: window))
-    XCTAssertGreaterThan(window.groups["pane-2"].frame.minX, window.groups["pane-1"].frame.minX)
-    XCTAssertTrue(waitUntilGone(window.staticTexts["status-grace"], timeout: 5))
+    XCTAssertGreaterThan(window.groups["pane-4"].frame.minX, window.groups["pane-1"].frame.minX)
+    XCTAssertTrue(
+      waitFor(window.groups["pane-4"].textViews["terminal"], timeout: 40) { $0.contains("% ") })
   }
 
   /// Catches a window that can shrink past its panes. With three panes in a row the minimum is

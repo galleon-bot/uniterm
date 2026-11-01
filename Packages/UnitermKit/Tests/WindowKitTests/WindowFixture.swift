@@ -27,6 +27,32 @@ final class TestScheduler {
   }
 }
 
+/// Holds the wakeups a timer asks for, so a test fires them by hand. A cancelled wake is gone, as
+/// with a real timer.
+@MainActor
+final class WakeScheduler {
+  private var counter = 0
+  private(set) var pending: [Int: (delay: TimeInterval, action: @MainActor () -> Void)] = [:]
+
+  func schedule(_ delay: TimeInterval, _ action: @escaping @MainActor () -> Void)
+    -> @MainActor ()
+    -> Void
+  {
+    counter += 1
+    let id = counter
+    pending[id] = (delay, action)
+
+    return { [weak self] in self?.pending[id] = nil }
+  }
+
+  /// Runs the one pending wake, if there is one.
+  func fire() {
+    guard let id = pending.keys.min(), let entry = pending.removeValue(forKey: id) else { return }
+
+    entry.action()
+  }
+}
+
 @MainActor
 final class AppletLog {
   var made: [FakeApplet] = []

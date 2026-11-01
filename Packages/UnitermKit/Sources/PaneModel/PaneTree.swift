@@ -11,18 +11,8 @@ public enum PaneTreeError: Error, Equatable {
   /// The two nodes are not neighbors under one split.
   case notAdjacent(NodeID, NodeID)
 
-  /// The ID to bring back was never handed out by this tree.
-  case neverIssued(NodeID)
-
   /// A saved tree cannot be restored: an ID is zero or repeats.
   case invalidRestore(String)
-
-  /// The ID to bring back belongs to a node that is gone for good: it was retired, or it was never
-  /// closed as a pane.
-  case retired(NodeID)
-
-  /// The pane to bring back is already in the tree.
-  case alreadyInTree(NodeID)
 }
 
 /// Which side of its neighbor a pane sits on. `before` is left of it in a row and above it in a
@@ -71,11 +61,6 @@ public struct PaneTree: Sendable, Equatable {
   public let metrics: PaneMetrics
   private var allocator: NodeIDAllocator
 
-  /// Panes closed with `close(_:)` whose IDs can still come back through `insert(_:at:in:)`. An ID
-  /// leaves this set when the pane returns or when the caller retires it. A node that vanished in
-  /// a collapse is never in it.
-  private var parked: Set<NodeID> = []
-
   /// The largest ID ever handed out. A saved layout stores it.
   public var highWaterMark: UInt64 { allocator.highWaterMark }
 
@@ -119,7 +104,8 @@ public struct PaneTree: Sendable, Equatable {
     root.contains(id)
   }
 
-  /// True when the ID was handed out and its node is gone.
+  /// True when the ID was handed out and its node is gone. A node's ID retires the moment the node
+  /// leaves the tree, and nothing issues it again.
   public func isRetired(_ id: NodeID) -> Bool {
     id.rawValue <= allocator.highWaterMark && !root.contains(id)
   }
@@ -190,7 +176,8 @@ public struct PaneTree: Sendable, Equatable {
   // MARK: Close
 
   /// Removes a pane. Its space goes to the siblings on either side, half to each. A pane with one
-  /// neighbor gives all of it to that neighbor. A split left with one child collapses.
+  /// neighbor gives all of it to that neighbor. A split left with one child collapses. The pane's
+  /// ID is retired.
   public mutating func close(_ target: NodeID) throws -> CloseOutcome {
     guard root.paneIDs.contains(target) else { throw PaneTreeError.unknownPane(target) }
 
@@ -200,7 +187,6 @@ public struct PaneTree: Sendable, Equatable {
     let removed = split.removing(target, focus: &focus)
 
     root = removed.normalizedRoot()
-    parked.insert(target)
 
     guard let focus else { preconditionFailure("a removed pane always names the pane after it") }
 
@@ -209,20 +195,14 @@ public struct PaneTree: Sendable, Equatable {
 
   // MARK: Placement
 
-  /// Where a pane sits now, in a form that `insert(_:at:in:)` can use after the tree has changed.
+  /// Where a pane sits now, in a form that `insert(at:in:)` can use after the tree has changed.
   /// The only pane has no place to come back to, so it answers nil.
   public func placement(of pane: NodeID) -> PanePlacement? {
     root.placement(of: pane)
   }
 
-  /// Lets go of a closed pane for good. Its ID is retired, and `insert(_:at:in:)` refuses it from
-  /// now on. Retiring an ID that is not parked changes nothing.
-  public mutating func retire(_ pane: NodeID) {
-    parked.remove(pane)
-  }
-
-  /// Brings a pane back. Pass the ID of a pane that was closed and not retired to keep it, or nil
-  /// to make a new pane with a fresh ID.
+  /// Opens a new pane where the placement says, and returns its ID. The ID is a fresh one, never an
+  /// ID that was retired.
   ///
   /// The pane goes beside the placement's neighbor on its side. When the neighbor now sits in a
   /// split of another axis, or is the root, the neighbor is wrapped in a new split along the
@@ -231,41 +211,23 @@ public struct PaneTree: Sendable, Equatable {
   /// When that leaves a pane below the minimum, an equal share is tried. When that fails too, the
   /// insert is refused. Nothing changes then, and no ID is used.
   @discardableResult
-  public mutating func insert(
-    _ pane: NodeID?, at placement: PanePlacement, in size: CGSize
-  ) throws -> NodeID {
-    if let pane {
-      guard pane.rawValue > 0, pane.rawValue <= allocator.highWaterMark else {
-        throw PaneTreeError.neverIssued(pane)
-      }
-
-      guard !root.contains(pane) else { throw PaneTreeError.alreadyInTree(pane) }
-      guard parked.contains(pane) else { throw PaneTreeError.retired(pane) }
-    }
-
+  public mutating func insert(at placement: PanePlacement, in size: CGSize) throws -> NodeID {
     let recorded = placement.weight > 0 && placement.weight < 1
     let weights: [Double?] = recorded ? [placement.weight, nil] : [nil]
 
     for weight in weights {
       var allocator = self.allocator
-      let id = pane ?? allocator.next()
+      let id = allocator.next()
       let candidate = root.inserting(id, at: placement, weight: weight, allocator: &allocator)
 
       guard fits(candidate, in: size) else { continue }
 
       root = candidate
       self.allocator = allocator
-      parked.remove(id)
       return id
     }
 
     throw PaneTreeError.belowMinimumSize(placement.neighbor)
-  }
-
-  /// True when `insert(_:at:in:)` would succeed.
-  public func canInsert(_ pane: NodeID?, at placement: PanePlacement, in size: CGSize) -> Bool {
-    var copy = self
-    return (try? copy.insert(pane, at: placement, in: size)) != nil
   }
 
   /// True when every pane of `candidate` keeps its minimum at `size`, and the whole tree fits.

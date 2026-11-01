@@ -237,10 +237,9 @@ final class LayoutPersistenceTests: XCTestCase {
 
   // MARK: IDs
 
-  /// Catches the reuse of an ID retired before the quit. The first launch splits twice, closes a
-  /// pane, and keeps it hidden for undo. Its parked ID is below the saved mark. After the relaunch,
-  /// that ID is retired, undo-style insertion of it is refused, and the next split uses a larger
-  /// ID than anything handed out before.
+  /// Catches the reuse of an ID retired before the quit. The first launch splits twice and closes the
+  /// newest pane. The closed ID is below the saved mark. After the relaunch, that ID is retired,
+  /// and the next split uses a larger ID than anything handed out before.
   func testIDsRetiredBeforeTheQuitAreNeverReissued() throws {
     let (first, _) = try launch()
     let controller = first.first
@@ -262,14 +261,8 @@ final class LayoutPersistenceTests: XCTestCase {
 
     XCTAssertFalse(restored.paneIDs.contains(third))
     XCTAssertTrue(restored.paneIDs.contains(second))
-
-    XCTAssertThrowsError(
-      try restored.paneArea.insert(
-        FakeApplet(), as: third,
-        at: PanePlacement(neighbor: second, axis: .row, side: .after, weight: 0.3))
-    ) {
-      XCTAssertEqual($0 as? PaneTreeError, .retired(third))
-    }
+    XCTAssertTrue(restored.paneArea.tree.isRetired(third))
+    XCTAssertEqual(restored.paneArea.tree.highWaterMark, mark)
 
     let created = restored.openPane(.terminalShell, axis: .column)!
     XCTAssertGreaterThan(created.rawValue, mark)

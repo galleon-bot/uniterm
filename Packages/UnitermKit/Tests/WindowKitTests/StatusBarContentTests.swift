@@ -30,28 +30,14 @@ final class StatusBarContentTests: XCTestCase {
       segments, [BarSegment(id: .message, symbolName: nil, text: "", tone: .normal)])
   }
 
-  /// Catches a grace segment that sits among the applet's slots, loses its hang-up control, or is
-  /// displaced by an error and its indicators. The window's slots come first in a fixed order, and
-  /// the applet's follow.
-  func testTheGraceSegmentsFollowTheWindowsOwnSlotsAndPrecedeTheApplets() {
+  /// Catches a window slot that sits among the applet's slots, or is displaced by an error and its
+  /// indicators. The window's slots come first in a fixed order, and the applet's follow.
+  func testTheWindowsOwnSlotsPrecedeTheApplets() {
     let segments = StatusBarContent.segments(
       display: display(.error, .uniterm, "boom"), hasUnseenError: true,
-      grace: GraceIndicator(count: 2, secondsLeft: 7),
       applet: [AppletSegment(text: "tmp")])
 
-    XCTAssertEqual(
-      segments.map(\.id),
-      [.message, .dismiss, .unseenError, .grace, .graceHangUp, .applet(0)])
-    XCTAssertEqual(segments[3].text, "2 closed panes kept for 7s. Cmd-Z undoes")
-    XCTAssertEqual(segments[4].accessibilityLabel, "Hang up closed panes now")
-    XCTAssertNil(segments[4].text)
-  }
-
-  /// Catches a grace segment that shows with nothing hidden.
-  func testNoGraceSegmentsAppearWithoutHiddenPanes() {
-    let segments = StatusBarContent.segments(display: nil, hasUnseenError: false, applet: [])
-
-    XCTAssertFalse(segments.contains { $0.id == .grace || $0.id == .graceHangUp })
+    XCTAssertEqual(segments.map(\.id), [.message, .dismiss, .unseenError, .applet(0)])
   }
 
   /// Catches a message shown without its source, or with the wrong icon or tone for its level.

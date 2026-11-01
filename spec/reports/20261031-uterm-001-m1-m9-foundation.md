@@ -12,12 +12,11 @@ and `make test-app` with 46 UI tests and 0 failures. M9 is the user's visual che
 UTERM-001 stays `accepted`.
 
 For the user:
-- ADR-02 says a removed node's ID is never reused. The M7 amendment to "Pane tree shape" reads that narrowly: a closed
-  pane kept for undo still exists, and its ID retires when the pane is discarded. After the run, the user confirmed
-  this reading, and ADR-02's wording was clarified to match.
+- After the run, the user ruled that undo reopens a pane from its description and is not a snapshot of running
+  processes. M10 removed the keep-alive tier. See "Follow-up after the run" below.
 - OSC 52 clipboard writes are allowed without asking, and only reads ask. The unreachable write dialog was removed.
 - An unavailable layout folder opens one window that saves nothing, instead of quitting.
-- Six ADR candidates sit as Undecided in the proposal's Decision Log.
+- After the run, ADR-05 and ADR-06 were written. The other candidates are listed in "ADR candidates" below.
 
 The session was interrupted during M7. A new coordinator session resumed it from this report, the state file, and git.
 
@@ -604,17 +603,57 @@ tests, 0 failures, and 4 skips. It also ran `make test-app` with 46 tests, 0 fai
 
 ## ADR candidates
 
-All of these are recorded as Undecided in the proposal's Decision Log. None was written.
-- The applet contract: hosted view, lifecycle, segments, detach and reattach, an inert versioned description, and a
-  running-state query covering every tab. It was extended in M7 and M8.
-- Clipboard: a program never reads the clipboard without confirmation naming its pane. Writes are allowed without
-  asking.
-- Two-tier undo close: a hidden live session under its parked ID, then an inert description.
-- The main window answers the standard `undo:` selector, and routes it to a focused text edit or a pane close.
-- Node IDs are scoped per window, with a per-window high-water mark in the layout file.
-- An unreadable description round-trips byte-for-byte through a placeholder pane.
+These are the candidates as they stood after the follow-up:
+- Undo close and the applet lifecycle: written as ADR-05. The user reframed it as a lifecycle rule. uniterm sends the
+  events, and each applet owns its response.
+- Description versioning: written as ADR-06. The user reframed it as two-layer versioning. uniterm owns the envelope,
+  and each applet owns its payload and its version.
+- The rest of the applet contract: waits on the applet drafts, UTERM-005 to UTERM-010.
+- Clipboard trust: still Undecided. It may wait on UTERM-004.
+- Per-window node ID scope: still Undecided. It may wait on UTERM-003 and UTERM-004.
+- Cmd-Z routing: still Undecided. The coordinator recommends no ADR, since only the window's key handling depends on it.
+
+## Follow-up after the run
+
+After the run, the user reviewed the open items in the same session.
+
+- ADR-02 first gained a sentence saying a pane kept for undo keeps its ID. That sentence was removed later the same
+  day, when keep-alive was removed.
+- ADR-05 and ADR-06 were written. ADR-05 was first written as "detached applets go quiet, and the host bounds their
+  background life". The user then ruled that uniterm only sends lifecycle events, and each applet owns its response.
+  ADR-05 was rewritten in place to say so, at the user's direction.
+- The drafts UTERM-003 to UTERM-010 gained context notes on the applet contract, pane ID scope, and clipboard rules.
+- A design for pausing a hidden terminal with SIGSTOP was reviewed against macOS and Linux signal semantics. The review
+  found that `login(1)` is the session leader and that a default-action SIGHUP kills a stopped process at once on XNU.
+  It also found that other threads run before a pending SIGHUP handler. A pty spike in bash 3.2, bash 5.2, and zsh 5.9
+  confirmed that stopping the shell first and resuming it last hides the stop from job control. The design was dropped
+  when the user ruled that undo is not a process snapshot.
+- M10, "Undo reopens from the description", was added by amendment and built. It removed the grace slots, the grace
+  segment, reattach, parked IDs, and the hidden-pane guards. Closing a pane that is running something now asks first.
+  A detached terminal holds back notifications until reattach.
+
+M10 checks:
+- The implementer ran every local check, and all passed. `make test-package` ran 364 tests.
+- The coordinator's first UI run had 46 tests and 1 failure, `testClosingAPaneGivesItsSpaceToTheNeighbor`. It failed
+  while dismissing the new-pane picker, before any close. It did not reproduce in 4 later runs. The implementer's
+  package checks overlapped that run, so load is the likely cause. That diagnosis is unresolved. The test now waits
+  for the shell's prompt before it closes the pane, which removes a separate race.
+- After the review fixes, the coordinator reran both suites. `make test-package` ran 364 tests with 0 failures and 4
+  skips. `make test-app` ran 46 tests with 0 failures in 347 s.
+
+M10 review findings:
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | The terminal's detach did not hold back its notifications, against ADR-05 | Fixed. It keeps the newest notification and posts it on reattach. A test failed first |
+| 2 | A stale doc on `setVisible` | Fixed |
+| 3 | A late message from a closed applet posts with pane ID 0 | Kept, with a comment and a test that pins it |
+| 4 | A dead pane closed later could add an undo entry | Confirmed by a failing test, fixed |
+| 5 | A Decision Log entry named the wrong section | Reworded |
+
+The `.cg.yaml` allowlist was committed at the user's direction.
 
 ## Status
 
-Finished, except M9. The user's visual check is left to the user. Record its result in M9's As built block. Then mark
+Finished, except M9. M10 is done. The user's visual check is left to the user. Record its result in M9's As built block. Then mark
 M9 DONE, move the row to `history.md`, and set UTERM-001 to `implemented`.

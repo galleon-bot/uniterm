@@ -55,8 +55,13 @@ public protocol AppletHost: AnyObject {
 
 /// What a pane runs. Every applet implements this contract.
 ///
-/// A closed pane's applet is detached and kept alive for a grace period, and reattached on undo.
-/// After that, only its description stays.
+/// The host sends the lifecycle events: `start`, `detach`, `reattach`, and `close`. It sends each
+/// when it happens and does nothing else on the applet's behalf. It never keeps an applet alive
+/// after closing it, and it never stops or signals the applet's work itself. Each applet decides
+/// what an event means for its own content.
+///
+/// Undo reopens a closed pane from its description, in the same place, with the same kind of
+/// applet. An applet that wants an undo to bring back more saves it in the description.
 @MainActor
 public protocol Applet: AnyObject {
   var typeID: String { get }
@@ -77,15 +82,21 @@ public protocol Applet: AnyObject {
 
   var host: (any AppletHost)? { get set }
 
+  /// The applet is in a pane and on screen. It begins its work.
   func start()
 
-  /// Ends the applet and everything it runs. The applet is unusable afterwards.
+  /// The host is done with the applet, and it is unusable afterwards. What the applet does next is
+  /// its own choice. It may end its work at once, finish it after a delay, or save more state into
+  /// its description. Work it keeps alive after close must be bounded in time and visible to the
+  /// user.
   func close()
 
-  /// Hides the applet and keeps it alive. The host removes its view from the window.
+  /// The applet has left the screen and stays alive. It stops at once what the user would notice
+  /// but cannot see. It pauses audio and video, and it holds back alerts. An applet with nothing
+  /// perceptible to pause does nothing.
   func detach()
 
-  /// Shows a detached applet again.
+  /// The applet is back on screen. It undoes what `detach` did.
   func reattach()
 
   /// Gives the applet keyboard focus.

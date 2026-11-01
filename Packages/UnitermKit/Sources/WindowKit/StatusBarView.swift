@@ -27,9 +27,6 @@ final class StatusBarView: NSView {
   /// Runs when the user clicks the dismiss control.
   var onDismiss: (() -> Void)?
 
-  /// Runs when the user clicks the control that hangs up the hidden closed panes.
-  var onHangUp: (() -> Void)?
-
   private(set) var segments: [BarSegment] = []
 
   private let stack = NSStackView()
@@ -81,8 +78,6 @@ final class StatusBarView: NSView {
 
     if let dismiss = frame(of: .dismiss), dismiss.insetBy(dx: -4, dy: -4).contains(point) {
       onDismiss?()
-    } else if let hangUp = frame(of: .graceHangUp), hangUp.insetBy(dx: -4, dy: -4).contains(point) {
-      onHangUp?()
     } else {
       onActivate?()
     }

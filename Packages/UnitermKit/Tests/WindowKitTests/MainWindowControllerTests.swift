@@ -217,8 +217,7 @@ final class MainWindowControllerTests: XCTestCase {
 
     XCTAssertEqual(controller.paneIDs, [NodeID(rawValue: 1)])
     XCTAssertEqual(controller.focusedPane, NodeID(rawValue: 1))
-    XCTAssertEqual(made[1].detachCount, 1)
-    XCTAssertFalse(made[1].closed)
+    XCTAssertTrue(made[1].closed)
     XCTAssertFalse(made[0].closed)
     XCTAssertEqual(width(controller, 1), 960)
     XCTAssertEqual(controller.window?.isVisible, true)
@@ -352,7 +351,7 @@ final class MainWindowControllerTests: XCTestCase {
   // MARK: Tabs
 
   /// Catches Cmd-W that closes a pane while its applet still has tabs. With two tabs it closes the
-  /// tab and keeps the pane. With one tab left it closes the pane, which hides the applet with
+  /// tab and keeps the pane. With one tab left it closes the pane, which ends the applet with
   /// every tab in it.
   func testCloseTakesATabFirstAndThePaneWhenOneTabIsLeft() async throws {
     let controller = try makeController()
@@ -370,7 +369,7 @@ final class MainWindowControllerTests: XCTestCase {
     controller.closePane(nil)
 
     XCTAssertEqual(controller.paneIDs.count, 1)
-    XCTAssertEqual(tabbed.detachCount, 1)
+    XCTAssertTrue(tabbed.closed)
     XCTAssertEqual(tabbed.tabsClosed, 1)
   }
 

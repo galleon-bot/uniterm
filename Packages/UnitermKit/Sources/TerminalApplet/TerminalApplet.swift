@@ -71,8 +71,11 @@ public final class TerminalApplet: TabbedApplet {
   private var tabs: [Tab]
   private var selectedIndex: Int
   private var started = false
-  private var detached = false
   private var closingTab = false
+
+  /// The newest notification that arrived while the applet was detached.
+  private var heldNotification: String?
+  private var detached = false
 
   /// A shell in one tab.
   public convenience init(engine: any TerminalEngine, launch: TerminalLaunch = .loginShell()) {
@@ -245,18 +248,24 @@ public final class TerminalApplet: TabbedApplet {
     }
   }
 
+  /// A terminal makes no sound and plays no video, so it pauses no output. It holds back what the
+  /// user would notice but cannot see: notifications from OSC 9 and OSC 777 are kept instead of
+  /// posted. The bell raises no alert here, so there is nothing to hold. A shell keeps running
+  /// whether or not anyone can see it, as a user expects.
+  ///
+  /// Only the newest held notification survives, and `reattach` posts it. Older ones are dropped,
+  /// since a burst of stale alerts on return would bury the one that matters.
   public func detach() {
     detached = true
-
-    for tab in tabs {
-      tab.session?.setFocused(false)
-      tab.session?.setVisible(false)
-    }
   }
 
   public func reattach() {
     detached = false
-    selectedTab?.session?.setVisible(true)
+
+    guard let text = heldNotification else { return }
+
+    heldNotification = nil
+    host?.applet(self, post: .info, text: text)
   }
 
   public func focus() {
@@ -455,7 +464,7 @@ public final class TerminalApplet: TabbedApplet {
         tab.session?.setFocused(false)
       }
 
-      tab.session?.setVisible(shown && !detached)
+      tab.session?.setVisible(shown)
     }
 
     tabBar.update(
@@ -516,7 +525,11 @@ public final class TerminalApplet: TabbedApplet {
         separator: ": ")
       guard !text.isEmpty else { return }
 
-      host?.applet(self, post: .info, text: text)
+      if detached {
+        heldNotification = text
+      } else {
+        host?.applet(self, post: .info, text: text)
+      }
 
     case .clipboardRequest(let request):
       confirm(request)

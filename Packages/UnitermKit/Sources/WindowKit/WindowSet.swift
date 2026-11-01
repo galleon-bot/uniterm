@@ -91,7 +91,7 @@ public final class WindowSet {
     NSScreen.screens.map { ScreenArea(frame: $0.frame, visibleFrame: $0.visibleFrame) }
   }
 
-  /// Everything running in any window, hidden closed panes included. Quitting ends all of it.
+  /// Everything running in any window. Quitting ends all of it.
   public var runningTabLabels: [String] {
     controllers.flatMap { $0.runningTabLabels }
   }
@@ -108,14 +108,6 @@ public final class WindowSet {
       confirmTitle: "Quit", cancelTitle: "Cancel")
 
     return await confirmer(request, activeController?.window)
-  }
-
-  /// Ends the hidden closed panes of every window. A quit calls it, so no process outlives the app
-  /// as a pane the user cannot see.
-  public func hangUpHiddenPanes() {
-    for controller in controllers {
-      controller.hangUpHiddenPanes()
-    }
   }
 
   /// The identifier of the nth window ever opened. The first keeps the plain name. A number is

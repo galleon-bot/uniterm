@@ -913,9 +913,9 @@ Log.
   reading it leaves none. A launch that opens no window clears it before the app quits. Neither counts as a crash.
   The marker clears one turn of the main loop after the windows are shown. Kept-aside files are numbered, so none
   replaces another, and the oldest are deleted past 5. Amended 2026-11-01; see Decision Log.
-- The ID high-water mark is per window, since each window has its own tree. The saved tree is the visible one. Panes
-  hidden for undo and the undo stack are not saved. Their IDs stay below the window's mark, so a restored tree counts
-  them as retired and refuses to insert them. A mark lower than the largest ID in the tree is raised to it.
+- The ID high-water mark is per window, since each window has its own tree. The undo stack is not saved. The IDs of
+  closed panes stay below the window's mark, so a restored tree counts them as retired and never issues them again. A
+  mark lower than the largest ID in the tree is raised to it. Amended 2026-11-01; see Decision Log.
 - A description that is unknown, newer, or unreadable becomes a placeholder pane. The file bytes of every description
   are kept exactly, including key order, spacing, and numbers a double cannot hold, and a placeholder writes them
   back unchanged. A readable description that its applet refuses to restore does the same. The window posts one
@@ -925,8 +925,8 @@ Log.
   other reason, or cannot move an unreadable file aside, also saves nothing for the whole run.
 - Saving stays off until the launch has opened its windows, so a half-restored layout never replaces the file. If one
   saved window fails to open, the rest restore, and a copy of the file is kept aside before any save can replace it.
-  The layout saves after a layout change that is quiet for the debounce, and once, at once, in the quit path before
-  the hidden panes are hung up.
+  The layout saves after a layout change that is quiet for the debounce, and once, at once, in the quit path. Amended
+  2026-11-01; see Decision Log.
 - The window frame is clamped onto a screen that exists now. A frame already inside one screen stays. Otherwise the
   screen with the saved frame is used, then the one with the largest overlap, then the main one.
 - A restored tree whose minimum size exceeds the visible screen opens inside the screen. The window's minimum content
@@ -977,7 +977,7 @@ The proposal ends with the user looking at the finished app.
 
 ### M10: Undo reopens from the description
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 Added 2026-11-01 by amendment. It can run before or after the user records M9.
 
@@ -988,12 +988,40 @@ Added 2026-11-01 by amendment. It can run before or after the user records M9.
   closes without asking
 - Declining that dialog keeps the pane open. Confirming closes it and puts its description on the undo stack
 - The grace segment, its hang-up control, the grace slots, and the reattach path are gone
-- The pane tree has no parked IDs. An ID is retired when its node leaves the tree, and insert never accepts it again
+- The pane tree has no parked IDs. An ID is retired when its node leaves the tree. Insert takes no ID, so a retired one
+  cannot come back. Amended 2026-11-01; see Decision Log.
 - The applet contract sends start, detach, reattach, and close, and documents each applet's duties per ADR-05
-- The terminal applet pauses nothing on detach, since it has nothing to pause, and that is stated where it implements
-  the contract
+- The terminal applet pauses no output on detach, since it has none to pause. It holds back notifications until
+  reattach, per ADR-05, and that is stated where it implements the contract. Amended 2026-11-01; see Decision Log.
 - Every M7 check that does not depend on keep-alive still holds: placement, the neighbor fallback, Cmd-Z in a text
   control, the working-directory rule, program-mode restore, and the window and quit guards
+
+**As built:**
+
+- Closing a pane ends its applet at once and puts its description on the undo stack, 20 deep, newest first. The grace
+  slots, the grace segment and its hang-up control, the slot eviction, the reattach path, the pane tree's parked IDs,
+  the dead-pane handling, and the quit and window counts of hidden panes are gone. Their tests went with them.
+  Placement, the placeholder for a refused description, the working-directory rule, program-mode restore, and Cmd-Z
+  deferring to a text control are unchanged.
+- A pane close asks first when any of its tabs is running something. The dialog names those tabs, declining keeps the
+  pane, and an idle pane closes without asking. A pane whose applet exited on its own closes with no entry. If the pane
+  became the last one while the question was open, confirming closes the window without a second question.
+- The pane tree's insert takes no ID and always issues a new one, so a retired ID cannot come back. A node's ID retires
+  when it leaves the tree. The ADR-02 guarantees keep their tests, now phrased for a closed pane and for a collapsed
+  split.
+- The layout file did not change. A window still saves its own ID high-water mark, and a test closes a pane, quits,
+  relaunches, and finds the closed ID retired and the next split above the mark.
+- The applet contract documents the four lifecycle events and each applet's duties per ADR-05. Nothing in the host
+  calls `detach` or `reattach` now, since the host closes a closed pane's applet and never hides one. They stay as part
+  of the contract. The terminal applet pauses no output on detach, and holds back notifications until reattach.
+- A last pane whose applet exits while the window-close question is open is not asked about again. Cancel leaves it in
+  the window, and closing it then needs no question, since nothing is running. Closing it adds no undo entry, because
+  the window remembers that its applet exited. The earlier replay that discarded it is gone with the hidden panes it
+  served.
+- Mutation checks each failed the named tests and were undone: no question for a running pane, no window close on a
+  confirmed pane that became the last, and a second window question for the last pane. The package tests pass, 362 run
+  with 4 skipped, in 13.8 seconds. The UI test for undo passes and expects the reopened pane to be pane 4 with no
+  grace segment. The full UI suite is the coordinator's run.
 
 ## Decision Log
 
@@ -1216,6 +1244,21 @@ Added 2026-11-01 by amendment. It can run before or after the user records M9.
   processes. uniterm sends lifecycle events and each applet owns its response, per ADR-05, which was rewritten to say
   so. So undo now reopens from the description only, and closing a pane that is running something asks first. The user
   chose to remove the keep-alive tier and to ask on a running pane close.
+- 2026-11-01: M10 best guesses. The undo stack is depth 20, and the policy is that depth alone. A pane that exits while
+  the window-close question is open is ignored. Cancel then leaves the dead pane, and closing it asks nothing. The
+  earlier handling discarded it and reattached hidden panes, which no longer exist. Confirming a pane-close question
+  for a pane that has become the last one closes the window. Nothing in the host calls `detach` or `reattach`, and the
+  contract keeps both. Amended M10's check on the terminal's detach, which said it pauses nothing. The terminal applet
+  holds back alerts on detach, per ADR-05. Notifications that arrive while
+  detached are kept, only the newest is posted on reattach, and older ones are dropped. The terminal posts no bell
+  alert, so the bell has nothing to hold. A pane whose applet exited on its own never adds an undo entry, even when it
+  stays in the window after a cancelled window question and is closed later. (work-queue best guess)
+- 2026-11-01: Amended two bullets of M8's As built block, the one on the ID high-water mark and the one on the quit
+  save, and M10's check on the pane tree's IDs. The "What layout persistence restores" decision was amended in the
+  entry above, not here. M8 said panes hidden for undo are not saved and that their IDs are refused on insert, and that the quit save
+  runs before the hidden panes are hung up. M10 removed hidden panes and the ID an insert accepts. The text now says
+  the IDs of closed panes stay below the mark and are never issued again, and the quit save has no hang-up step after
+  it. M10's check said insert never accepts a retired ID. Insert now takes no ID. (work-queue best guess)
 
 ## References
 

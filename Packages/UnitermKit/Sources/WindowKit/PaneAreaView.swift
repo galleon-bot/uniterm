@@ -126,27 +126,16 @@ final class PaneAreaView: NSView {
     return created
   }
 
-  /// Brings a pane back, or opens a new one, where `placement` says. Pass the ID of a removed pane
-  /// to keep it, or nil for a new pane with a fresh ID. Throws when the pane does not fit. Focus
-  /// stays where it was, and the caller moves it.
+  /// Opens a new pane where `placement` says and puts `applet` in it. The pane gets a fresh ID.
+  /// Throws when the pane does not fit. Focus stays where it was, and the caller moves it.
   @discardableResult
-  func insert(_ applet: any Applet, as id: NodeID?, at placement: PanePlacement) throws -> NodeID {
-    let created = try tree.insert(id, at: placement, in: bounds.size)
+  func insert(_ applet: any Applet, at placement: PanePlacement) throws -> NodeID {
+    let created = try tree.insert(at: placement, in: bounds.size)
 
     install(applet, as: created)
     changed()
     layoutSubtreeIfNeeded()
     return created
-  }
-
-  /// Retires a removed pane's ID. Call it when the pane is discarded, so the ID never comes back.
-  func retire(_ pane: NodeID) {
-    tree.retire(pane)
-  }
-
-  /// True when `insert(_:as:at:)` would succeed now.
-  func canInsert(_ id: NodeID?, at placement: PanePlacement) -> Bool {
-    tree.canInsert(id, at: placement, in: bounds.size)
   }
 
   /// Removes a pane and gives its space to its neighbors. Returns nil for the last pane, which

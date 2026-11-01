@@ -41,7 +41,7 @@ final class QuitGuardTests: XCTestCase {
         asked.append(request)
         return answer
       },
-      makeController: { [unowned self] identifier in
+      makeController: { identifier in
         try MainWindowController(
           appearance: appearance, settings: store, identifier: identifier
         ) { _ in
@@ -56,22 +56,28 @@ final class QuitGuardTests: XCTestCase {
     return set
   }
 
-  /// Catches a quit that forgets a window, or a hidden pane. Window one is idle. Window two has a
-  /// visible pane running make and a hidden pane running vim. Quit lists both, and nothing from
-  /// window one.
-  func testQuitCountsEveryWindowsRunningTabsHiddenOnesIncluded() async throws {
+  /// Catches a quit that forgets a window, or counts a pane that is gone. Window one is idle.
+  /// Window two has two panes running make and vim. Quit lists both, and nothing from window one. A
+  /// third pane running emacs was closed with the user's say, so it is not listed.
+  func testQuitCountsEveryWindowsRunningTabs() async throws {
     let set = makeWindows()
     try set.open()
     let second = try set.open()
-    second.openPane(.terminalShell, axis: .row)
     made[1].isRunningSomething = true
     made[1].labels = ["make test"]
+    second.openPane(.terminalShell, axis: .row)
     made[2].isRunningSomething = true
     made[2].labels = ["vim"]
+    second.openPane(.terminalShell, axis: .row)
+    made[3].isRunningSomething = true
+    made[3].labels = ["emacs"]
+    second.confirmer = { _, _ in true }
     second.closePane(nil)
+    await second.pendingGuard?.value
 
+    XCTAssertTrue(made[3].closed)
     XCTAssertEqual(set.runningTabLabels, ["make test", "vim"])
-    XCTAssertEqual(second.paneIDs.count, 1)
+    XCTAssertEqual(second.paneIDs.count, 2)
 
     answer = false
     let proceed = await set.shouldQuit()
@@ -96,24 +102,5 @@ final class QuitGuardTests: XCTestCase {
 
     XCTAssertTrue(proceed)
     XCTAssertTrue(asked.isEmpty)
-  }
-
-  /// Catches a quit that leaves hidden processes behind. Hanging up ends the hidden panes of every
-  /// window and leaves the visible ones alone.
-  func testQuitHangsUpHiddenPanesInEveryWindow() throws {
-    let set = makeWindows()
-    let first = try set.open()
-    let second = try set.open()
-    first.openPane(.terminalShell, axis: .row)
-    second.openPane(.terminalShell, axis: .row)
-    first.closePane(nil)
-    second.closePane(nil)
-    XCTAssertEqual(made.map(\.closed), [false, false, false, false])
-
-    set.hangUpHiddenPanes()
-
-    XCTAssertEqual(made.map(\.closed), [false, false, true, true])
-    XCTAssertTrue(first.ledger.hidden.isEmpty)
-    XCTAssertTrue(second.ledger.hidden.isEmpty)
   }
 }

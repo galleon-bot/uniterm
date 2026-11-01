@@ -52,9 +52,8 @@ public struct SavedWindow: Sendable, Equatable {
   public var focusedPane: NodeID?
 
   /// The largest node ID the window's tree ever handed out. A restored tree starts its allocator
-  /// from it, so an ID that was retired before the quit, including one parked for a hidden pane,
-  /// is never issued again. Panes that were hidden for undo are not in the file, and their IDs stay
-  /// below the mark. Each window has its own tree and so its own mark.
+  /// from it, so an ID that was retired before the quit is never issued again. A closed pane is not
+  /// in the file, and its ID stays below the mark. Each window has its own tree and so its own mark.
   public var highWaterMark: UInt64
 
   public init(

@@ -145,7 +145,7 @@ public protocol TerminalSession: AnyObject {
 
   func setFocused(_ focused: Bool)
 
-  /// Tells the renderer whether the view can be seen. A detached session is not visible.
+  /// Tells the renderer whether the view can be seen.
   func setVisible(_ visible: Bool)
 
   /// Hangs up the child and releases the session. The session is unusable afterwards.

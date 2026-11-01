@@ -187,15 +187,30 @@ final class TerminalAppletTests: XCTestCase {
     XCTAssertEqual(answers.all, [true])
   }
 
-  func testDetachHidesAndReattachShowsTheSameSession() {
-    let (applet, engine, _, session) = makeApplet()
+  /// Catches a detached terminal that still posts alerts the user cannot see. Notifications that
+  /// arrive while detached are held, the newest is posted on reattach, and the older one is
+  /// dropped. The session itself stays alive and visible, since a shell has nothing else to pause.
+  /// It cannot show that the bell is held, since the terminal posts no bell alert at all.
+  func testDetachHoldsBackNotificationsAndReattachPostsTheNewest() {
+    let (applet, engine, host, session) = makeApplet()
 
     applet.detach()
-    XCTAssertFalse(session.visible)
+    session.onEvent?(.notification(title: "", body: "first"))
+    session.onEvent?(.notification(title: "", body: "second"))
+    session.onEvent?(.bell)
+
+    XCTAssertTrue(host.posts.isEmpty)
+    XCTAssertTrue(session.visible)
+    XCTAssertFalse(session.closed)
 
     applet.reattach()
-    XCTAssertTrue(session.visible)
+
+    XCTAssertEqual(host.posts.map(\.1), ["second"])
     XCTAssertEqual(engine.sessions.count, 1)
+
+    session.onEvent?(.notification(title: "", body: "live"))
+
+    XCTAssertEqual(host.posts.map(\.1), ["second", "live"])
   }
 
   func testRunningStateComesFromTheSession() {

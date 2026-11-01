@@ -31,20 +31,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   private let placement: StatusBarPlacement
   private let makeApplet: AppletFactory
   private let restoreApplet: AppletRestorer
-  private let undoClock: any StatusClock
-  private let undoScheduler: StatusScheduler
   private var appearanceToken: UUID?
   private var statusToken: UUID?
   private var started = Set<ObjectIdentifier>()
   private var panesClosed = false
   private var historyVisible = false
-  private var cancelUndoWake: (@MainActor () -> Void)?
 
-  /// The last visible pane after its applet ended on its own, kept because the hidden panes could
-  /// not be brought back. It leaves when one of them returns.
-  private var deadPane: NodeID?
-
-  /// The window's two undo tiers: closed panes kept alive and hidden, then descriptions.
+  /// The window's closed panes, as descriptions. No closed applet is kept alive.
   private(set) var ledger: CloseUndoLedger
 
   /// Asks the user before something is ended that undo cannot bring back. Tests replace it.
@@ -53,8 +46,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// The question the window is asking now, if any. A second question is not stacked on it.
   private(set) var pendingGuard: Task<Void, Never>?
 
-  /// The last visible pane whose applet ended while a question was open. The answer settles it.
-  private var exitedWhileAsking: NodeID?
+  /// Applets that ended on their own and are still in the tree, such as a last pane left behind by
+  /// a cancelled window question. Closing one adds no undo entry.
+  private var exitedApplets = Set<ObjectIdentifier>()
 
   /// Runs once, when the window closes. The set of windows uses it to let go of the controller.
   var onClose: ((MainWindowController) -> Void)?
@@ -75,8 +69,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// The settings store supplies the status bar position, which is global to every window. The
   /// identifier names the window to accessibility, so it must differ between open windows.
   ///
-  /// The undo policy sets how many closed panes stay alive, for how long, and how many closes the
-  /// window remembers. The clock and scheduler time the grace period.
+  /// The undo policy sets how many closes the window remembers.
   ///
   /// A restored window takes its pane tree and its applets from the saved layout, and `makeApplet`
   /// is not called for the first pane.
@@ -85,8 +78,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     statusCenter: StatusCenter = StatusCenter(),
     identifier: String = "main-window",
     undoPolicy: CloseUndoPolicy = .standard,
-    undoClock: any StatusClock = SystemStatusClock(),
-    undoScheduler: @escaping StatusScheduler = StatusCenter.defaultScheduler,
     restoring restored: RestoredWindow? = nil,
     restoreApplet: @escaping AppletRestorer = { _ in
       throw AppletRestoreError.unsupported("this window cannot reopen a closed pane")
@@ -97,8 +88,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     self.statusCenter = statusCenter
     self.makeApplet = makeApplet
     self.restoreApplet = restoreApplet
-    self.undoClock = undoClock
-    self.undoScheduler = undoScheduler
     ledger = CloseUndoLedger(policy: undoPolicy)
     placement = StatusBarPlacement(store: settings, statusCenter: statusCenter)
 
@@ -139,7 +128,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     contentController.onLayout = { [weak self] in self?.updateMinimumSize() }
     contentController.statusBar.onActivate = { [weak self] in self?.toggleMessageHistory(nil) }
     contentController.statusBar.onDismiss = { [weak self] in self?.dismissMessage(nil) }
-    contentController.statusBar.onHangUp = { [weak self] in self?.hangUpHiddenPanes() }
     placement.onChange = { [weak self] position in
       self?.contentController.move(.statusBar, to: DockEdge(position))
     }
@@ -201,14 +189,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   var statusBarSegments: [BarSegment] {
     StatusBarContent.segments(
       display: statusCenter.display, hasUnseenError: statusCenter.hasUnseenError,
-      grace: graceIndicator, applet: paneArea.applet(for: paneArea.focusedPane)?.segments ?? [])
-  }
-
-  private var graceIndicator: GraceIndicator? {
-    guard let deadline = ledger.nextDeadline else { return nil }
-
-    let left = Int(max(0, deadline - undoClock.now).rounded(.up))
-    return GraceIndicator(count: ledger.hidden.count, secondsLeft: left)
+      applet: paneArea.applet(for: paneArea.focusedPane)?.segments ?? [])
   }
 
   private func refreshStatusBar() {
@@ -378,113 +359,61 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   /// Closes one pane. Its space goes to its neighbors. The last pane closes the window.
   ///
-  /// A pane the user closes stays alive and hidden for a grace period, so undo can bring back the
-  /// exact session. A pane whose applet ended on its own has nothing to keep.
+  /// A pane the user closes ends its applet at once, and its description goes on the undo stack. A
+  /// pane that is running something asks first. A pane whose applet ended on its own has nothing to
+  /// undo.
   private func closePane(_ pane: NodeID, appletEnded: Bool) {
     guard let applet = paneArea.applet(for: pane) else { return }
 
     guard paneArea.paneCount > 1 else {
-      closeLastPane(exited: appletEnded ? pane : nil)
+      closeLastPane()
       return
     }
 
-    if appletEnded {
+    if appletEnded || exitedApplets.contains(ObjectIdentifier(applet)) {
       discard(pane)
-      return
-    }
-
-    switch roomForClosedPane(applet) {
-    case .keep:
-      hide(pane)
-
-    case .describeOnly:
-      describeAndClose(pane)
-
-    case .ask:
+    } else if applet.isRunningSomething {
       askBeforeClosing(pane, applet: applet)
+    } else {
+      describeAndClose(pane)
     }
-  }
-
-  private enum Room {
-    /// A grace slot is free, so the pane stays alive, hidden.
-    case keep
-
-    /// No slot is free and the pane is idle. Only its description is kept.
-    case describeOnly
-
-    /// No slot is free and the pane is running something. Ending it needs the user's say.
-    case ask
-  }
-
-  /// Decides what a closing pane gets. When the slots are full, an idle hidden pane drops to its
-  /// description first, which frees a slot before any dialog is shown.
-  private func roomForClosedPane(_ applet: any Applet) -> Room {
-    if ledger.hasFreeSlot { return .keep }
-
-    if let idle = ledger.hidden.first(where: { !$0.applet.isRunningSomething }) {
-      dropToDescription(idle)
-      return .keep
-    }
-
-    return applet.isRunningSomething ? .ask : .describeOnly
   }
 
   private func askBeforeClosing(_ pane: NodeID, applet: any Applet) {
     let request = CloseConfirmation(
       title: "Close this pane?",
       detail:
-        "Every closed pane that can stay alive is already in use. Closing this one ends what is running in it. Undo reopens the pane, but not the running session.",
+        "Closing this pane ends what is running in it. Undo reopens the pane in the same place, but not the running session.",
       labels: applet.runningLabels, confirmTitle: "Close Pane", cancelTitle: "Cancel")
 
-    ask(request, replaysExit: true) { [weak self] in
-      guard let self, paneArea.applet(for: pane) === applet, paneArea.paneCount > 1 else {
-        return
-      }
+    ask(request) { [weak self] in
+      guard let self, paneArea.applet(for: pane) === applet else { return }
 
-      describeAndClose(pane)
+      if paneArea.paneCount > 1 {
+        describeAndClose(pane)
+      } else {
+        window?.close()
+      }
     }
   }
 
-  /// Takes a pane out of the tree. Returns what undo needs to bring it back.
-  private func takeOut(_ pane: NodeID) -> (applet: any Applet, closed: ClosedPane)? {
-    guard let applet = paneArea.applet(for: pane),
-      let removed = try? paneArea.remove(pane)
-    else { return nil }
+  /// Ends the pane's applet at once and puts its description on the undo stack.
+  private func describeAndClose(_ pane: NodeID) {
+    guard let applet = paneArea.applet(for: pane), let removed = try? paneArea.remove(pane)
+    else { return }
 
     let closed = ClosedPane(
-      paneID: pane, placement: removed.placement, description: applet.describe(),
-      title: applet.title, serial: ledger.nextSerial())
+      placement: removed.placement, description: applet.describe(), title: applet.title)
 
+    started.remove(ObjectIdentifier(applet))
+    applet.close()
     statusCenter.paneClosed(id: pane.rawValue)
 
     if let next = removed.refocus {
       paneArea.focus(next)
     }
 
-    return (applet, closed)
-  }
-
-  /// Keeps the closed pane's applet alive and hidden until its deadline.
-  private func hide(_ pane: NodeID) {
-    guard let taken = takeOut(pane) else { return }
-
-    taken.applet.detach()
-    ledger.hide(
-      taken.closed, applet: taken.applet, deadline: undoClock.now + ledger.policy.gracePeriod)
-
-    undoStateDidChange()
-  }
-
-  /// Ends the closed pane's applet at once. Only its description stays.
-  private func describeAndClose(_ pane: NodeID) {
-    guard let taken = takeOut(pane) else { return }
-
-    started.remove(ObjectIdentifier(taken.applet))
-    taken.applet.close()
-    paneArea.retire(taken.closed.paneID)
-    ledger.describe(taken.closed)
-
-    undoStateDidChange()
+    ledger.push(closed)
   }
 
   /// Closes a pane whose applet ended on its own. Nothing is kept for undo.
@@ -493,8 +422,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     else { return }
 
     started.remove(ObjectIdentifier(applet))
+    exitedApplets.remove(ObjectIdentifier(applet))
     applet.close()
-    paneArea.retire(pane)
     statusCenter.paneClosed(id: pane.rawValue)
 
     if let next = removed.refocus {
@@ -502,83 +431,16 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
   }
 
-  /// Ends a hidden pane's applet. Its description moves to the stack.
-  private func dropToDescription(_ hidden: HiddenPane) {
-    ledger.unhide(hidden.applet)
-    started.remove(ObjectIdentifier(hidden.applet))
-    hidden.applet.close()
-    paneArea.retire(hidden.closed.paneID)
-    ledger.describe(hidden.closed)
-
-    undoStateDidChange()
-  }
-
-  /// Ends every hidden pane's applet now, as the grace segment's action does. Their descriptions
-  /// stay on the stack, so undo can still reopen the panes.
-  public func hangUpHiddenPanes() {
-    for hidden in ledger.takeAllHidden() {
-      started.remove(ObjectIdentifier(hidden.applet))
-      hidden.applet.close()
-      paneArea.retire(hidden.closed.paneID)
-      ledger.describe(hidden.closed)
-    }
-
-    undoStateDidChange()
-  }
-
-  /// Hangs up the hidden panes whose deadline has come.
-  private func expireHiddenPanes() {
-    for hidden in ledger.takeExpired(at: undoClock.now) {
-      started.remove(ObjectIdentifier(hidden.applet))
-      hidden.applet.close()
-      paneArea.retire(hidden.closed.paneID)
-      ledger.describe(hidden.closed)
-    }
-  }
-
-  /// One tick keeps the countdown honest and hangs up what has expired. It wakes at most once a
-  /// second, and sooner when a deadline falls between ticks.
-  private func scheduleUndoWake() {
-    cancelUndoWake?()
-    cancelUndoWake = nil
-
-    guard let deadline = ledger.nextDeadline else { return }
-
-    let delay = min(1, max(0, deadline - undoClock.now))
-    cancelUndoWake = undoScheduler(delay) { [weak self] in
-      self?.undoWake()
-    }
-  }
-
-  private func undoWake() {
-    cancelUndoWake = nil
-    expireHiddenPanes()
-    undoStateDidChange()
-  }
-
-  private func undoStateDidChange() {
-    scheduleUndoWake()
-    refreshStatusBar()
-  }
-
-  /// What is running in this window: every visible pane, and every hidden pane that is still
-  /// alive. Closing the window or quitting ends all of it.
+  /// What is running in this window. Closing the window or quitting ends all of it.
   public var runningTabLabels: [String] {
-    let hidden = ledger.hidden.map(\.applet)
-    return (paneArea.applets + hidden).flatMap { $0.runningLabels }
+    paneArea.applets.flatMap { $0.runningLabels }
   }
 
-  /// The last pane closes the window. When something is running in the window, including a hidden
-  /// pane, the user is asked first. Cancel keeps the window and brings back the hidden panes that
-  /// are running something. An applet that ended on its own then leaves, since it has nothing
-  /// left to show. When no hidden pane fits, it stays so the window is not left empty, and it
-  /// leaves as soon as a hidden pane returns.
-  private func closeLastPane(exited: NodeID?) {
-    guard pendingGuard == nil else {
-      if let exited { exitedWhileAsking = exited }
-
-      return
-    }
+  /// The last pane closes the window. When something is running in it, the user is asked first,
+  /// and Cancel keeps the window. A pane whose applet ended while the question is open is not
+  /// asked about again. It stays after a Cancel, and closing it then needs no question.
+  private func closeLastPane() {
+    guard pendingGuard == nil else { return }
 
     let labels = runningTabLabels
 
@@ -587,41 +449,23 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       return
     }
 
-    askToCloseWindow(labels: labels) { [weak self] in
-      guard let self else { return }
-
-      reattachRunningHiddenPanes()
-
-      guard let exited else { return }
-
-      if paneArea.paneCount > 1 {
-        discard(exited)
-      } else {
-        deadPane = exited
-      }
-    }
+    askToCloseWindow(labels: labels)
   }
 
-  private func askToCloseWindow(labels: [String], onCancel: @escaping @MainActor () -> Void) {
+  private func askToCloseWindow(labels: [String]) {
     let request = CloseConfirmation(
       title: "Close this window?",
       detail: "Closing the window ends everything that is running in it.", labels: labels,
       confirmTitle: "Close Window", cancelTitle: "Cancel")
 
-    ask(request, onCancel: onCancel) { [weak self] in
+    ask(request) { [weak self] in
       self?.window?.close()
     }
   }
 
-  /// Shows a question and runs one of two actions with the answer. A second question is dropped
-  /// while the first is open. The one caller that cannot afford that, a pane that ended, records
-  /// itself in `exitedWhileAsking` first. Cancel then discards it, or keeps it as the dead pane
-  /// when it is the last one. A confirmed pane-close question closes it again, since nothing
-  /// answered for it.
-  private func ask(
-    _ request: CloseConfirmation, replaysExit: Bool = false,
-    onCancel: @escaping @MainActor () -> Void = {}, onConfirm: @escaping @MainActor () -> Void
-  ) {
+  /// Shows a question and runs `onConfirm` when the user agrees. Declining does nothing. A second
+  /// question is dropped while the first is open.
+  private func ask(_ request: CloseConfirmation, onConfirm: @escaping @MainActor () -> Void) {
     guard pendingGuard == nil else { return }
 
     pendingGuard = Task { @MainActor [weak self] in
@@ -630,69 +474,16 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       let confirmed = await confirmer(request, window)
       pendingGuard = nil
 
-      let exited = exitedWhileAsking
-      exitedWhileAsking = nil
-
       if confirmed {
         onConfirm()
-
-        if replaysExit, let exited, paneArea.applet(for: exited) != nil {
-          closePane(exited, appletEnded: true)
-        }
-      } else {
-        onCancel()
-
-        if let exited, paneArea.applet(for: exited) != nil {
-          if paneArea.paneCount > 1 {
-            discard(exited)
-          } else {
-            deadPane = exited
-          }
-        }
       }
     }
   }
 
-  /// Brings back every hidden pane that is running something, newest first. Returns how many came
-  /// back. One that does not fit stays hidden, and the status bar says so.
-  @discardableResult
-  private func reattachRunningHiddenPanes() -> Int {
-    let running = ledger.hidden.filter { $0.applet.isRunningSomething }
-      .sorted { $0.closed.serial > $1.closed.serial }
-
-    return running.filter { reattach($0) }.count
-  }
-
-  /// Puts a hidden pane back in its place with its ID and its session. Returns false when it does
-  /// not fit. It stays hidden then, so a larger window can still undo.
-  @discardableResult
-  private func reattach(_ hidden: HiddenPane) -> Bool {
-    let id: NodeID
-
-    do {
-      id = try paneArea.insert(hidden.applet, as: hidden.closed.paneID, at: hidden.closed.placement)
-    } catch {
-      postNoRoom(to: "bring the pane back")
-      return false
-    }
-
-    ledger.unhide(hidden.applet)
-    hidden.applet.reattach()
-
-    if let dead = deadPane {
-      deadPane = nil
-      discard(dead)
-    }
-
-    paneArea.focus(id)
-
-    undoStateDidChange()
-    return true
-  }
-
-  /// Opens a pane from a closed pane's description. The pane gets a new ID, and the applet starts
-  /// fresh. A description this build cannot restore opens as a placeholder, which keeps its bytes.
-  /// The entry stays on the stack when the pane does not fit.
+  /// Opens a pane from a closed pane's description, in the same place with the same kind of applet.
+  /// The pane gets a new ID, and the applet starts fresh. A description this build cannot restore
+  /// opens as a placeholder, which keeps its bytes. The entry stays on the stack when the pane does
+  /// not fit.
   private func reopen(_ closed: ClosedPane) {
     let restored = PaneRestoration.applet(for: closed.description, restorer: restoreApplet)
     let applet = restored.applet
@@ -701,17 +492,16 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
     let id: NodeID
     do {
-      id = try paneArea.insert(applet, as: nil, at: closed.placement)
+      id = try paneArea.insert(applet, at: closed.placement)
     } catch {
       applet.close()
       postNoRoom(to: "reopen the pane")
       return
     }
 
-    ledger.removeDescribed(serial: closed.serial)
+    ledger.removeNewest()
     startPendingApplets()
     paneArea.focus(id)
-    undoStateDidChange()
 
     if restored.isPlaceholder {
       statusCenter.post(
@@ -822,32 +612,27 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     statusCenter.dismissCurrent()
   }
 
-  /// Brings back the pane that closed last. A pane still hidden returns with its session and its
-  /// ID. Past the grace period, the pane reopens from its description with a new ID.
+  /// Reopens the pane that closed last from its description, in its former place, with a new ID.
   ///
   /// The window calls this for the standard undo action, except while a text control is being
   /// edited. Then Cmd-Z undoes the edit and never a pane close.
   @objc public func undoClosePane(_ sender: Any?) {
     guard paneActionsEnabled else { return }
 
-    switch ledger.newest {
-    case .hidden(let hidden):
-      reattach(hidden)
-
-    case .described(let closed):
-      reopen(closed)
-
-    case nil:
+    guard let closed = ledger.newest else {
       statusCenter.post(level: .info, source: .uniterm, text: "There is no closed pane to undo.")
+      return
     }
+
+    reopen(closed)
   }
 
   /// Closes the focused pane's selected tab when its applet has several. Otherwise it closes the
   /// pane, and with one pane left the window closes too.
   ///
-  /// A tab running something asks first, and the applet does the asking. A pane close asks only
-  /// when no grace slot is free for a pane that is running something. A close that ends the window
-  /// asks when anything in the window is running, including hidden panes.
+  /// A tab running something asks first, and the applet does the asking. A pane close asks when any
+  /// of its tabs is running something. A close that ends the window asks when anything in the
+  /// window is running.
   @objc public func closePane(_ sender: Any?) {
     guard paneActionsEnabled else { return }
 
@@ -861,8 +646,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   // MARK: Saved layout
 
-  /// The window as a saved layout holds it. Hidden panes and the undo state are not part of it.
-  /// The saved tree is the visible one, and its IDs stay below the layout's high-water mark.
+  /// The window as a saved layout holds it. The undo stack is not part of it. The IDs of closed
+  /// panes stay below the layout's high-water mark.
   ///
   /// A pane with no applet cannot happen while the window is consistent. If it did, the pane is
   /// left out, so the rest of the layout still saves. A window with no pane left is not saved.
@@ -920,13 +705,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   // MARK: Window
 
   /// The red button and Cmd-Q on the last window end here. When something is running in the window,
-  /// including a hidden pane, the sheet asks and the close waits for the answer.
+  /// the sheet asks and the close waits for the answer.
   public func windowShouldClose(_ sender: NSWindow) -> Bool {
     let labels = runningTabLabels
 
     guard !labels.isEmpty else { return true }
 
-    askToCloseWindow(labels: labels) {}
+    askToCloseWindow(labels: labels)
     return false
   }
 
@@ -938,21 +723,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     onLayoutChange?()
   }
 
-  /// Closing the window ends every applet in it, hidden ones included, and lets go of the undo
-  /// state. Undoing a closed window is out of scope.
+  /// Closing the window ends every applet in it and lets go of the undo stack. Undoing a closed
+  /// window is out of scope.
   public func windowWillClose(_ notification: Notification) {
     guard !panesClosed else { return }
 
     panesClosed = true
-    cancelUndoWake?()
-    cancelUndoWake = nil
 
     for applet in paneArea.applets { applet.close() }
-
-    for hidden in ledger.takeAllHidden() {
-      started.remove(ObjectIdentifier(hidden.applet))
-      hidden.applet.close()
-    }
 
     ledger.removeAll()
 
@@ -964,20 +742,17 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   // MARK: Applet host
 
   public func applet(_ applet: any Applet, post level: StatusLevel, text: String) {
-    let id =
-      paneArea.paneID(for: applet)?.rawValue ?? ledger.hiddenPane(for: applet)?.closed.paneID
-      .rawValue
-      ?? 0
+    // An applet may keep bounded, visible work after close and still post. ID 0 never matches a
+    // live pane.
+    let id = paneArea.paneID(for: applet)?.rawValue ?? 0
     statusCenter.post(level: level, source: .pane(id: id, name: applet.title), text: text)
   }
 
-  /// A visible pane whose applet ended closes, and keeps nothing for undo. A hidden pane whose
-  /// applet ended has nothing alive to keep, so it drops to its description.
+  /// A pane whose applet ended closes, and keeps nothing for undo.
   public func appletDidExit(_ applet: any Applet) {
     if let pane = paneArea.paneID(for: applet) {
+      exitedApplets.insert(ObjectIdentifier(applet))
       closePane(pane, appletEnded: true)
-    } else if let hidden = ledger.hiddenPane(for: applet) {
-      dropToDescription(hidden)
     }
   }
 

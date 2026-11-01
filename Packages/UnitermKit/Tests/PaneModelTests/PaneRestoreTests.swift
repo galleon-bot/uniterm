@@ -57,9 +57,8 @@ final class PaneRestoreTests: XCTestCase {
     XCTAssertEqual(try tree.split(id(1), axis: .column, in: wide), id(6))
   }
 
-  /// Catches a restore that reissues the ID of a pane closed before the quit, whether it was
-  /// parked for undo or gone. IDs 3 and 4 were handed out and are not in the tree. Both are
-  /// retired, and a hidden pane's ID cannot be inserted from the new tree.
+  /// Catches a restore that reissues the ID of a pane closed before the quit. IDs 3 and 4 were
+  /// handed out and are not in the tree. Both are retired, and the next node gets 10.
   func testIDsRetiredBeforeTheQuitStayRetired() throws {
     var tree = try PaneTree(
       restoring: row(5, [(pane(1), 0.5), (pane(2), 0.5)]), highWaterMark: 9, metrics: flat)
@@ -72,12 +71,10 @@ final class PaneRestoreTests: XCTestCase {
 
     let placement = PanePlacement(neighbor: id(1), axis: .row, side: .after, weight: 0.5)
 
-    XCTAssertThrowsError(try tree.insert(id(3), at: placement, in: wide)) {
-      XCTAssertEqual($0 as? PaneTreeError, .retired(id(3)))
-    }
+    XCTAssertEqual(try tree.insert(at: placement, in: wide), id(10))
 
-    XCTAssertThrowsError(try tree.insert(id(30), at: placement, in: wide)) {
-      XCTAssertEqual($0 as? PaneTreeError, .neverIssued(id(30)))
+    for retired in [3, 4, 9] as [UInt64] {
+      XCTAssertTrue(tree.isRetired(id(retired)), "\(retired)")
     }
   }
 

@@ -56,21 +56,20 @@ final class PanePlacementTests: XCTestCase {
     XCTAssertNil(tree.placement(of: id(1)))
   }
 
-  /// Catches an undo that changes the pane's ID or burns a new one. Pane 2 closes and returns. It
-  /// sits between 1 and 4 again. Closing gave 1 and 4 weights 0.625 and 0.375. Returning takes 0.25
-  /// and scales them by 0.75: 0.46875 and 0.28125. The highest ID ever issued stays 4.
-  func testAReattachedPaneKeepsItsIDAndItsPlace() throws {
+  /// Catches an undo that puts the pane in the wrong place or at the wrong size. Pane 2 closes and a
+  /// new pane takes its place. It sits between 1 and 4 again, with ID 5. Closing gave 1 and 4
+  /// weights 0.625 and 0.375. Returning takes 0.25 and scales them by 0.75: 0.46875 and 0.28125.
+  func testAReopenedPaneTakesItsFormerPlaceAndWeight() throws {
     var tree = try threeInARow()
     let placement = try XCTUnwrap(tree.placement(of: id(2)))
     _ = try tree.close(id(2))
 
-    let returned = try tree.insert(id(2), at: placement, in: wide)
+    let reopened = try tree.insert(at: placement, in: wide)
 
-    XCTAssertEqual(returned, id(2))
+    XCTAssertEqual(reopened, id(5))
     let root = try rootSplit(tree)
-    XCTAssertEqual(root.children.map { $0.node.id }, [id(1), id(2), id(4)])
+    XCTAssertEqual(root.children.map { $0.node.id }, [id(1), id(5), id(4)])
     XCTAssertEqual(root.children.map(\.weight), [0.46875, 0.25, 0.28125])
-    XCTAssertEqual(tree.highWaterMark, 4)
   }
 
   /// Catches a pane reopened from a description that takes the old ID. The ID 4 is the next after
@@ -81,7 +80,7 @@ final class PanePlacementTests: XCTestCase {
     let placement = try XCTUnwrap(tree.placement(of: id(2)))
     _ = try tree.close(id(2))
 
-    let reopened = try tree.insert(nil, at: placement, in: wide)
+    let reopened = try tree.insert(at: placement, in: wide)
 
     XCTAssertEqual(reopened, id(4))
     XCTAssertEqual(tree.paneIDs, [id(1), id(4)])
@@ -89,26 +88,27 @@ final class PanePlacementTests: XCTestCase {
   }
 
   /// Catches an undo of the only split that cannot rebuild it. Closing pane 2 leaves pane 1 alone.
-  /// The neighbor is the root pane, so it is wrapped in a new split. The old split 3 stays retired,
-  /// so the new one is 4. Both halves are 0.5.
+  /// The neighbor is the root pane, so it is wrapped in a new split. The old split 3 stays retired.
+  /// The new pane is 4 and the new split is 5. Both halves are 0.5.
   func testUndoingTheOnlySplitWrapsTheRootPane() throws {
     var tree = PaneTree(metrics: flat)
     try tree.split(id(1), axis: .row, in: wide)
     let placement = try XCTUnwrap(tree.placement(of: id(2)))
     _ = try tree.close(id(2))
 
-    try tree.insert(id(2), at: placement, in: wide)
+    try tree.insert(at: placement, in: wide)
 
     let root = try rootSplit(tree)
-    XCTAssertEqual(root.id, id(4))
+    XCTAssertEqual(root.id, id(5))
     XCTAssertEqual(root.axis, .row)
-    XCTAssertEqual(root.children.map { $0.node.id }, [id(1), id(2)])
+    XCTAssertEqual(root.children.map { $0.node.id }, [id(1), id(4)])
     XCTAssertEqual(root.children.map(\.weight), [0.5, 0.5])
   }
 
   /// Catches an undo that ignores the placement's axis when the neighbor has since moved into a
   /// split of the other axis. Pane 1 was split along a column after pane 2 closed. Pane 2 returns
-  /// beside pane 1 along the row, so pane 1 and 2 share a new row split inside the column.
+  /// beside pane 1 along the row, so pane 1 and the new pane 6 share a new row split inside the
+  /// column.
   func testAChangedNeighborIsWrappedAlongTheRecordedAxis() throws {
     var tree = PaneTree(metrics: flat)
     try tree.split(id(1), axis: .row, in: wide)
@@ -116,7 +116,7 @@ final class PanePlacementTests: XCTestCase {
     _ = try tree.close(id(2))
     let below = try tree.split(id(1), axis: .column, in: wide)
 
-    try tree.insert(id(2), at: placement, in: wide)
+    try tree.insert(at: placement, in: wide)
 
     let column = try rootSplit(tree)
     XCTAssertEqual(column.axis, .column)
@@ -128,12 +128,12 @@ final class PanePlacementTests: XCTestCase {
     }
 
     XCTAssertEqual(row.axis, .row)
-    XCTAssertEqual(row.children.map { $0.node.id }, [id(1), id(2)])
+    XCTAssertEqual(row.children.map { $0.node.id }, [id(1), id(6)])
     XCTAssertEqual(column.children[0].weight, 0.5)
   }
 
   /// Catches a neighbor that must be a pane. Pane 1 sat before a column split. Closing it leaves the
-  /// column as the root. Undo places pane 1 beside that split by the split's own ID, 5.
+  /// column as the root. Undo places the new pane 6 beside that split by the split's own ID, 5.
   func testASplitCanBeTheNeighbor() throws {
     var tree = PaneTree(metrics: flat)
     try tree.split(id(1), axis: .row, in: wide)
@@ -143,18 +143,18 @@ final class PanePlacementTests: XCTestCase {
     XCTAssertEqual(placement.side, .before)
     _ = try tree.close(id(1))
 
-    try tree.insert(id(1), at: placement, in: wide)
+    try tree.insert(at: placement, in: wide)
 
     let root = try rootSplit(tree)
     XCTAssertEqual(root.axis, .row)
-    XCTAssertEqual(root.children.map { $0.node.id }, [id(1), id(5)])
+    XCTAssertEqual(root.children.map { $0.node.id }, [id(6), id(5)])
     XCTAssertEqual(root.children.map(\.weight), [0.5, 0.5])
   }
 
   /// Catches the fallback that is not defined. Panes 1, 2, 4, and 5 have weights 0.5, 0.25, 0.125,
   /// and 0.125. Pane 5 closes, then 4, so 5's neighbor is gone and the row holds 1 and 2 at 0.5
-  /// each. Pane 5 goes to the end of the root along the row with its recorded 0.125. The others
-  /// scale by 0.875 to 0.4375 each.
+  /// each. The new pane 6 goes to the end of the root along the row with pane 5's recorded 0.125.
+  /// The others scale by 0.875 to 0.4375 each.
   func testAGoneNeighborFallsBackToTheEndOfTheRoot() throws {
     var tree = PaneTree(metrics: flat)
     try tree.split(id(1), axis: .row, in: wide)
@@ -167,15 +167,15 @@ final class PanePlacementTests: XCTestCase {
     _ = try tree.close(id(5))
     _ = try tree.close(id(4))
 
-    try tree.insert(id(5), at: placement, in: wide)
+    try tree.insert(at: placement, in: wide)
 
     let root = try rootSplit(tree)
-    XCTAssertEqual(root.children.map { $0.node.id }, [id(1), id(2), id(5)])
+    XCTAssertEqual(root.children.map { $0.node.id }, [id(1), id(2), id(6)])
     XCTAssertEqual(root.children.map(\.weight), [0.4375, 0.4375, 0.125])
   }
 
   /// Catches a fallback that ignores the recorded side. Pane 1 sat before pane 2. With 2 and 1
-  /// gone, only pane 4 is left. Pane 1 returns before it, not after.
+  /// gone, only pane 4 is left. The new pane 5 goes before it, not after.
   func testTheFallbackKeepsTheRecordedSide() throws {
     var tree = try threeInARow()
     let placement = try XCTUnwrap(tree.placement(of: id(1)))
@@ -184,9 +184,9 @@ final class PanePlacementTests: XCTestCase {
     _ = try tree.close(id(2))
     XCTAssertEqual(tree.paneIDs, [id(4)])
 
-    try tree.insert(id(1), at: placement, in: wide)
+    try tree.insert(at: placement, in: wide)
 
-    XCTAssertEqual(tree.paneIDs, [id(1), id(4)])
+    XCTAssertEqual(tree.paneIDs, [id(5), id(4)])
     XCTAssertEqual(try rootSplit(tree).children.map(\.weight), [0.5, 0.5])
   }
 
@@ -198,14 +198,12 @@ final class PanePlacementTests: XCTestCase {
     let placement = PanePlacement(neighbor: id(1), axis: .row, side: .after, weight: 0.5)
     let before = tree
 
-    XCTAssertThrowsError(try tree.insert(nil, at: placement, in: tiny)) { error in
+    XCTAssertThrowsError(try tree.insert(at: placement, in: tiny)) { error in
       XCTAssertEqual(error as? PaneTreeError, .belowMinimumSize(id(1)))
     }
 
     XCTAssertEqual(tree, before)
     XCTAssertEqual(tree.highWaterMark, 1)
-    XCTAssertFalse(tree.canInsert(nil, at: placement, in: tiny))
-    XCTAssertTrue(tree.canInsert(nil, at: placement, in: wide))
   }
 
   /// Catches a recorded weight that is applied even when it squeezes the pane. A recorded weight
@@ -215,54 +213,31 @@ final class PanePlacementTests: XCTestCase {
     var tree = PaneTree(metrics: flat)
     let placement = PanePlacement(neighbor: id(1), axis: .row, side: .after, weight: 0.05)
 
-    try tree.insert(nil, at: placement, in: wide)
+    try tree.insert(at: placement, in: wide)
 
     XCTAssertEqual(try rootSplit(tree).children.map(\.weight), [0.5, 0.5])
   }
 
-  /// Catches a reattach of a pane that is already in the tree, or of an ID never issued.
-  func testReattachingAPresentOrUnknownPaneIsRefused() throws {
-    var tree = try threeInARow()
-    let placement = PanePlacement(neighbor: id(1), axis: .row, side: .after, weight: 0.25)
-    let before = tree
-
-    XCTAssertThrowsError(try tree.insert(id(2), at: placement, in: wide)) { error in
-      XCTAssertEqual(error as? PaneTreeError, .alreadyInTree(id(2)))
-    }
-
-    XCTAssertThrowsError(try tree.insert(id(99), at: placement, in: wide)) { error in
-      XCTAssertEqual(error as? PaneTreeError, .neverIssued(id(99)))
-    }
-
-    XCTAssertEqual(tree, before)
-  }
-
-  /// Catches a retired ID that can come back. A closed pane's ID returns only while the pane is
-  /// parked. After the caller retires it, insert refuses it and the allocator never issues it
-  /// again. The tree is left as it was, and a new pane gets a fresh ID.
-  func testARetiredPaneIDNeverComesBack() throws {
+  /// Catches an ID that comes back. A closed pane's ID is retired the moment the pane leaves the
+  /// tree. A pane opened at its place gets a fresh ID, and the closed ID stays retired.
+  func testAClosedPanesIDIsRetiredAndNeverIssuedAgain() throws {
     var tree = try threeInARow()
     let placement = try XCTUnwrap(tree.placement(of: id(2)))
     _ = try tree.close(id(2))
-    tree.retire(id(2))
-    let before = tree
 
-    XCTAssertThrowsError(try tree.insert(id(2), at: placement, in: wide)) { error in
-      XCTAssertEqual(error as? PaneTreeError, .retired(id(2)))
-    }
+    XCTAssertTrue(tree.isRetired(id(2)))
 
-    XCTAssertEqual(tree, before)
-
-    let fresh = try tree.insert(nil, at: placement, in: wide)
+    let fresh = try tree.insert(at: placement, in: wide)
 
     XCTAssertEqual(fresh, id(5))
     XCTAssertFalse(tree.paneIDs.contains(id(2)))
+    XCTAssertTrue(tree.isRetired(id(2)))
   }
 
-  /// Catches a node that vanished in a collapse and can be brought back as a pane. Splitting 2
-  /// downward makes split 5, and closing the new pane collapses it. Split 5 was never a closed
-  /// pane, so its ID is retired from the start and insert refuses it.
-  func testACollapsedNodeIDCannotBeInserted() throws {
+  /// Catches a node that vanished in a collapse and is issued again. Splitting 2 downward makes
+  /// pane 4 and split 5, and closing pane 4 collapses split 5. Both are retired, and a pane opened
+  /// afterward is 6.
+  func testACollapsedNodeIDIsRetiredAndNeverIssuedAgain() throws {
     var tree = PaneTree(metrics: flat)
     try tree.split(id(1), axis: .row, in: wide)
     let lower = try tree.split(id(2), axis: .column, in: wide)
@@ -271,28 +246,12 @@ final class PanePlacementTests: XCTestCase {
     let collapsed = id(lower.rawValue + 1)
 
     XCTAssertFalse(tree.contains(collapsed))
-    XCTAssertThrowsError(try tree.insert(collapsed, at: placement, in: wide)) { error in
-      XCTAssertEqual(error as? PaneTreeError, .retired(collapsed))
-    }
-  }
+    XCTAssertTrue(tree.isRetired(collapsed))
 
-  /// Catches a parked ID that comes back twice. The pane returns once and keeps its ID. A second
-  /// insert finds it in the tree.
-  func testAParkedPaneIDReturnsOnceOnly() throws {
-    var tree = try threeInARow()
-    let placement = try XCTUnwrap(tree.placement(of: id(2)))
-    _ = try tree.close(id(2))
+    let fresh = try tree.insert(at: placement, in: wide)
 
-    try tree.insert(id(2), at: placement, in: wide)
-
-    XCTAssertThrowsError(try tree.insert(id(2), at: placement, in: wide)) { error in
-      XCTAssertEqual(error as? PaneTreeError, .alreadyInTree(id(2)))
-    }
-
-    _ = try tree.close(id(2))
-    try tree.insert(id(2), at: placement, in: wide)
-
-    XCTAssertTrue(tree.contains(id(2)))
+    XCTAssertEqual(fresh, id(6))
+    XCTAssertTrue(tree.isRetired(collapsed))
   }
 
   /// Catches a pane that comes back as an extra nesting level. After the merge the tree never nests
@@ -302,7 +261,7 @@ final class PanePlacementTests: XCTestCase {
     let placement = try XCTUnwrap(tree.placement(of: id(4)))
     _ = try tree.close(id(4))
 
-    try tree.insert(nil, at: placement, in: wide)
+    try tree.insert(at: placement, in: wide)
 
     let root = try rootSplit(tree)
     XCTAssertEqual(root.children.count, 3)

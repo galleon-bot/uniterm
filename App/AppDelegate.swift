@@ -198,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
   }
 
-  /// Quitting asks first when anything is running in any window, hidden closed panes included.
+  /// Quitting asks first when anything is running in any window.
   /// The answer comes later, so AppKit waits for it. A second Cmd-Q while the question is open
   /// does not stack another one.
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -219,7 +219,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationWillTerminate(_ notification: Notification) {
     layoutPersistence?.saveForQuit()
-    windowSet?.hangUpHiddenPanes()
     terminalEngine?.removeConfigFile()
   }
 

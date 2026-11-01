@@ -198,7 +198,7 @@ final class WindowSetTests: XCTestCase {
   /// Catches a pane action that reaches another window's panes.
   ///
   /// The window controller owns the action and acts on its own tree, so a split in the first leaves
-  /// the second alone. The closed pane's applet is detached, not touched elsewhere.
+  /// the second alone. Only the closed pane's applet is closed.
   func testPaneActionsActOnTheirOwnWindowOnly() throws {
     let fixture = makeFixture()
     let first = try fixture.windows.open()
@@ -210,8 +210,7 @@ final class WindowSetTests: XCTestCase {
     XCTAssertEqual(first.paneIDs, [NodeID(rawValue: 1)])
     XCTAssertEqual(second.paneIDs, [NodeID(rawValue: 1)])
     XCTAssertFalse(fixture.log.made[0].closed)
-    XCTAssertEqual(fixture.log.made[2].detachCount, 1)
-    XCTAssertEqual(fixture.log.made[1].detachCount, 0)
+    XCTAssertTrue(fixture.log.made[2].closed)
     XCTAssertFalse(fixture.log.made[1].closed)
   }
 

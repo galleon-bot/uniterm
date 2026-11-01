@@ -7,32 +7,6 @@ import XCTest
 
 @testable import WindowKit
 
-/// Holds the wakeups the undo timer asks for, so a test fires them by hand. A cancelled wake is
-/// gone, as with a real timer.
-@MainActor
-final class WakeScheduler {
-  private var counter = 0
-  private(set) var pending: [Int: (delay: TimeInterval, action: @MainActor () -> Void)] = [:]
-
-  func schedule(_ delay: TimeInterval, _ action: @escaping @MainActor () -> Void)
-    -> @MainActor ()
-    -> Void
-  {
-    counter += 1
-    let id = counter
-    pending[id] = (delay, action)
-
-    return { [weak self] in self?.pending[id] = nil }
-  }
-
-  /// Runs the one pending wake, if there is one.
-  func fire() {
-    guard let id = pending.keys.min(), let entry = pending.removeValue(forKey: id) else { return }
-
-    entry.action()
-  }
-}
-
 @MainActor
 final class UndoRecorder {
   var made: [FakeApplet] = []
@@ -43,15 +17,12 @@ final class UndoRecorder {
   var answers: [Bool] = []
 }
 
-/// One window over fake applets, a manual clock, a scheduler held by hand, and a confirmer that
-/// records what it was asked and answers from a script. The applets are titled "Fake 0",
-/// "Fake 1", and so on in the order made.
+/// One window over fake applets and a confirmer that records what it was asked and answers from a
+/// script. The applets are titled "Fake 0", "Fake 1", and so on in the order made.
 @MainActor
 final class UndoFixture {
   let suite = "uniterm-undo-test-\(UUID().uuidString)"
   let defaults: UserDefaults
-  let clock = TestClock()
-  let scheduler = WakeScheduler()
   let recorder = UndoRecorder()
   let controller: MainWindowController
 
@@ -64,7 +35,6 @@ final class UndoFixture {
 
     controller = try MainWindowController(
       appearance: AppearanceController(store: store), settings: store, undoPolicy: policy,
-      undoClock: clock, undoScheduler: scheduler.schedule,
       restoreApplet: { description in
         guard case .string(let title) = description.payload else {
           throw AppletRestoreError.corrupt("no title")
@@ -96,8 +66,6 @@ final class UndoFixture {
   }
 
   var made: [FakeApplet] { recorder.made }
-  var bar: StatusBarView { controller.contentController.statusBar }
-  var graceText: String? { bar.segments.first { $0.id == .grace }?.text }
 
   /// Opens panes until there are `count`. The first three sit in a row, as panes 1, 2, and 4. The
   /// fourth splits pane 4 downward as pane 5, since a fourth pane in the row would be too narrow.
@@ -114,10 +82,6 @@ final class UndoFixture {
   func settle() async {
     let task = controller.pendingGuard
     await task?.value
-  }
-
-  func hasSegment(_ id: BarSegmentID) -> Bool {
-    bar.segments.contains { $0.id == id }
   }
 }
 
@@ -146,80 +110,30 @@ final class UndoCloseTests: XCTestCase {
     return split.children.map(\.weight)
   }
 
-  // MARK: Grace tier
+  // MARK: Closing and undoing
 
-  /// Catches a close that tears the applet down at once, so undo has no live session to bring
-  /// back. The closed pane's applet is detached, alive, and the bar shows the grace period. The
-  /// clock reads 0 and the period is 10 seconds, so 10 are left.
-  func testClosingAPaneKeepsItsAppletAliveAndHidden() throws {
+  /// Catches a close that keeps the applet alive for undo. The closed pane's applet is closed at
+  /// once. It is never detached, and nothing is asked for an idle pane.
+  func testClosingAPaneEndsItsAppletAtOnce() throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
 
     fixture.controller.closePane(nil)
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
-    XCTAssertEqual(fixture.made[1].detachCount, 1)
-    XCTAssertFalse(fixture.made[1].closed)
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 1)
-    XCTAssertEqual(fixture.graceText, "1 closed pane kept for 10s. Cmd-Z undoes")
-    XCTAssertTrue(fixture.hasSegment(.graceHangUp))
-  }
-
-  /// Catches an undo that brings back a new applet or a new ID instead of the exact session. The
-  /// pane returns with ID 2 and the same applet object. No applet is made, and none is restored
-  /// from a description. The two panes share the row evenly again.
-  func testUndoWithinGraceReattachesTheSameAppletAndID() throws {
-    let fixture = try makeFixture()
-    fixture.openPanes(2)
-    fixture.controller.closePane(nil)
-
-    fixture.controller.undoClosePane(nil)
-
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2)])
-    XCTAssertTrue(fixture.controller.paneArea.applet(for: id(2)) === fixture.made[1])
-    XCTAssertEqual(fixture.made[1].reattachCount, 1)
-    XCTAssertFalse(fixture.made[1].closed)
-    XCTAssertEqual(fixture.made.count, 2)
-    XCTAssertTrue(fixture.recorder.restored.isEmpty)
-    XCTAssertEqual(rootWeights(fixture.controller), [0.5, 0.5])
-    XCTAssertEqual(fixture.controller.focusedPane, id(2))
-    XCTAssertTrue(fixture.controller.ledger.hidden.isEmpty)
-    XCTAssertFalse(fixture.hasSegment(.grace))
-  }
-
-  /// Catches a countdown that never moves, and a deadline that does not hang the pane up. At 3
-  /// seconds, 7 are left. At 10 the pane is hung up, its description stays, the segment goes, and no
-  /// wake is left pending.
-  func testTheGracePeriodCountsDownAndHangsUpAtTheDeadline() throws {
-    let fixture = try makeFixture()
-    fixture.openPanes(2)
-    fixture.controller.closePane(nil)
-
-    fixture.clock.now = 3
-    fixture.scheduler.fire()
-
-    XCTAssertEqual(fixture.graceText, "1 closed pane kept for 7s. Cmd-Z undoes")
-    XCTAssertFalse(fixture.made[1].closed)
-
-    fixture.clock.now = 10
-    fixture.scheduler.fire()
-
     XCTAssertTrue(fixture.made[1].closed)
-    XCTAssertTrue(fixture.controller.ledger.hidden.isEmpty)
-    XCTAssertEqual(fixture.controller.ledger.described.count, 1)
-    XCTAssertFalse(fixture.hasSegment(.grace))
-    XCTAssertTrue(fixture.scheduler.pending.isEmpty)
+    XCTAssertEqual(fixture.made[1].detachCount, 0)
+    XCTAssertEqual(fixture.controller.ledger.entries.count, 1)
+    XCTAssertTrue(fixture.recorder.asked.isEmpty)
   }
 
-  /// Catches a reopen that reuses the old ID or makes the applet through the picker's factory.
-  /// Panes 1 and 2 and split 3 were issued, so the reopened pane is 4. It comes from the saved
-  /// description, which carries the old applet's title.
-  func testUndoAfterTheGracePeriodReopensFromTheDescriptionWithANewID() throws {
+  /// Catches an undo that brings back the old applet or reuses the old ID. Panes 1 and 2 and split 3
+  /// were issued, so the reopened pane is 4. It comes from the saved description, which carries the
+  /// old applet's title, and its applet starts fresh. The two panes share the row evenly again.
+  func testUndoReopensFromTheDescriptionWithANewID() throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
     fixture.controller.closePane(nil)
-    fixture.clock.now = 10
-    fixture.scheduler.fire()
 
     fixture.controller.undoClosePane(nil)
 
@@ -227,14 +141,17 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1"])
     XCTAssertTrue(fixture.controller.paneArea.applet(for: id(4)) === fixture.recorder.restored[0])
     XCTAssertTrue(fixture.recorder.restored[0].started)
+    XCTAssertTrue(fixture.made[1].closed)
     XCTAssertEqual(fixture.made.count, 2)
-    XCTAssertTrue(fixture.controller.ledger.described.isEmpty)
+    XCTAssertEqual(fixture.made[1].reattachCount, 0)
+    XCTAssertEqual(rootWeights(fixture.controller), [0.5, 0.5])
     XCTAssertEqual(fixture.controller.focusedPane, id(4))
+    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
   }
 
-  /// Catches an undo that drops a description this build cannot restore. A placeholder closed past
-  /// its grace period holds a newer build's bytes. The reopened pane is a placeholder that still
-  /// holds them, so a later save writes them back.
+  /// Catches an undo that drops a description this build cannot restore. A placeholder closed with a
+  /// newer build's bytes reopens as a placeholder that still holds them, so a later save writes
+  /// them back.
   func testUndoOfADescriptionTheRestorerRefusesKeepsItsBytesInAPlaceholder() throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
@@ -243,8 +160,6 @@ final class UndoCloseTests: XCTestCase {
     fixture.made[1].fixedDescription = AppletDescription(
       type: "fake", version: 9, payload: .null, verbatim: bytes)
     fixture.controller.closePane(nil)
-    fixture.clock.now = 10
-    fixture.scheduler.fire()
 
     fixture.controller.undoClosePane(nil)
 
@@ -256,35 +171,31 @@ final class UndoCloseTests: XCTestCase {
 
     XCTAssertEqual(reopened.count, 1)
     XCTAssertEqual(reopened.first?.describe().verbatim, bytes)
-    XCTAssertTrue(fixture.controller.ledger.described.isEmpty)
+    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
   }
 
-  /// Catches an undo that takes the hidden tier before the stack whatever the order of closes. Pane
-  /// 4 closes first and ages into a description. Pane 2 closes later and is still hidden. The first
-  /// undo returns pane 2 with its ID. The second reopens pane 4's description after pane 2, as
-  /// pane 6, since 5 went to the split that wrapped pane 1 for the first undo.
-  func testUndoTakesTheNewestCloseAcrossBothTiers() throws {
+  /// Catches an undo that reopens an older close first. Pane 4 closes, then pane 2. The first undo
+  /// reopens pane 2's description, and the second reopens pane 4's.
+  func testUndoTakesTheNewestCloseFirst() throws {
     let fixture = try makeFixture()
     fixture.openPanes(3)
     XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2), id(4)])
 
     fixture.controller.closePane(nil)
-    fixture.clock.now = 10
-    fixture.scheduler.fire()
     fixture.controller.closePane(nil)
+    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
 
     fixture.controller.undoClosePane(nil)
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2)])
-    XCTAssertTrue(fixture.recorder.restored.isEmpty)
+    XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1"])
 
     fixture.controller.undoClosePane(nil)
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2), id(6)])
-    XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 2"])
+    XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1", "Fake 2"])
+    XCTAssertEqual(fixture.controller.paneIDs.count, 3)
   }
 
   /// Catches undo that ignores where the pane sat when the tree has changed since. Pane 2 closes,
-  /// then pane 1 is split below, so pane 1 sits in a column. Pane 2 still returns beside pane 1 in
-  /// a row, not below it.
+  /// then pane 1 is split below, so pane 1 sits in a column. The reopened pane returns beside pane 1
+  /// in a row, not below it. Pane 4 and split 5 went to the split, so the new pane is 6.
   func testUndoPlacesThePaneBesideItsNeighborAfterTheNeighborMoved() throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
@@ -304,12 +215,12 @@ final class UndoCloseTests: XCTestCase {
     }
 
     XCTAssertEqual(row.axis, .row)
-    XCTAssertEqual(row.children.map { $0.node.id }, [id(1), id(2)])
+    XCTAssertEqual(row.children.map { $0.node.id }, [id(1), id(6)])
   }
 
   /// Catches an undo that cannot place a pane whose neighbor has gone. Pane 2 closes beside pane 1.
-  /// Then pane 1's shell exits, which retires 1 and leaves only pane 4. Pane 2 returns at the end
-  /// of the row, on the side it was recorded on, with its ID.
+  /// Then pane 1's shell exits, which leaves only pane 4. The reopened pane 5 goes at the end of the
+  /// row, on the side it was recorded on.
   func testUndoFallsBackToTheEdgeWhenTheNeighborIsGone() throws {
     let fixture = try makeFixture()
     fixture.openPanes(3)
@@ -321,92 +232,76 @@ final class UndoCloseTests: XCTestCase {
 
     fixture.controller.undoClosePane(nil)
 
-    XCTAssertEqual(fixture.controller.paneIDs, [id(4), id(2)])
-    XCTAssertTrue(fixture.controller.paneArea.applet(for: id(2)) === fixture.made[1])
-    XCTAssertTrue(fixture.controller.ledger.hidden.isEmpty)
+    XCTAssertEqual(fixture.controller.paneIDs, [id(4), id(5)])
+    XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1"])
   }
 
-  // MARK: Slots
-
-  /// Catches a tier that grows past its slots, and a dialog that comes before an idle hidden pane
-  /// frees a slot. With two slots and three closes of idle panes, the oldest hidden pane is hung up
-  /// to make room, two stay hidden, and nothing is asked.
-  func testTheNumberOfHiddenPanesIsBoundedAndTheOldestIdleOneIsDroppedFirst() throws {
-    let fixture = try makeFixture(
-      CloseUndoPolicy(graceSlots: 2, gracePeriod: 10, stackDepth: 20))
+  /// Catches a stack that grows past its depth. With a depth of 2, three closes keep the newest
+  /// two, and the oldest is not undoable.
+  func testTheUndoStackKeepsOnlyTheNewestCloses() throws {
+    let fixture = try makeFixture(CloseUndoPolicy(stackDepth: 2))
     fixture.openPanes(4)
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2), id(4), id(5)])
+    var closed: [String] = []
 
     for _ in 0..<3 {
+      let focused = fixture.controller.focusedPane
+      closed.append(try XCTUnwrap(fixture.controller.paneArea.applet(for: focused)).title)
       fixture.controller.closePane(nil)
     }
 
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 2)
-    XCTAssertTrue(fixture.made[3].closed, "the oldest hidden pane stayed alive")
-    XCTAssertFalse(fixture.made[2].closed)
-    XCTAssertFalse(fixture.made[1].closed)
-    XCTAssertEqual(fixture.controller.ledger.described.count, 1)
-    XCTAssertTrue(fixture.recorder.asked.isEmpty)
+    XCTAssertEqual(fixture.controller.ledger.entries.map(\.title), Array(closed.suffix(2)))
   }
 
-  /// Catches a full tier that ends a running hidden pane to make room. The hidden pane is running,
-  /// and the pane that closes now is idle. No dialog is needed, since the idle pane loses nothing
-  /// but its session. It is hung up and described, and the running pane stays hidden.
-  func testAnIdlePaneNeverEvictsARunningHiddenPane() throws {
-    let fixture = try makeFixture(
-      CloseUndoPolicy(graceSlots: 1, gracePeriod: 10, stackDepth: 20))
-    fixture.openPanes(3)
-    fixture.made[2].isRunningSomething = true
+  /// Catches an undo with nothing to undo that does nothing visible. The status bar says so.
+  func testUndoWithNothingClosedSaysSo() throws {
+    let fixture = try makeFixture()
 
-    fixture.controller.closePane(nil)
-    fixture.controller.closePane(nil)
+    fixture.controller.undoClosePane(nil)
 
-    XCTAssertTrue(fixture.recorder.asked.isEmpty)
-    XCTAssertTrue(fixture.made[1].closed)
-    XCTAssertFalse(fixture.made[2].closed)
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 1)
-    XCTAssertTrue(fixture.controller.ledger.hidden[0].applet === fixture.made[2])
-    XCTAssertEqual(fixture.controller.ledger.described.count, 1)
+    XCTAssertEqual(
+      fixture.controller.statusCenter.history.last?.text, "There is no closed pane to undo.")
   }
 
-  /// Catches a dialog that appears when an idle hidden pane could have been dropped instead. The
-  /// hidden pane is idle and the closing pane is running. The idle one drops to its description,
-  /// and the running one takes the slot with no question.
-  func testAnIdleHiddenPaneIsDroppedBeforeAnyDialogIsShown() throws {
-    let fixture = try makeFixture(
-      CloseUndoPolicy(graceSlots: 1, gracePeriod: 10, stackDepth: 20))
-    fixture.openPanes(3)
+  /// Catches a refused reopen that eats the description. With the window too narrow for another
+  /// pane, undo posts a warning and the entry stays for a larger window.
+  func testAnUndoThatDoesNotFitKeepsTheEntry() throws {
+    let fixture = try makeFixture()
+    fixture.openPanes(2)
+    fixture.controller.closePane(nil)
+    let window = try XCTUnwrap(fixture.controller.window)
+    window.setContentSize(NSSize(width: 300, height: 640))
+    window.contentView?.layoutSubtreeIfNeeded()
+
+    fixture.controller.undoClosePane(nil)
+
+    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
+    XCTAssertEqual(fixture.controller.ledger.entries.count, 1)
+    XCTAssertEqual(
+      fixture.controller.statusCenter.history.last?.text,
+      "There is not enough room to reopen the pane.")
+  }
+
+  // MARK: Pane close guard
+
+  /// Catches a close that ends a running pane with no question, and one that ends it after Cancel.
+  /// The question names the running tabs and no others. Declining keeps the pane in the tree and
+  /// nothing on the stack. Accepting closes the applet and keeps its description.
+  func testClosingARunningPaneAsksAndCancelKeepsIt() async throws {
+    let fixture = try makeFixture()
+    fixture.openPanes(2)
     fixture.made[1].isRunningSomething = true
-
-    fixture.controller.closePane(nil)
-    fixture.controller.closePane(nil)
-
-    XCTAssertTrue(fixture.recorder.asked.isEmpty)
-    XCTAssertTrue(fixture.made[2].closed)
-    XCTAssertFalse(fixture.made[1].closed)
-    XCTAssertTrue(fixture.controller.ledger.hidden[0].applet === fixture.made[1])
-  }
-
-  /// Catches a close that ends a running pane with no question when no slot is free, and one that
-  /// ends it anyway after Cancel. Both hidden and closing panes are running. The question names the
-  /// running tab. Declining keeps the pane in the tree. Accepting hangs it up.
-  func testClosingARunningPaneWithNoFreeSlotAsksAndCancelKeepsIt() async throws {
-    let fixture = try makeFixture(
-      CloseUndoPolicy(graceSlots: 1, gracePeriod: 10, stackDepth: 20))
-    fixture.openPanes(3)
-    fixture.made[1].isRunningSomething = true
-    fixture.made[2].isRunningSomething = true
-    fixture.controller.closePane(nil)
-    XCTAssertTrue(fixture.recorder.asked.isEmpty, "a free slot still asked")
+    fixture.made[1].labels = ["vim notes.txt", "make test"]
 
     fixture.recorder.answers = [false]
     fixture.controller.closePane(nil)
     await fixture.settle()
 
     XCTAssertEqual(fixture.recorder.asked.count, 1)
-    XCTAssertEqual(fixture.recorder.asked[0].labels, ["Fake 1"])
+    XCTAssertEqual(fixture.recorder.asked[0].labels, ["vim notes.txt", "make test"])
+    XCTAssertEqual(fixture.recorder.asked[0].confirmTitle, "Close Pane")
     XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2)])
     XCTAssertFalse(fixture.made[1].closed)
+    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
 
     fixture.recorder.answers = [true]
     fixture.controller.closePane(nil)
@@ -415,139 +310,61 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertEqual(fixture.recorder.asked.count, 2)
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
     XCTAssertTrue(fixture.made[1].closed)
-    XCTAssertFalse(fixture.made[2].closed)
-    XCTAssertEqual(fixture.controller.ledger.described.count, 1)
+    XCTAssertFalse(fixture.made[0].closed)
+    XCTAssertEqual(fixture.controller.ledger.entries.map(\.title), ["Fake 1"])
   }
 
-  /// Catches a close that asks although the grace tier can undo it. A running pane closes with free
-  /// slots and no question.
-  func testClosingARunningPaneWithAFreeSlotNeverAsks() throws {
+  /// Catches a pane that exited while its close question was open and is closed twice, or kept on
+  /// the stack. The exit closes the pane with no entry. Confirming then does nothing.
+  func testAPaneThatExitsDuringItsCloseQuestionIsNotClosedAgain() async throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
     fixture.made[1].isRunningSomething = true
+    fixture.recorder.answers = [true]
 
     fixture.controller.closePane(nil)
+    XCTAssertNotNil(fixture.controller.pendingGuard)
 
-    XCTAssertTrue(fixture.recorder.asked.isEmpty)
-    XCTAssertFalse(fixture.made[1].closed)
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 1)
-  }
-
-  /// Catches a stack that grows past its depth. With one slot and a depth of 1, three closes of
-  /// idle panes hang up the first two. The newest of those, "Fake 2", is the one description left,
-  /// and "Fake 1" is still hidden.
-  func testTheDescriptionStackKeepsOnlyTheNewestCloses() throws {
-    let fixture = try makeFixture(
-      CloseUndoPolicy(graceSlots: 1, gracePeriod: 10, stackDepth: 1))
-    fixture.openPanes(4)
-
-    for _ in 0..<3 {
-      fixture.controller.closePane(nil)
-    }
+    fixture.made[1].isRunningSomething = false
+    fixture.controller.appletDidExit(fixture.made[1])
+    await fixture.settle()
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
-    XCTAssertTrue(fixture.made[3].closed)
-    XCTAssertEqual(fixture.controller.ledger.described.map(\.title), ["Fake 2"])
-    XCTAssertTrue(fixture.controller.ledger.hidden[0].applet === fixture.made[1])
+    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
   }
 
-  // MARK: Exits
-
-  /// Catches a shell that exits on its own and leaves a hidden session or a description behind. The
-  /// user did not close this pane, so undo has nothing to bring back.
-  func testAPaneThatExitedOnItsOwnAddsNothingToEitherTier() throws {
+  /// Catches a confirmed pane close that does nothing once the pane has become the last one. Pane 2
+  /// runs vim and its close is asked about. Pane 1 exits meanwhile. The user confirms, and the
+  /// window closes, since nothing else is left to keep it open.
+  func testConfirmingAPaneCloseThatBecameTheLastPaneClosesTheWindow() async throws {
     let fixture = try makeFixture()
-    fixture.openPanes(2)
-
-    fixture.controller.appletDidExit(fixture.made[1])
-
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
-    XCTAssertTrue(fixture.made[1].closed)
-    XCTAssertTrue(fixture.controller.ledger.hidden.isEmpty)
-    XCTAssertTrue(fixture.controller.ledger.described.isEmpty)
-    XCTAssertFalse(fixture.hasSegment(.grace))
-  }
-
-  /// Catches a hidden pane that stays alive after its processes all exit. It drops to its
-  /// description, and undo then reopens it with a new ID.
-  func testAHiddenPaneWhoseProcessesAllExitDropsToItsDescription() throws {
-    let fixture = try makeFixture()
-    fixture.openPanes(2)
-    fixture.controller.closePane(nil)
-
-    fixture.controller.appletDidExit(fixture.made[1])
-
-    XCTAssertTrue(fixture.made[1].closed)
-    XCTAssertTrue(fixture.controller.ledger.hidden.isEmpty)
-    XCTAssertEqual(fixture.controller.ledger.described.count, 1)
-    XCTAssertFalse(fixture.hasSegment(.grace))
-
-    fixture.controller.undoClosePane(nil)
-
-    XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1"])
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(4)])
-  }
-
-  /// Catches a hidden applet whose message loses its pane. It still names pane 2.
-  func testAHiddenPanesMessageStillNamesItsPane() throws {
-    let fixture = try makeFixture()
-    fixture.openPanes(2)
-    fixture.controller.closePane(nil)
-
-    fixture.controller.applet(fixture.made[1], post: .info, text: "done")
-
-    XCTAssertEqual(
-      fixture.controller.statusCenter.history.last?.source, .pane(id: 2, name: "Fake 1"))
-  }
-
-  // MARK: Status bar
-
-  /// Catches a flood of messages that pushes the grace segment off the bar. Thirty messages and an
-  /// error arrive, and the segment and its hang-up control are still there.
-  func testTheGraceSegmentStaysThroughAMessageFlood() throws {
-    let fixture = try makeFixture()
-    fixture.openPanes(2)
-    fixture.controller.closePane(nil)
-
-    for index in 0..<30 {
-      fixture.controller.statusCenter.post(
-        level: .info, source: .uniterm, text: "message \(index)")
-    }
-
-    fixture.controller.statusCenter.post(level: .error, source: .uniterm, text: "boom")
-
-    XCTAssertTrue(fixture.hasSegment(.grace))
-    XCTAssertTrue(fixture.hasSegment(.graceHangUp))
-    XCTAssertEqual(fixture.graceText, "1 closed pane kept for 10s. Cmd-Z undoes")
-  }
-
-  /// Catches a hang-up control that does nothing. Clicking it ends the hidden pane at once, ahead
-  /// of its deadline, and keeps its description so undo can still reopen the layout.
-  func testTheHangUpControlEndsHiddenPanesAtOnce() throws {
-    let fixture = try makeFixture()
-    fixture.openPanes(3)
-    fixture.controller.closePane(nil)
-    fixture.controller.closePane(nil)
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 2)
-
     let window = try XCTUnwrap(fixture.controller.window)
-    fixture.bar.layoutSubtreeIfNeeded()
-    let frame = try XCTUnwrap(fixture.bar.frame(of: .graceHangUp))
-    let event = try XCTUnwrap(
-      NSEvent.mouseEvent(
-        with: .leftMouseDown,
-        location: fixture.bar.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil),
-        modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
-        eventNumber: 0, clickCount: 1, pressure: 1))
+    window.orderFrontRegardless()
+    fixture.openPanes(2)
+    fixture.made[1].isRunningSomething = true
+    fixture.recorder.answers = [true]
 
-    fixture.bar.mouseDown(with: event)
+    fixture.controller.closePane(nil)
+    fixture.controller.appletDidExit(fixture.made[0])
+    await fixture.settle()
 
-    XCTAssertTrue(fixture.controller.ledger.hidden.isEmpty)
+    XCTAssertEqual(fixture.recorder.asked.count, 1)
+    XCTAssertFalse(window.isVisible)
     XCTAssertTrue(fixture.made[1].closed)
-    XCTAssertTrue(fixture.made[2].closed)
-    XCTAssertEqual(fixture.controller.ledger.described.count, 2)
-    XCTAssertFalse(fixture.hasSegment(.grace))
-    XCTAssertTrue(fixture.scheduler.pending.isEmpty)
+  }
+
+  /// Catches a shell that exits on its own and leaves a description behind. The user did not close
+  /// this pane, so undo has nothing to bring back.
+  func testAPaneThatExitedOnItsOwnAddsNoEntry() throws {
+    let fixture = try makeFixture()
+    fixture.openPanes(2)
+
+    fixture.controller.appletDidExit(fixture.made[1])
+
+    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
+    XCTAssertTrue(fixture.made[1].closed)
+    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
+    XCTAssertTrue(fixture.recorder.asked.isEmpty)
   }
 
   // MARK: Window close guard
@@ -595,36 +412,21 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertTrue(fixture.made[0].closed)
   }
 
-  /// Catches a window close that forgets hidden panes. The visible pane is idle and the hidden one
-  /// runs vim, so the window still asks and names the hidden tab. Confirming hangs the hidden
-  /// pane up.
-  func testAHiddenRunningPaneCountsInTheWindowCloseGuard() async throws {
+  /// Catches a closed pane that still counts toward the window guard. Pane 2 ran vim and was closed
+  /// with the user's say. Nothing of it is alive, so the window closes with no question.
+  func testAClosedPaneDoesNotCountInTheWindowCloseGuard() async throws {
     let fixture = try makeFixture()
     let window = try XCTUnwrap(fixture.controller.window)
-    window.orderFrontRegardless()
     fixture.openPanes(2)
     fixture.made[1].isRunningSomething = true
-    fixture.made[1].labels = ["vim"]
-    fixture.controller.closePane(nil)
     fixture.recorder.answers = [true]
-
-    XCTAssertFalse(fixture.controller.windowShouldClose(window))
-    await fixture.settle()
-
-    XCTAssertEqual(fixture.recorder.asked.map(\.labels), [["vim"]])
-    XCTAssertFalse(window.isVisible)
-    XCTAssertTrue(fixture.made[1].closed)
-  }
-
-  /// Catches an idle hidden pane that blocks a window close with a question.
-  func testAnIdleHiddenPaneDoesNotAskOnWindowClose() throws {
-    let fixture = try makeFixture()
-    let window = try XCTUnwrap(fixture.controller.window)
-    fixture.openPanes(2)
     fixture.controller.closePane(nil)
+    await fixture.settle()
+    XCTAssertEqual(fixture.recorder.asked.count, 1)
 
     XCTAssertTrue(fixture.controller.windowShouldClose(window))
-    XCTAssertTrue(fixture.recorder.asked.isEmpty)
+    XCTAssertEqual(fixture.recorder.asked.count, 1)
+    XCTAssertTrue(fixture.controller.runningTabLabels.isEmpty)
   }
 
   /// Catches a multi-tab pane that is named as one. A pane with three tabs, one running, lists the
@@ -643,49 +445,7 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertEqual(fixture.recorder.asked.map(\.labels), [["make test"]])
   }
 
-  // MARK: Last visible pane
-
-  /// Catches a last-pane close that ignores a hidden running pane. Pane 2 runs vim and is hidden.
-  /// Closing pane 1, the last visible one, asks. Cancel brings pane 2 back in its place with its
-  /// session, and the window stays open with pane 1.
-  func testClosingTheLastVisiblePaneAsksAndCancelReattachesTheHiddenPane() async throws {
-    let fixture = try makeFixture()
-    let window = try XCTUnwrap(fixture.controller.window)
-    window.orderFrontRegardless()
-    fixture.openPanes(2)
-    fixture.made[1].isRunningSomething = true
-    fixture.controller.closePane(nil)
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
-
-    fixture.controller.closePane(nil)
-    await fixture.settle()
-
-    XCTAssertEqual(fixture.recorder.asked.map(\.labels), [["Fake 1"]])
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2)])
-    XCTAssertTrue(fixture.controller.paneArea.applet(for: id(2)) === fixture.made[1])
-    XCTAssertEqual(fixture.made[1].reattachCount, 1)
-    XCTAssertFalse(fixture.made[1].closed)
-    XCTAssertTrue(window.isVisible)
-  }
-
-  /// Catches a confirmed last-pane close that leaves the hidden process alive. Confirming closes the
-  /// window and hangs up both applets.
-  func testConfirmingTheLastPaneCloseHangsUpTheHiddenPaneToo() async throws {
-    let fixture = try makeFixture()
-    let window = try XCTUnwrap(fixture.controller.window)
-    window.orderFrontRegardless()
-    fixture.openPanes(2)
-    fixture.made[1].isRunningSomething = true
-    fixture.controller.closePane(nil)
-    fixture.recorder.answers = [true]
-
-    fixture.controller.closePane(nil)
-    await fixture.settle()
-
-    XCTAssertFalse(window.isVisible)
-    XCTAssertTrue(fixture.made[0].closed)
-    XCTAssertTrue(fixture.made[1].closed)
-  }
+  // MARK: Last pane
 
   /// Catches an idle last pane that asks, or a close that leaves the window open. Nothing is
   /// running, so the window closes at once.
@@ -701,178 +461,114 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertTrue(fixture.made[0].closed)
   }
 
-  /// Catches a shell that exits as the last visible pane and takes a hidden running pane with it.
-  /// Cancel brings the hidden pane back, then the exited pane leaves.
-  func testTheLastVisiblePaneExitingWithAHiddenRunningPaneAsksFirst() async throws {
+  /// Catches a last-pane close that ends a running program with no question. The window-close
+  /// question names the tab. Cancel keeps the window and the pane. Confirming closes the window.
+  func testClosingTheLastRunningPaneAsksAndCancelKeepsTheWindow() async throws {
     let fixture = try makeFixture()
     let window = try XCTUnwrap(fixture.controller.window)
     window.orderFrontRegardless()
-    fixture.openPanes(2)
-    fixture.made[1].isRunningSomething = true
-    fixture.controller.closePane(nil)
+    fixture.made[0].isRunningSomething = true
+    fixture.made[0].labels = ["vim"]
 
-    fixture.controller.appletDidExit(fixture.made[0])
+    fixture.recorder.answers = [false]
+    fixture.controller.closePane(nil)
     await fixture.settle()
 
-    XCTAssertEqual(fixture.recorder.asked.map(\.labels), [["Fake 1"]])
-    XCTAssertEqual(fixture.controller.paneIDs, [id(2)])
-    XCTAssertTrue(fixture.made[0].closed)
-    XCTAssertFalse(fixture.made[1].closed)
+    XCTAssertEqual(fixture.recorder.asked.map(\.labels), [["vim"]])
+    XCTAssertEqual(fixture.recorder.asked[0].confirmTitle, "Close Window")
     XCTAssertTrue(window.isVisible)
-  }
+    XCTAssertFalse(fixture.made[0].closed)
 
-  /// Catches an exit that arrives while the window-close question is open and is dropped. The last
-  /// visible shell exits after Cmd-W asked about the hidden running pane. Cancel brings the hidden
-  /// pane back, and the dead pane must leave too instead of staying as a zombie.
-  func testALastPaneThatExitsWhileTheWindowQuestionIsOpenLeavesOnCancel() async throws {
-    let fixture = try makeFixture()
-    let window = try XCTUnwrap(fixture.controller.window)
-    window.orderFrontRegardless()
-    fixture.openPanes(2)
-    fixture.made[1].isRunningSomething = true
-    fixture.controller.closePane(nil)
-
-    fixture.controller.closePane(nil)
-    XCTAssertNotNil(fixture.controller.pendingGuard)
-
-    fixture.controller.appletDidExit(fixture.made[0])
-    await fixture.settle()
-
-    XCTAssertEqual(fixture.recorder.asked.count, 1)
-    XCTAssertEqual(fixture.controller.paneIDs, [id(2)])
-    XCTAssertTrue(fixture.made[0].closed)
-    XCTAssertFalse(fixture.made[1].closed)
-    XCTAssertTrue(window.isVisible)
-  }
-
-  /// Catches a second window-close question after one Cancel. The last visible shell exits while
-  /// the question is open and no hidden pane fits. One Cancel leaves the dead pane in place, and
-  /// nothing asks again.
-  func testACancelWithNoRoomToReattachAsksOnlyOnce() async throws {
-    let fixture = try makeFixture()
-    let window = try XCTUnwrap(fixture.controller.window)
-    window.orderFrontRegardless()
-    fixture.openPanes(2)
-    fixture.made[1].isRunningSomething = true
-    fixture.controller.closePane(nil)
-    window.setContentSize(NSSize(width: 300, height: 640))
-    window.contentView?.layoutSubtreeIfNeeded()
-
-    fixture.controller.closePane(nil)
-    fixture.controller.appletDidExit(fixture.made[0])
-    await fixture.settle()
-    await fixture.settle()
-
-    XCTAssertEqual(fixture.recorder.asked.count, 1)
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 1)
-    XCTAssertTrue(window.isVisible)
-  }
-
-  /// Catches a dead last pane that is left behind when the pane-close question it arrived during is
-  /// confirmed. With one grace slot held by a running pane, closing a running pane asks. Pane 1
-  /// then exits, and pane 2 exits as the last pane. Nothing is running by then, so the window must
-  /// close.
-  func testAnExitDuringAPaneCloseQuestionIsSettledOnConfirm() async throws {
-    let fixture = try makeFixture(CloseUndoPolicy(graceSlots: 1, gracePeriod: 10, stackDepth: 20))
-    let window = try XCTUnwrap(fixture.controller.window)
-    window.orderFrontRegardless()
-    fixture.openPanes(3)
-    fixture.made[2].isRunningSomething = true
-    fixture.controller.closePane(nil)
-    fixture.made[1].isRunningSomething = true
     fixture.recorder.answers = [true]
+    fixture.controller.closePane(nil)
+    await fixture.settle()
+
+    XCTAssertFalse(window.isVisible)
+    XCTAssertTrue(fixture.made[0].closed)
+  }
+
+  /// Catches a second question for a last pane that exited while the first was open. The exit is
+  /// not asked about again. Cancel leaves the dead pane, and closing it then asks nothing, since
+  /// nothing is running.
+  func testALastPaneThatExitsWhileTheWindowQuestionIsOpenIsNotAskedAboutAgain() async throws {
+    let fixture = try makeFixture()
+    let window = try XCTUnwrap(fixture.controller.window)
+    window.orderFrontRegardless()
+    fixture.made[0].isRunningSomething = true
 
     fixture.controller.closePane(nil)
     XCTAssertNotNil(fixture.controller.pendingGuard)
 
-    fixture.made[2].isRunningSomething = false
-    fixture.made[1].isRunningSomething = false
+    fixture.made[0].isRunningSomething = false
     fixture.controller.appletDidExit(fixture.made[0])
-    fixture.controller.appletDidExit(fixture.made[1])
     await fixture.settle()
+
+    XCTAssertEqual(fixture.recorder.asked.count, 1)
+    XCTAssertTrue(window.isVisible)
+    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
+
+    fixture.controller.closePane(nil)
 
     XCTAssertEqual(fixture.recorder.asked.count, 1)
     XCTAssertFalse(window.isVisible)
   }
 
-  /// Catches a discarded pane whose ID can return. Hanging up the hidden pane retires its ID. The
-  /// area then refuses to insert it, and a pane opened later gets a fresh ID.
-  func testAHungUpPanesIDIsRetiredForGood() throws {
-    let fixture = try makeFixture()
-    fixture.openPanes(2)
-    fixture.controller.closePane(nil)
-    let closed = try XCTUnwrap(fixture.controller.ledger.hidden.first)
-
-    fixture.controller.hangUpHiddenPanes()
-
-    XCTAssertThrowsError(
-      try fixture.controller.paneArea.insert(
-        FakeApplet(), as: closed.closed.paneID, at: closed.closed.placement)
-    ) { error in
-      XCTAssertEqual(error as? PaneTreeError, .retired(closed.closed.paneID))
-    }
-
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
-    fixture.controller.undoClosePane(nil)
-    XCTAssertEqual(fixture.controller.paneIDs.count, 2)
-    XCTAssertFalse(fixture.controller.paneIDs.contains(closed.closed.paneID))
-  }
-
-  /// Catches an exited last pane that is left dead after a cancel that cannot restore the hidden
-  /// pane. The window is too narrow for two panes, so the hidden pane stays hidden and the dead
-  /// pane stays so the window is not left empty. Once the window is wide enough, undo brings the
-  /// hidden pane back and the dead pane leaves.
-  func testADeadLastPaneLeavesWhenTheHiddenPaneFinallyReturns() async throws {
+  /// Catches a dead pane that adds an undo entry. The last pane exits while the window question
+  /// is open, and Cancel leaves it. The user splits and closes the dead pane. It exited on its own,
+  /// so undo has nothing to bring back.
+  func testADeadPaneClosedLaterAddsNoEntry() async throws {
     let fixture = try makeFixture()
     let window = try XCTUnwrap(fixture.controller.window)
     window.orderFrontRegardless()
-    fixture.openPanes(2)
-    fixture.made[1].isRunningSomething = true
-    fixture.controller.closePane(nil)
-    window.setContentSize(NSSize(width: 300, height: 640))
-    window.contentView?.layoutSubtreeIfNeeded()
+    fixture.made[0].isRunningSomething = true
 
+    fixture.controller.closePane(nil)
+    fixture.made[0].isRunningSomething = false
     fixture.controller.appletDidExit(fixture.made[0])
     await fixture.settle()
-
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 1)
-    XCTAssertTrue(window.isVisible)
 
-    window.setContentSize(NSSize(width: 960, height: 640))
-    window.contentView?.layoutSubtreeIfNeeded()
-    fixture.controller.undoClosePane(nil)
+    XCTAssertNotNil(fixture.controller.openPane(.terminalShell, axis: .row))
+    fixture.controller.paneArea.focus(id(1))
+    fixture.controller.closePane(nil)
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(2)])
     XCTAssertTrue(fixture.made[0].closed)
-    XCTAssertFalse(fixture.made[1].closed)
+    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
+  }
+
+  /// Catches a message from a closed applet that claims a live pane. Its source names pane 0, which
+  /// no live pane has.
+  func testAMessageFromAClosedAppletNamesNoLivePane() throws {
+    let fixture = try makeFixture()
+    fixture.openPanes(2)
+    fixture.controller.closePane(nil)
+
+    fixture.controller.applet(fixture.made[1], post: .info, text: "late")
+
+    XCTAssertEqual(
+      fixture.controller.statusCenter.history.last?.source, .pane(id: 0, name: "Fake 1"))
   }
 
   // MARK: Window lifecycle
 
-  /// Catches a hidden pane that outlives its window, and a wake that fires on a closed window. The
-  /// window closes with one pane hidden and one described. Both are gone, and no wake is pending.
-  func testClosingTheWindowHangsUpHiddenPanesAndClearsTheUndoState() throws {
+  /// Catches an undo stack that outlives its window. The window closes with two descriptions on
+  /// the stack. Every applet is closed and the stack is empty.
+  func testClosingTheWindowClearsTheUndoStack() throws {
     let fixture = try makeFixture()
     fixture.openPanes(3)
     fixture.controller.closePane(nil)
-    fixture.clock.now = 10
-    fixture.scheduler.fire()
     fixture.controller.closePane(nil)
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 1)
-    XCTAssertEqual(fixture.controller.ledger.described.count, 1)
+    XCTAssertEqual(fixture.controller.ledger.entries.count, 2)
 
     fixture.controller.window?.close()
 
     XCTAssertTrue(fixture.made.allSatisfy(\.closed))
-    XCTAssertTrue(fixture.controller.ledger.hidden.isEmpty)
-    XCTAssertTrue(fixture.controller.ledger.described.isEmpty)
-    XCTAssertTrue(fixture.scheduler.pending.isEmpty)
+    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
   }
 
-  /// Catches a closed window that is kept alive by its grace panes or its timer. The controller is
-  /// released after the window closes with hidden and described panes.
+  /// Catches a closed window that is kept alive by its undo stack. The controller is released after
+  /// the window closes with descriptions on the stack.
   func testAWindowWithUndoStateIsReleasedWhenItCloses() async throws {
     weak var released: MainWindowController?
 
@@ -880,8 +576,6 @@ final class UndoCloseTests: XCTestCase {
       let fixture = try UndoFixture()
       fixture.openPanes(3)
       fixture.controller.closePane(nil)
-      fixture.clock.now = 10
-      fixture.scheduler.fire()
       fixture.controller.closePane(nil)
       released = fixture.controller
 
@@ -890,25 +584,6 @@ final class UndoCloseTests: XCTestCase {
 
     let gone = await waitUntil { released == nil }
     XCTAssertTrue(gone, "the closed window's controller was never released")
-  }
-
-  /// Catches a refused reopen that eats the description. With the window too narrow for another
-  /// pane, undo posts a warning and the entry stays for a larger window.
-  func testAnUndoThatDoesNotFitKeepsTheEntry() throws {
-    let fixture = try makeFixture()
-    fixture.openPanes(2)
-    fixture.controller.closePane(nil)
-    let window = try XCTUnwrap(fixture.controller.window)
-    window.setContentSize(NSSize(width: 300, height: 640))
-    window.contentView?.layoutSubtreeIfNeeded()
-
-    fixture.controller.undoClosePane(nil)
-
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 1)
-    XCTAssertEqual(
-      fixture.controller.statusCenter.history.last?.text,
-      "There is not enough room to bring the pane back.")
   }
 
   // MARK: Cmd-Z
@@ -924,7 +599,7 @@ final class UndoCloseTests: XCTestCase {
   }
 
   /// Catches a Cmd-Z that undoes a pane close while a text control is being edited. A pane is
-  /// hidden. With a text field being edited, the standard undo action leaves the pane hidden and
+  /// closed. With a text field being edited, the standard undo action leaves the pane closed and
   /// the menu item follows the edit's undo state. With a plain view focused, as a terminal is, the
   /// same action brings the pane back and the item reads Undo Close Pane.
   func testCommandZUndoesAnEditInATextControlAndAPaneCloseElsewhere() throws {
@@ -950,7 +625,7 @@ final class UndoCloseTests: XCTestCase {
     window.undoCloseOrEdit(nil)
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)], "Cmd-Z in a text field undid a close")
-    XCTAssertEqual(fixture.controller.ledger.hidden.count, 1)
+    XCTAssertEqual(fixture.controller.ledger.entries.count, 1)
 
     XCTAssertTrue(window.makeFirstResponder(plain))
     XCTAssertTrue(window.validateMenuItem(item))
@@ -958,6 +633,6 @@ final class UndoCloseTests: XCTestCase {
 
     window.undoCloseOrEdit(nil)
 
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2)])
+    XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(4)])
   }
 }
