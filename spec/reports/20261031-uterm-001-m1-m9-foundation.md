@@ -6,7 +6,19 @@ commit below is in `/Users/ripta/projects/uniterm`. The branch is `agent/petunia
 
 ## TL;DR
 
-The run is in progress. See the run state below.
+The run finished on 2026-11-01. M1 to M8 are done, each in its own commit, followed by a row-review fix commit and a
+final-review fix commit. The last full runs were `make test-package` with 380 tests, 0 failures, and 4 US-layout skips,
+and `make test-app` with 46 UI tests and 0 failures. M9 is the user's visual check, so the row stays in `queue.md` and
+UTERM-001 stays `accepted`.
+
+For the user:
+- ADR-02 says a removed node's ID is never reused. The M7 amendment to "Pane tree shape" reads that narrowly: a closed
+  pane kept for undo still exists, and its ID retires when the pane is discarded. ADR-02's text was not edited.
+- OSC 52 clipboard writes are allowed without asking, and only reads ask. The unreachable write dialog was removed.
+- An unavailable layout folder opens one window that saves nothing, instead of quitting.
+- Six ADR candidates sit as Undecided in the proposal's Decision Log.
+
+The session was interrupted during M7. A new coordinator session resumed it from this report, the state file, and git.
 
 ## Run state
 
@@ -25,6 +37,8 @@ The run is in progress. See the run state below.
 | M7 Undo close pane | DONE | "Add undo close pane with grace and description tiers and close guards" |
 | M8 Layout persistence | DONE | "Save and restore every window's layout across launches" |
 | M9 User visual check | HELD: a check only the user can perform | |
+| Row review fixes | DONE | "Fix undo order, placeholder undo, and background-tab saves found in review" |
+| Final review fixes | DONE | "Ask once and settle pane exits during close questions" |
 
 Held or blocked rows: none. M9 is left to the user. The row stays in `queue.md` until the user records it.
 
@@ -565,6 +579,41 @@ Best guesses from the implementer:
 adr-impact, over the whole range: ADR-01, ADR-03, and ADR-04 are consistent. ADR-02's wording still says a removed
 node's ID is never reused, while the code and the amended proposal retire it only on discard. That is for the user.
 
+### Final review
+
+Commit: "Ask once and settle pane exits during close questions".
+
+The final review covered the run's whole range, focused on the row-review fix commit. It doubled as the run's ADR
+review. The range adds or edits no ADR, and `proposals.py freeze` with all 9 commits printed `[]`. adr-impact on the
+fix commit found no conflict. It named two uncovered decisions. The silent OSC 52 write is already part of the
+clipboard candidate. The no-save window for an unavailable layout folder fails the ADR bar, since it is one
+component's failure policy.
+
+Checks: the implementer ran every local check, and all passed. The coordinator reran `make test-package` with 380
+tests, 0 failures, and 4 skips. It also ran `make test-app` with 46 tests, 0 failures, in 349 s.
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | A Cancel with no room to reattach asked the window-close question twice | Confirmed by a failing test. One Cancel now keeps the dead pane and asks nothing more |
+| 2 | An exit recorded during a pane-close question was dropped on Confirm | Confirmed reachable by a failing test. Confirm now closes it as an exit |
+| 3 | Five in-place proposal edits lacked Amended markers | Fixed. The Decision Log entry now states the current exit behavior |
+| 4 | Two long proposal lines | Rewrapped |
+| 5 | A doc comment with a lone last word | Rewrapped |
+| 6 | OSC 52 writes go through without asking | Left for the user. It matches the proposal, which asks only for reads |
+
+## ADR candidates
+
+All of these are recorded as Undecided in the proposal's Decision Log. None was written.
+- The applet contract: hosted view, lifecycle, segments, detach and reattach, an inert versioned description, and a
+  running-state query covering every tab. It was extended in M7 and M8.
+- Clipboard: a program never reads the clipboard without confirmation naming its pane. Writes are allowed without
+  asking.
+- Two-tier undo close: a hidden live session under its parked ID, then an inert description.
+- The main window answers the standard `undo:` selector, and routes it to a focused text edit or a pane close.
+- Node IDs are scoped per window, with a per-window high-water mark in the layout file.
+- An unreadable description round-trips byte-for-byte through a placeholder pane.
+
 ## Status
 
-In progress.
+Finished, except M9. The user's visual check is left to the user. Record its result in M9's As built block. Then mark
+M9 DONE, move the row to `history.md`, and set UTERM-001 to `implemented`.

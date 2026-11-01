@@ -575,8 +575,9 @@ Out of scope, for later proposals:
 - OSC 9 and OSC 777 post as info with the pane as source. Notification text drops control characters and is capped at 200
   characters. libghostty allows one notification per second.
 - An OSC 52 read and an unsafe paste each ask the user in an alert that names the pane, with Cancel as the default. An
-  OSC 52 write is allowed without asking. Amended 2026-11-01; see Decision Log. A denied request still completes with empty data, since libghostty keeps the request until the
-  embedder answers. A test shows the program receives nothing before the answer and nothing after a denial.
+  OSC 52 write is allowed without asking. A denied request still completes with empty data, since libghostty keeps the
+  request until the embedder answers. A test shows the program receives nothing before the answer and nothing after a
+  denial. Amended 2026-11-01; see Decision Log.
 - The applet description is versioned and wrapped so an unreadable one can be kept and written back. Shell mode restores
   a fresh shell in the tab's directory. A program-mode description is refused until M5.
 - `send(text:)` pastes, so a shell with bracketed paste does not run a pasted newline. Tests press Return through the
@@ -742,8 +743,8 @@ Out of scope, for later proposals:
   description restores a fresh shell in each tab's directory. A program-mode description is still refused on restore.
 - Status segments follow the selected tab. A background tab's title and exit-code events leave the host and segments
   alone. Its directory change tells the host, so the layout saves, and leaves the segments alone. Its notifications and
-  clipboard requests still post and ask the user. Amended 2026-11-01; see Decision Log. A tab's title shows in
-  its tab and the applet title follows the selected tab.
+  clipboard requests still post and ask the user. A tab's title shows in its tab and the applet title follows the
+  selected tab. Amended 2026-11-01; see Decision Log.
 - Mutation checks each failed the named tests, and each was undone: the ssh name match, Cmd-W taking a tab before a
   pane, closing the selected tab and not another, the guard asking only for a running tab, both ways, the bar hidden at
   one tab, program mode refusing a new tab, the description staying inert on restore, and "running" meaning any tab.
@@ -835,7 +836,7 @@ Out of scope, for later proposals:
   stack trims the lowest serial. Amended 2026-11-01; see Decision Log.
 - A description this build cannot restore, such as a newer version of a placeholder's bytes, reopens as a placeholder
   that keeps those bytes, the way a restored layout does. Its entry leaves the stack only once a pane opened. A pane
-  that does not fit keeps its entry.
+  that does not fit keeps its entry. Amended 2026-11-01; see Decision Log.
 - A pane closes into a grace slot when one is free. With none free, an idle hidden pane drops to its description first.
   When every hidden pane is running something, a closing idle pane keeps only its description. A closing pane that is
   running something asks first, and declining keeps it open. A pane whose applet exited on its own is discarded, with no
@@ -868,8 +869,9 @@ Out of scope, for later proposals:
   in the wrong directory, which is harmless.
 - When the last visible pane's applet exited and the user cancels the close, the hidden running panes come back. If
   none fits, the dead pane stays so the window is not empty. It leaves when a hidden pane returns, for instance after
-  the window grows and the user undoes. A pane that ends while the window-close question is open is closed again once
-  the answer is Cancel, so it is judged by what is running then. Without that, the dead pane stayed.
+  the window grows and the user undoes. A pane that ends while a question is open waits for the answer. Cancel then
+  discards it, or keeps it as the dead pane when it is the last one, with no second question. Confirming a pane-close
+  question closes it as an exit would. Without that, the dead pane stayed. Amended 2026-11-01; see Decision Log.
 - Mutation checks failed named tests and were undone: the grace slot bound off by one fails the slot and
   idle-eviction tests. The package tests pass, 299 run with 4 skipped, in 12.0 seconds. The UI suite passes, 39
   tests with no failure, in 301 seconds, including the undo and Cmd-Q tests. Left to the user: how the grace
@@ -909,8 +911,8 @@ Out of scope, for later proposals:
   policy values with no setting. The launch marker counts the launches that never finished. The fourth launch after
   three crashed ones moves the file aside. The marker is set after the file is read, so a launch that throws while
   reading it leaves none. A launch that opens no window clears it before the app quits. Neither counts as a crash.
-  The marker clears one turn of the main loop after the windows are shown.
-  Kept-aside files are numbered, so none replaces another, and the oldest are deleted past 5.
+  The marker clears one turn of the main loop after the windows are shown. Kept-aside files are numbered, so none
+  replaces another, and the oldest are deleted past 5. Amended 2026-11-01; see Decision Log.
 - The ID high-water mark is per window, since each window has its own tree. The saved tree is the visible one. Panes
   hidden for undo and the undo stack are not saved. Their IDs stay below the window's mark, so a restored tree counts
   them as retired and refuses to insert them. A mark lower than the largest ID in the tree is raised to it.
@@ -936,12 +938,13 @@ Out of scope, for later proposals:
 - UI tests and debug builds can set `UNITERM_LAYOUT_DIR` for the folder, and `UNITERM_LAYOUT_DEBOUNCE` for a long
   debounce so only the save on quit can write. Release builds ignore both, and `UNITERM_DEFAULTS_PATH` for the
   preferences file, which release builds ignore too. Each UI test gets its own layout folder.
+  Amended 2026-11-01; see Decision Log.
 - Saving has a maximum wait of 10 seconds. The first change after a save starts it, and later changes restart only the
   debounce. A stream of changes that never goes quiet still writes within 10 seconds. A title or segment change that
   leaves the pane's saved description the same is not a layout change.
 - A layout folder that is not available opens one default window that saves nothing, with an error in its status bar.
   A launch that cannot open any window, or an engine that does not start, shows a critical alert that says what failed
-  and to quit and open uniterm again. Then the app quits.
+  and to quit and open uniterm again. Then the app quits. Amended 2026-11-01; see Decision Log.
 - A write flushes the temp file with `F_FULLFSYNC`, falling back to `fsync`, and flushes the folder after the rename.
   A weight that is not a positive finite number is written as an equal share, and an unusable frame as a default one,
   so one bad number never makes the next launch reject the file. A node ID above 2^48 is unreadable, and a mark above
@@ -1160,8 +1163,9 @@ The proposal ends with the user looking at the finished app.
   oldest description by arrival. Both now go by close serial, because panes drop out of the hidden tier out of close
   order and Cmd-Z reopened an older close first. Amended M7's As built on reopening, which dropped the entry and the
   bytes when the restorer refused a description. It now opens a placeholder that keeps the bytes. Added to M7's As
-  built that an exit during the window-close question is replayed after Cancel, since it was dropped. Amended M8's As
-  built: the launch marker is set after the file is read, and cleared when no window opens, since a launch that failed
+  built that a pane ending during a close question waits for the answer, since the exit was dropped. On Cancel the pane
+  is discarded, or kept as the dead pane when it is the last. On Confirm of a pane-close question it is closed as an
+  exit. Amended M8's As built: the launch marker is set after the file is read, and cleared when no window opens, since a launch that failed
   for another reason would otherwise count toward moving a valid layout aside. `UNITERM_DEFAULTS_PATH` is debug-only
   like the other test variables. (work-queue best guess)
 - 2026-11-01: Amended M5's As built, which said a background tab's directory event leaves the host alone. It now tells

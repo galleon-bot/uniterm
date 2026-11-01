@@ -745,6 +745,57 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertTrue(window.isVisible)
   }
 
+  /// Catches a second window-close question after one Cancel. The last visible shell exits while
+  /// the question is open and no hidden pane fits. One Cancel leaves the dead pane in place, and
+  /// nothing asks again.
+  func testACancelWithNoRoomToReattachAsksOnlyOnce() async throws {
+    let fixture = try makeFixture()
+    let window = try XCTUnwrap(fixture.controller.window)
+    window.orderFrontRegardless()
+    fixture.openPanes(2)
+    fixture.made[1].isRunningSomething = true
+    fixture.controller.closePane(nil)
+    window.setContentSize(NSSize(width: 300, height: 640))
+    window.contentView?.layoutSubtreeIfNeeded()
+
+    fixture.controller.closePane(nil)
+    fixture.controller.appletDidExit(fixture.made[0])
+    await fixture.settle()
+    await fixture.settle()
+
+    XCTAssertEqual(fixture.recorder.asked.count, 1)
+    XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
+    XCTAssertEqual(fixture.controller.ledger.hidden.count, 1)
+    XCTAssertTrue(window.isVisible)
+  }
+
+  /// Catches a dead last pane that is left behind when the pane-close question it arrived during is
+  /// confirmed. With one grace slot held by a running pane, closing a running pane asks. Pane 1
+  /// then exits, and pane 2 exits as the last pane. Nothing is running by then, so the window must
+  /// close.
+  func testAnExitDuringAPaneCloseQuestionIsSettledOnConfirm() async throws {
+    let fixture = try makeFixture(CloseUndoPolicy(graceSlots: 1, gracePeriod: 10, stackDepth: 20))
+    let window = try XCTUnwrap(fixture.controller.window)
+    window.orderFrontRegardless()
+    fixture.openPanes(3)
+    fixture.made[2].isRunningSomething = true
+    fixture.controller.closePane(nil)
+    fixture.made[1].isRunningSomething = true
+    fixture.recorder.answers = [true]
+
+    fixture.controller.closePane(nil)
+    XCTAssertNotNil(fixture.controller.pendingGuard)
+
+    fixture.made[2].isRunningSomething = false
+    fixture.made[1].isRunningSomething = false
+    fixture.controller.appletDidExit(fixture.made[0])
+    fixture.controller.appletDidExit(fixture.made[1])
+    await fixture.settle()
+
+    XCTAssertEqual(fixture.recorder.asked.count, 1)
+    XCTAssertFalse(window.isVisible)
+  }
+
   /// Catches a discarded pane whose ID can return. Hanging up the hidden pane retires its ID. The
   /// area then refuses to insert it, and a pane opened later gets a fresh ID.
   func testAHungUpPanesIDIsRetiredForGood() throws {

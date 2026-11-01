@@ -53,8 +53,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// The question the window is asking now, if any. A second question is not stacked on it.
   private(set) var pendingGuard: Task<Void, Never>?
 
-  /// The last visible pane whose applet ended while a question was open. If the answer is Cancel,
-  /// the pane is closed again then, so it is judged by what is running by that time.
+  /// The last visible pane whose applet ended while a question was open. The answer settles it.
   private var exitedWhileAsking: NodeID?
 
   /// Runs once, when the window closes. The set of windows uses it to let go of the controller.
@@ -437,7 +436,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         "Every closed pane that can stay alive is already in use. Closing this one ends what is running in it. Undo reopens the pane, but not the running session.",
       labels: applet.runningLabels, confirmTitle: "Close Pane", cancelTitle: "Cancel")
 
-    ask(request) { [weak self] in
+    ask(request, replaysExit: true) { [weak self] in
       guard let self, paneArea.applet(for: pane) === applet, paneArea.paneCount > 1 else {
         return
       }
@@ -616,10 +615,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   /// Shows a question and runs one of two actions with the answer. A second question is dropped
   /// while the first is open. The one caller that cannot afford that, a pane that ended, records
-  /// itself in `exitedWhileAsking` first.
+  /// itself in `exitedWhileAsking` first. Cancel then discards it, or keeps it as the dead pane
+  /// when it is the last one. A confirmed pane-close question closes it again, since nothing
+  /// answered for it.
   private func ask(
-    _ request: CloseConfirmation, onCancel: @escaping @MainActor () -> Void = {},
-    onConfirm: @escaping @MainActor () -> Void
+    _ request: CloseConfirmation, replaysExit: Bool = false,
+    onCancel: @escaping @MainActor () -> Void = {}, onConfirm: @escaping @MainActor () -> Void
   ) {
     guard pendingGuard == nil else { return }
 
@@ -634,10 +635,20 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
       if confirmed {
         onConfirm()
+
+        if replaysExit, let exited, paneArea.applet(for: exited) != nil {
+          closePane(exited, appletEnded: true)
+        }
       } else {
         onCancel()
 
-        if let exited { closePane(exited, appletEnded: true) }
+        if let exited, paneArea.applet(for: exited) != nil {
+          if paneArea.paneCount > 1 {
+            discard(exited)
+          } else {
+            deadPane = exited
+          }
+        }
       }
     }
   }

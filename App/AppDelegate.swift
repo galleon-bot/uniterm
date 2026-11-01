@@ -176,8 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
-  /// Tells the user what failed at launch, then quits. Without a window there is nowhere else to say
-  /// it.
+  /// Tells the user what failed at launch, then quits. Without a window there is nowhere else to
+  /// say it.
   private func failLaunch(_ message: String, detail: any Error) {
     let alert = NSAlert()
     alert.alertStyle = .critical
