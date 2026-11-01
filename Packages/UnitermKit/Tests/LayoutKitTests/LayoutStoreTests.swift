@@ -232,6 +232,19 @@ final class LayoutStoreTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: fourth.layoutURL.path))
   }
 
+  /// Catches a launch that fails to read the layout yet leaves its marker behind. Three such
+  /// launches would count as crashes and move a valid layout aside. Here the layout path is a
+  /// directory, so the read throws.
+  func testALaunchThatThrowsLeavesNoMarker() throws {
+    let directory = try makeScratch(self)
+    let store = makeStore(directory)
+    XCTAssertTrue(try store.acquire())
+    try FileManager.default.createDirectory(at: store.layoutURL, withIntermediateDirectories: false)
+
+    XCTAssertThrowsError(try store.beginLaunch())
+    XCTAssertFalse(FileManager.default.fileExists(atPath: store.markerURL.path))
+  }
+
   /// A finished launch clears the count, so crashes that are far apart never add up.
   func testAFinishedLaunchResetsTheCrashCount() throws {
     let directory = try makeScratch(self)

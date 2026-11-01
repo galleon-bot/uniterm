@@ -41,18 +41,29 @@ enum PaneRestoration {
     return RestoredPanes(tree: tree, applets: applets, focus: focus, placeholders: placeholders)
   }
 
+  /// The applet for a description. A description the restorer refuses becomes a placeholder that
+  /// keeps its bytes.
+  static func applet(
+    for description: AppletDescription, restorer: AppletRestorer
+  ) -> (applet: any Applet, isPlaceholder: Bool) {
+    do {
+      return (try restorer(description), false)
+    } catch {
+      return (PlaceholderApplet(keeping: description, reason: reason(for: error)), true)
+    }
+  }
+
   private static func node(
     from saved: SavedNode, restorer: AppletRestorer, applets: inout [NodeID: any Applet],
     placeholders: inout Int
   ) -> Node {
     switch saved {
     case .pane(let id, let description):
-      do {
-        applets[id] = try restorer(description)
-      } catch {
+      let restored = applet(for: description, restorer: restorer)
+      applets[id] = restored.applet
+
+      if restored.isPlaceholder {
         placeholders += 1
-        applets[id] = PlaceholderApplet(
-          keeping: description, reason: reason(for: error))
       }
 
       return .pane(Pane(id: id))

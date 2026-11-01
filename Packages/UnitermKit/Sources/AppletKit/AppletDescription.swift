@@ -41,11 +41,6 @@ public struct AppletDescription: Sendable, Equatable, Codable {
     try container.encode(version, forKey: .version)
     try container.encode(payload, forKey: .payload)
   }
-
-  /// This description with the file bytes it came from.
-  public func withVerbatim(_ bytes: Data) -> AppletDescription {
-    AppletDescription(type: type, version: version, payload: payload, verbatim: bytes)
-  }
 }
 
 /// Why an applet could not be restored from a description. A caller keeps the raw description and

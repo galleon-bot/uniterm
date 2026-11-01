@@ -527,6 +527,44 @@ looks, and the real "Close windows when quitting" toggle. The UI test sets `-NSQ
 
 Test cost: `swift test` takes 14.5 s of test time for 372 tests. The 7 layout UI tests take 49 s.
 
+### Row review: M1 to M8
+
+Commit: "Fix undo order, placeholder undo, and background-tab saves found in review".
+
+This run has one row, so the reviewer was also asked for the run's ADR review. The range adds or edits no ADR, and the
+reviewer found no ADR finding. The `proposals.py freeze` check with all 8 row commits printed `[]`.
+
+Checks:
+- The implementer ran `make fmt-check`, `make lint`, `make check`, `make build`, `make test-package`, a UI test
+  target build, and `proposals.py check`, and all passed.
+- The coordinator reran both suites. `make test-package` ran 378 tests with 0 failures and 4 skips. `make test-app`
+  ran 46 tests with 0 failures in 351 s.
+
+Review findings:
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | Undo reopened an older close first when panes dropped to descriptions out of close order | Confirmed by two failing tests. The stack is now ordered by close serial |
+| 2 | Undoing a placeholder pane past its grace period lost its saved bytes | Confirmed by a failing test. Undo now reopens a placeholder, as launch restore does, and keeps the entry on failure |
+| 3 | A background tab's `cd` never scheduled a save | Confirmed by a failing test. Any tab's description change now tells the host. Segments still follow the selected tab |
+| 4 | A launch persistence failure quit silently | Fixed with a critical alert, then quit. An unavailable layout folder instead opens one window that saves nothing, with an error on its bar. No automated test |
+| 5 | A launch that failed without crashing still counted toward the crash-loop bound | Confirmed by two failing tests, fixed |
+| 6 | A pane that exited while a close question was open was dropped, and left a zombie on Cancel | Confirmed by a failing test, fixed. The comments that claimed a wait were corrected |
+| 7 | Dead code and test-only exports | `AppletChoiceError`, `withVerbatim`, and `isHistoryVisible` removed. `keptAsideFiles` made internal. `PaneTree.isRetired` kept, since no public call proves a split ID or a live ID retired |
+| 8 | The README status was stale | Updated |
+| 9 | `UNITERM_DEFAULTS_PATH` worked in release builds | Now DEBUG-only, like the other hooks |
+| 10 | Comment wraps and a dense doc block | Fixed |
+| 11 | adr-impact: OSC 52 writes never ask, so the write dialog was unreachable | The unreachable path was removed. Writes stay allowed without asking, as the proposal requires confirmation only for reads. Recorded in the Decision Log and the clipboard ADR candidate |
+
+Best guesses from the implementer:
+- An unavailable layout folder continues with one window that saves nothing, following the second-instance precedent.
+  If the user prefers, a small change in the app delegate turns it into alert and quit.
+- A launch that opens no window clears the unfinished-launch count. That also resets any earlier count. A
+  deterministic non-crash failure should not move a good layout aside.
+
+adr-impact, over the whole range: ADR-01, ADR-03, and ADR-04 are consistent. ADR-02's wording still says a removed
+node's ID is never reused, while the code and the amended proposal retire it only on discard. That is for the user.
+
 ## Status
 
 In progress.

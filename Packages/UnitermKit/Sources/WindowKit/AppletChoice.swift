@@ -9,17 +9,6 @@ public enum AppletChoice: Sendable, Equatable {
   case terminalProgram(command: String)
 }
 
-/// A choice the app cannot start, with a reason the user can read.
-public struct AppletChoiceError: Error, Equatable, LocalizedError {
-  public let reason: String
-
-  public init(_ reason: String) {
-    self.reason = reason
-  }
-
-  public var errorDescription: String? { reason }
-}
-
 /// The state of the new-pane picker, apart from its views.
 struct NewPaneForm: Equatable {
   enum Mode: Int, CaseIterable {

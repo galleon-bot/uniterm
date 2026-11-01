@@ -23,15 +23,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   /// UI tests set `UNITERM_DEFAULTS_PATH` to a plist path inside the test runner's container, so
   /// they never touch the developer's real preferences. A write to that file from the sandboxed
-  /// runner reaches the running app the way `defaults write` would.
+  /// runner reaches the running app the way `defaults write` would. Only debug builds honor it.
   private static func makeDefaults() -> UserDefaults {
-    guard let path = ProcessInfo.processInfo.environment["UNITERM_DEFAULTS_PATH"],
-      let defaults = UserDefaults(suiteName: path)
-    else {
-      return .standard
-    }
+    #if DEBUG
+      if let path = ProcessInfo.processInfo.environment["UNITERM_DEFAULTS_PATH"],
+        let defaults = UserDefaults(suiteName: path)
+      {
+        return defaults
+      }
+    #endif
 
-    return defaults
+    return .standard
   }
 
   /// UI tests set `UNITERM_TERMINAL_DIR` so the generated terminal config stays out of the
@@ -87,12 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     } catch {
       logger.error("the terminal engine did not start: \(String(describing: error))")
 
-      let alert = NSAlert()
-      alert.alertStyle = .critical
-      alert.messageText = "uniterm could not start its terminal engine"
-      alert.informativeText = "\(error)"
-      alert.runModal()
-      NSApp.terminate(nil)
+      failLaunch("uniterm could not start its terminal engine", detail: error)
       return
     }
 
@@ -134,23 +131,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       })
     windowSet = windows
 
-    let persistence: LayoutPersistence
+    let persistence: LayoutPersistence?
     do {
       persistence = LayoutPersistence(
         directory: try Self.layoutDirectory(), windows: windows, debounce: Self.layoutDebounce())
     } catch {
       logger.error("the layout folder is not available: \(String(describing: error))")
-      NSApp.terminate(nil)
-      return
+      persistence = nil
+
+      do {
+        try windows.open()
+        windows.post(
+          level: .error, source: .uniterm,
+          text: "The layout folder is not available, so this window's layout is not saved: \(error)"
+        )
+      } catch {
+        failLaunch("uniterm could not open its first window", detail: error)
+        return
+      }
     }
 
     layoutPersistence = persistence
 
     do {
-      try persistence.launch()
+      try persistence?.launch()
     } catch {
-      logger.error("the first pane did not start: \(String(describing: error))")
-      NSApp.terminate(nil)
+      logger.error("the first window did not open: \(String(describing: error))")
+      failLaunch("uniterm could not open its first window", detail: error)
       return
     }
 
@@ -167,6 +174,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if let controller = windows.activeController {
       postDebugError(to: controller)
     }
+  }
+
+  /// Tells the user what failed at launch, then quits. Without a window there is nowhere else to say
+  /// it.
+  private func failLaunch(_ message: String, detail: any Error) {
+    let alert = NSAlert()
+    alert.alertStyle = .critical
+    alert.messageText = message
+    alert.informativeText =
+      "\(detail)\n\nQuit uniterm and open it again. If this keeps happening, check the log."
+    alert.runModal()
+    NSApp.terminate(nil)
   }
 
   /// UI tests set `UNITERM_DEBUG_POST_ERROR` to get an error on the status bar without relying on

@@ -266,19 +266,14 @@ final class GhosttySurfaceView: NSView, TerminalSession, TerminalMenuActions, NS
     }
   }
 
-  func writeClipboard(_ text: String, needsConfirmation: Bool) {
-    guard needsConfirmation else {
-      Self.store(text)
-      return
-    }
+  /// OSC 52 writes are allowed without asking. The config sets `clipboard-write` to `allow`, so
+  /// libghostty never asks for one. A write that did arrive as a question is answered yes, to match.
+  func writeClipboard(_ text: String) {
+    Self.store(text)
+  }
 
-    let request = TerminalClipboardRequest(kind: .write, text: text) { allow in
-      guard allow else { return }
-
-      DispatchQueue.main.async { Self.store(text) }
-    }
-
-    onEvent?(.clipboardRequest(request))
+  func allowClipboardWrite(text: String, state: OpaqueToken) {
+    completeClipboard(text: text, state: state, allow: true)
   }
 
   private static func store(_ text: String) {

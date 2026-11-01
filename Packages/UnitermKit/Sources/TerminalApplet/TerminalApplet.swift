@@ -500,7 +500,11 @@ public final class TerminalApplet: TabbedApplet {
     case .workingDirectoryChanged(let path):
       tab.workingDirectory = path
 
-      if isSelected { rebuildSegments() }
+      if isSelected {
+        rebuildSegments()
+      } else {
+        host?.appletDidChange(self)
+      }
 
     case .commandFinished(let exitCode, _):
       tab.failedExitCode = exitCode.flatMap { $0 != 0 ? $0 : nil }
@@ -580,13 +584,6 @@ public final class TerminalApplet: TabbedApplet {
         title: "Allow a program to read your clipboard?",
         detail:
           "A program in this pane asked for the clipboard with an escape sequence. It would receive: \(Self.preview(request.text))",
-        confirmTitle: "Allow", cancelTitle: "Deny")
-
-    case .write:
-      confirmation = AppletConfirmation(
-        title: "Allow a program to change your clipboard?",
-        detail:
-          "A program in this pane wants to replace the clipboard with: \(Self.preview(request.text))",
         confirmTitle: "Allow", cancelTitle: "Deny")
 
     case .unsafePaste:

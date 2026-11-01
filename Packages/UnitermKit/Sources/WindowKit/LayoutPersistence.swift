@@ -69,7 +69,8 @@ public final class LayoutPersistence {
     try LayoutStore.defaultDirectory()
   }
 
-  /// Opens the windows for this launch. Throws only when not even a default window opens.
+  /// Opens the windows for this launch. Throws only when not even a default window opens. Such a
+  /// launch is not a crash, so it clears the launch marker and does not count toward the bound.
   @discardableResult
   public func launch() throws -> Outcome {
     let writer: Bool
@@ -100,12 +101,18 @@ public final class LayoutPersistence {
 
     let outcome: Outcome
 
-    switch result {
-    case .restored(let layout):
-      outcome = try restore(layout)
+    do {
+      switch result {
+      case .restored(let layout):
+        outcome = try restore(layout)
 
-    case .fresh(let notice):
-      outcome = try openDefault(.fresh, level: .warning, notice: notice)
+      case .fresh(let notice):
+        outcome = try openDefault(.fresh, level: .warning, notice: notice)
+      }
+    } catch {
+      store.finishLaunch()
+      store.release()
+      throw error
     }
 
     windows.onLayoutChange = { [weak self] in self?.saver.layoutDidChange() }

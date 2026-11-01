@@ -232,6 +232,33 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertEqual(fixture.controller.focusedPane, id(4))
   }
 
+  /// Catches an undo that drops a description this build cannot restore. A placeholder closed past
+  /// its grace period holds a newer build's bytes. The reopened pane is a placeholder that still
+  /// holds them, so a later save writes them back.
+  func testUndoOfADescriptionTheRestorerRefusesKeepsItsBytesInAPlaceholder() throws {
+    let fixture = try makeFixture()
+    fixture.openPanes(2)
+
+    let bytes = Data(#"{"type":"fake","version":9,"payload":{"new":true}}"#.utf8)
+    fixture.made[1].fixedDescription = AppletDescription(
+      type: "fake", version: 9, payload: .null, verbatim: bytes)
+    fixture.controller.closePane(nil)
+    fixture.clock.now = 10
+    fixture.scheduler.fire()
+
+    fixture.controller.undoClosePane(nil)
+
+    XCTAssertEqual(fixture.controller.paneIDs.count, 2)
+
+    let reopened = fixture.controller.paneIDs.compactMap {
+      fixture.controller.paneArea.applet(for: $0) as? PlaceholderApplet
+    }
+
+    XCTAssertEqual(reopened.count, 1)
+    XCTAssertEqual(reopened.first?.describe().verbatim, bytes)
+    XCTAssertTrue(fixture.controller.ledger.described.isEmpty)
+  }
+
   /// Catches an undo that takes the hidden tier before the stack whatever the order of closes. Pane
   /// 4 closes first and ages into a description. Pane 2 closes later and is still hidden. The first
   /// undo returns pane 2 with its ID. The second reopens pane 4's description after pane 2, as
@@ -688,6 +715,30 @@ final class UndoCloseTests: XCTestCase {
     await fixture.settle()
 
     XCTAssertEqual(fixture.recorder.asked.map(\.labels), [["Fake 1"]])
+    XCTAssertEqual(fixture.controller.paneIDs, [id(2)])
+    XCTAssertTrue(fixture.made[0].closed)
+    XCTAssertFalse(fixture.made[1].closed)
+    XCTAssertTrue(window.isVisible)
+  }
+
+  /// Catches an exit that arrives while the window-close question is open and is dropped. The last
+  /// visible shell exits after Cmd-W asked about the hidden running pane. Cancel brings the hidden
+  /// pane back, and the dead pane must leave too instead of staying as a zombie.
+  func testALastPaneThatExitsWhileTheWindowQuestionIsOpenLeavesOnCancel() async throws {
+    let fixture = try makeFixture()
+    let window = try XCTUnwrap(fixture.controller.window)
+    window.orderFrontRegardless()
+    fixture.openPanes(2)
+    fixture.made[1].isRunningSomething = true
+    fixture.controller.closePane(nil)
+
+    fixture.controller.closePane(nil)
+    XCTAssertNotNil(fixture.controller.pendingGuard)
+
+    fixture.controller.appletDidExit(fixture.made[0])
+    await fixture.settle()
+
+    XCTAssertEqual(fixture.recorder.asked.count, 1)
     XCTAssertEqual(fixture.controller.paneIDs, [id(2)])
     XCTAssertTrue(fixture.made[0].closed)
     XCTAssertFalse(fixture.made[1].closed)

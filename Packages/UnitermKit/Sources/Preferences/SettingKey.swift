@@ -1,6 +1,7 @@
 /// A typed key into the app's UserDefaults domain.
 ///
-/// Values are stored as their raw strings, so `defaults write <domain> <name> -string <raw>` sets them.
+/// Values are stored as their raw strings, so `defaults write <domain> <name> -string <raw>` sets
+/// them.
 public struct SettingKey<Value: RawRepresentable & Sendable>: Sendable
 where Value.RawValue == String {
   public let name: String

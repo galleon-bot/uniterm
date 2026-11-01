@@ -10,7 +10,10 @@ Each window also has a status bar and a command palette. Both can be docked in d
 
 ## Status
 
-Early development. The app skeleton builds. The terminal is not wired in yet.
+Early development. The terminal applet runs through libghostty, with tabs and a program mode. A window holds splits that
+can be resized, and the app opens several windows. It has a status bar with message history, undo for a closed pane, and
+close guards for running programs. Every window's layout is saved and restored across launches. The other applets and
+the command palette are not built yet.
 
 ## Stack
 

@@ -151,7 +151,7 @@ public final class LayoutStore {
 
   // MARK: Launch
 
-  /// Starts a launch. It sets the launch marker, then reads the layout. Call `finishLaunch()` once
+  /// Starts a launch. It reads the layout, then sets the launch marker. Call `finishLaunch()` once
   /// the windows are up.
   ///
   /// The marker counts launches that never finished. At the bound, the layout is moved aside and
@@ -171,8 +171,16 @@ public final class LayoutStore {
         })
     }
 
-    try writeMarker(unfinished + 1)
+    let result = try readLayout()
 
+    try writeMarker(unfinished + 1)
+    return result
+  }
+
+  /// Reads the layout file. A file that cannot be used is moved aside, and the launch starts fresh.
+  /// Every failure here comes before the marker is written, because a launch that threw never
+  /// started and must not count toward the crash bound.
+  private func readLayout() throws -> LaunchResult {
     guard FileManager.default.fileExists(atPath: layoutURL.path) else {
       return .fresh(notice: nil)
     }
@@ -235,7 +243,7 @@ public final class LayoutStore {
   private static let asideSuffix = ".json"
 
   /// The kept-aside files, oldest first.
-  public var keptAsideFiles: [URL] {
+  var keptAsideFiles: [URL] {
     asideEntries().map(\.url)
   }
 

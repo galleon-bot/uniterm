@@ -141,9 +141,17 @@ enum GhosttyCallbacks {
     let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
     let text = String(cString: string)
     let token = OpaqueToken(pointer: state)
+
+    if request == GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE {
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated { view.allowClipboardWrite(text: text, state: token) }
+      }
+
+      return
+    }
+
     let kind: TerminalClipboardRequest.Kind =
-      request == GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ
-      ? .read : request == GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE ? .write : .unsafePaste
+      request == GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ ? .read : .unsafePaste
 
     DispatchQueue.main.async {
       MainActor.assumeIsolated { view.askAboutClipboard(kind: kind, text: text, state: token) }
@@ -169,7 +177,7 @@ enum GhosttyCallbacks {
 
     let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
     DispatchQueue.main.async {
-      MainActor.assumeIsolated { view.writeClipboard(plain, needsConfirmation: confirm) }
+      MainActor.assumeIsolated { view.writeClipboard(plain) }
     }
   }
 

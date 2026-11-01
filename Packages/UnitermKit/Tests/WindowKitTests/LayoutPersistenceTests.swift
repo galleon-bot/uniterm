@@ -14,6 +14,9 @@ private final class LaunchControls {
 
   /// The number of the restored window whose controller fails to build. Counts from 1.
   var failingWindow: Int?
+
+  /// Makes the default window fail to build as well, so the launch throws.
+  var failingDefault = false
   var restoredWindows = 0
 }
 
@@ -83,7 +86,11 @@ private final class LaunchFixture {
           restoring: restored, restoreApplet: restore, makeApplet: make)
       },
       makeController: { identifier in
-        try MainWindowController(
+        if controls.failingDefault {
+          throw AppletRestoreError.unsupported("test failure")
+        }
+
+        return try MainWindowController(
           appearance: appearance, settings: settings, identifier: identifier,
           restoreApplet: restore, makeApplet: make)
       })
@@ -136,6 +143,15 @@ final class LayoutPersistenceTests: XCTestCase {
   }
 
   private var layoutFile: URL { directory.appendingPathComponent("layout.json") }
+
+  /// The copies the store kept beside the layout file, oldest first.
+  private func keptAsideFiles() -> [URL] {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+
+    return names.filter { $0.hasPrefix("layout.aside-") }.sorted().map {
+      directory.appendingPathComponent($0)
+    }
+  }
 
   private func plant(_ layout: SavedLayout) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -244,7 +260,6 @@ final class LayoutPersistenceTests: XCTestCase {
     let (relaunched, _) = try launch()
     let restored = relaunched.first
 
-    XCTAssertTrue(restored.paneArea.tree.isRetired(third), "the hidden pane's ID is retired")
     XCTAssertFalse(restored.paneIDs.contains(third))
     XCTAssertTrue(restored.paneIDs.contains(second))
 
@@ -316,7 +331,7 @@ final class LayoutPersistenceTests: XCTestCase {
 
     XCTAssertEqual(outcome, .fresh)
     XCTAssertEqual(fixture.windows.controllers.count, 1)
-    XCTAssertEqual(fixture.store.keptAsideFiles.count, 1)
+    XCTAssertEqual(keptAsideFiles().count, 1)
     XCTAssertTrue(
       fixture.messages(of: fixture.first).contains { $0.contains("could not be used") })
   }
@@ -334,7 +349,7 @@ final class LayoutPersistenceTests: XCTestCase {
 
     XCTAssertEqual(outcome, .fresh)
     XCTAssertEqual(fixture.windows.controllers.count, 1)
-    XCTAssertEqual(fixture.store.keptAsideFiles.count, 1)
+    XCTAssertEqual(keptAsideFiles().count, 1)
     XCTAssertTrue(
       fixture.messages(of: fixture.first).contains { $0.contains("did not finish starting") })
   }
@@ -366,9 +381,25 @@ final class LayoutPersistenceTests: XCTestCase {
 
     XCTAssertEqual(try fixture.persistence.launch(), .restored(windows: 1))
     XCTAssertEqual(fixture.windows.controllers.count, 1)
-    XCTAssertEqual(try Data(contentsOf: fixture.store.keptAsideFiles[0]), original)
+    XCTAssertEqual(try Data(contentsOf: keptAsideFiles()[0]), original)
     XCTAssertTrue(
       fixture.messages(of: fixture.first).contains { $0.contains("did not reopen") })
+  }
+
+  /// Catches a launch that throws after the marker was set. The app quits, and three such
+  /// launches in a row would move a valid layout aside as if the app had crashed.
+  func testALaunchThatCannotOpenAnyWindowLeavesNoMarker() throws {
+    try plant(SavedLayout(windows: [savedWindow(tree: savedPane(1, "a"))]))
+
+    let fixture = LaunchFixture(directory: directory)
+    addTeardownBlock { @MainActor in fixture.cleanUp() }
+    fixture.controls.failingWindow = 1
+    fixture.controls.failingDefault = true
+
+    XCTAssertThrowsError(try fixture.persistence.launch())
+    XCTAssertFalse(
+      FileManager.default.fileExists(atPath: directory.appendingPathComponent("launch.marker").path)
+    )
   }
 
   // MARK: Saving

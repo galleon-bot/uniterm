@@ -65,8 +65,6 @@ public final class TerminalClipboardRequest: @unchecked Sendable {
   public enum Kind: Sendable, Equatable {
     /// A program asked to read the clipboard with OSC 52. The text is what it would receive.
     case read
-    /// A program asked to write the clipboard with OSC 52.
-    case write
     /// A paste that libghostty judged unsafe.
     case unsafePaste
   }

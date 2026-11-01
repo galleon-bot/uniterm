@@ -11,8 +11,11 @@ public typealias LayoutScheduler =
 ///
 /// Every layout change restarts the wait, so a burst of changes writes once. A stream of changes
 /// that never goes quiet still writes once the maximum wait has passed since the first of them.
-/// The caller asks for an immediate save on quit, which also drops any wait still pending. Saving stays off until the
-/// caller turns it on, so a half-restored layout never replaces the file.
+///
+/// The caller asks for an immediate save on quit, which also drops any wait still pending.
+///
+/// Saving stays off until the caller turns it on, so a half-restored layout never replaces the
+/// file.
 @MainActor
 public final class LayoutSaver {
   public static let defaultScheduler: LayoutScheduler = { delay, action in

@@ -179,7 +179,7 @@ final class TerminalAppletTests: XCTestCase {
   /// A second answer to one request does nothing.
   func testRequestResolvesOnce() {
     let answers = Answers()
-    let request = TerminalClipboardRequest(kind: .write, text: "x") { answers.append($0) }
+    let request = TerminalClipboardRequest(kind: .read, text: "x") { answers.append($0) }
 
     request.resolve(allow: true)
     request.resolve(allow: false)
@@ -628,7 +628,9 @@ final class TerminalAppletTests: XCTestCase {
   }
 
   /// Catches status bar segments that follow the last event instead of the selected tab. Tab one
-  /// is in /var/tmp with a failed command. Tab two starts in the same directory with no failure.
+  /// is in /var/tmp with a failed command. Tab two starts in the same directory with no failure. A
+  /// background tab's new directory still reaches the host, which saves the layout. It does not
+  /// change the segments.
   func testSegmentsReflectTheSelectedTab() {
     let (applet, engine, host, first) = makeApplet()
     first.onEvent?(.workingDirectoryChanged("/var/tmp"))
@@ -643,7 +645,7 @@ final class TerminalAppletTests: XCTestCase {
     let changes = host.changed
     first.onEvent?(.workingDirectoryChanged("/etc"))
     XCTAssertEqual(applet.segments, [AppletSegment(symbolName: "folder", text: "proj")])
-    XCTAssertEqual(host.changed, changes, "a background tab told the host")
+    XCTAssertGreaterThan(host.changed, changes, "a background directory change was never saved")
 
     applet.selectTab(at: 0)
     XCTAssertEqual(

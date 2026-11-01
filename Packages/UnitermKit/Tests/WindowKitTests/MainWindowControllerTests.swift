@@ -7,6 +7,10 @@ import XCTest
 
 @testable import WindowKit
 
+private struct ProgramsUnavailable: LocalizedError {
+  var errorDescription: String? { "no programs in this test" }
+}
+
 @MainActor
 final class MainWindowControllerTests: XCTestCase {
   /// The applets the factory handed out, in order. The first one is the window's first pane.
@@ -27,7 +31,7 @@ final class MainWindowControllerTests: XCTestCase {
     let controller = try MainWindowController(appearance: appearance, settings: store) {
       [unowned self] choice in
       if case .terminalProgram = choice {
-        throw AppletChoiceError("no programs in this test")
+        throw ProgramsUnavailable()
       }
 
       let applet = reuse ?? FakeApplet()

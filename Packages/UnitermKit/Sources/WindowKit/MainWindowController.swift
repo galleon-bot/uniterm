@@ -50,9 +50,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// Asks the user before something is ended that undo cannot bring back. Tests replace it.
   var confirmer: CloseConfirmer = CloseDialog.present
 
-  /// The question the window is asking now, if any. A second close waits for it instead of
-  /// stacking a second dialog.
+  /// The question the window is asking now, if any. A second question is not stacked on it.
   private(set) var pendingGuard: Task<Void, Never>?
+
+  /// The last visible pane whose applet ended while a question was open. If the answer is Cancel,
+  /// the pane is closed again then, so it is judged by what is running by that time.
+  private var exitedWhileAsking: NodeID?
 
   /// Runs once, when the window closes. The set of windows uses it to let go of the controller.
   var onClose: ((MainWindowController) -> Void)?
@@ -238,8 +241,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       statusCenter.markHistorySeen()
     }
   }
-
-  var isHistoryVisible: Bool { historyVisible }
 
   func refreshMinimumSize() {
     updateMinimumSize()
@@ -574,6 +575,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// left to show. When no hidden pane fits, it stays so the window is not left empty, and it
   /// leaves as soon as a hidden pane returns.
   private func closeLastPane(exited: NodeID?) {
+    guard pendingGuard == nil else {
+      if let exited { exitedWhileAsking = exited }
+
+      return
+    }
+
     let labels = runningTabLabels
 
     guard !labels.isEmpty else {
@@ -607,8 +614,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
   }
 
-  /// Shows a question and runs one of two actions with the answer. A second question waits for
-  /// the first.
+  /// Shows a question and runs one of two actions with the answer. A second question is dropped
+  /// while the first is open. The one caller that cannot afford that, a pane that ended, records
+  /// itself in `exitedWhileAsking` first.
   private func ask(
     _ request: CloseConfirmation, onCancel: @escaping @MainActor () -> Void = {},
     onConfirm: @escaping @MainActor () -> Void
@@ -621,10 +629,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       let confirmed = await confirmer(request, window)
       pendingGuard = nil
 
+      let exited = exitedWhileAsking
+      exitedWhileAsking = nil
+
       if confirmed {
         onConfirm()
       } else {
         onCancel()
+
+        if let exited { closePane(exited, appletEnded: true) }
       }
     }
   }
@@ -667,19 +680,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   }
 
   /// Opens a pane from a closed pane's description. The pane gets a new ID, and the applet starts
-  /// fresh. It stays on the stack when it does not fit.
+  /// fresh. A description this build cannot restore opens as a placeholder, which keeps its bytes.
+  /// The entry stays on the stack when the pane does not fit.
   private func reopen(_ closed: ClosedPane) {
-    let applet: any Applet
-
-    do {
-      applet = try restoreApplet(closed.description)
-    } catch {
-      ledger.removeDescribed(serial: closed.serial)
-      statusCenter.post(
-        level: .error, source: .uniterm,
-        text: "The pane \u{201C}\(closed.title)\u{201D} did not reopen: \(error)")
-      return
-    }
+    let restored = PaneRestoration.applet(for: closed.description, restorer: restoreApplet)
+    let applet = restored.applet
 
     applet.host = self
 
@@ -696,6 +701,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     startPendingApplets()
     paneArea.focus(id)
     undoStateDidChange()
+
+    if restored.isPlaceholder {
+      statusCenter.post(
+        level: .warning, source: .uniterm,
+        text:
+          "The pane \u{201C}\(closed.title)\u{201D} could not be restored. It is kept as it was.")
+    }
   }
 
   private func postNoRoom(to action: String) {

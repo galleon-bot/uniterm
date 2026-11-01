@@ -58,7 +58,8 @@ struct CloseUndoLedger {
   /// Hidden panes, oldest first.
   private(set) var hidden: [HiddenPane] = []
 
-  /// Descriptions, oldest first.
+  /// Descriptions, lowest serial first. Panes reach this tier in the order they drop out of the
+  /// hidden one, which is not always the order they closed.
   private(set) var described: [ClosedPane] = []
 
   private var serial = 0
@@ -115,9 +116,11 @@ struct CloseUndoLedger {
     return hidden.remove(at: index)
   }
 
-  /// Puts a description on the stack. The oldest drop when the stack is deeper than the policy.
+  /// Puts a description on the stack by serial. The earliest closes drop when the stack is deeper
+  /// than the policy.
   mutating func describe(_ closed: ClosedPane) {
-    described.append(closed)
+    let index = described.firstIndex { $0.serial > closed.serial } ?? described.endIndex
+    described.insert(closed, at: index)
 
     if described.count > policy.stackDepth {
       described.removeFirst(described.count - policy.stackDepth)

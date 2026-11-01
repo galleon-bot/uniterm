@@ -392,10 +392,10 @@ final class StatusBarTests: XCTestCase {
     fixture.layout()
 
     try click(fixture, at: NSPoint(x: 20, y: fixture.bar.bounds.midY))
-    XCTAssertTrue(fixture.controller.isHistoryVisible)
+    XCTAssertFalse(fixture.controller.contentController.history.isHidden)
 
     try click(fixture, at: NSPoint(x: 20, y: fixture.bar.bounds.midY))
-    XCTAssertFalse(fixture.controller.isHistoryVisible)
+    XCTAssertTrue(fixture.controller.contentController.history.isHidden)
   }
 
   /// Catches a menu item whose title does not follow the history state.
@@ -458,7 +458,7 @@ final class StatusBarTests: XCTestCase {
     try click(fixture, at: NSPoint(x: control.midX, y: control.midY))
 
     XCTAssertEqual(fixture.messageText, "")
-    XCTAssertFalse(fixture.controller.isHistoryVisible)
+    XCTAssertTrue(fixture.controller.contentController.history.isHidden)
     XCTAssertNil(fixture.bar.frame(of: .dismiss), "the control outlives the error")
   }
 }
