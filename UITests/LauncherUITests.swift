@@ -1,0 +1,151 @@
+import XCTest
+
+/// Drives the in-pane launcher in the launched app. Each test proves a contract that only real key
+/// routing and the window server can show: the first responder, the Window menu's number keys, and
+/// the pane that stays after an applet replaces the launcher.
+@MainActor
+final class LauncherUITests: UnitermUITestCase {
+  /// Where the screenshot test also writes its PNGs. The runner may not be allowed to write there,
+  /// so the attachments in the result bundle are the record.
+  private static let shotsDirectory = URL(
+    fileURLWithPath:
+      "/private/tmp/claude-501/-Users-ripta-projects-uniterm/9c422818-aa92-4fa3-9745-41242178e836/scratchpad/launcher-shots",
+    isDirectory: true)
+
+  private func startedWindow() -> (app: XCUIApplication, window: XCUIElement) {
+    let app = launchApp()
+    let window = app.windows["main-window"]
+    _ = waitForTerminal(in: app)
+    return (app, window)
+  }
+
+  /// Catches a launcher that needs a click before it takes keys, or one that does not open a
+  /// terminal on Return. Cmd-D shows it, Return alone replaces it with a shell in the same pane.
+  func testReturnOpensATerminalInTheSamePane() {
+    let (app, window) = startedWindow()
+
+    app.typeKey("d", modifierFlags: .command)
+    XCTAssertTrue(launcher(in: window).waitForExistence(timeout: 5), "Cmd-D showed no launcher")
+    XCTAssertFalse(window.sheets.firstMatch.exists, "a dialog opened")
+
+    app.typeKey(.return, modifierFlags: [])
+
+    let pane = window.groups["pane-2"]
+    XCTAssertTrue(waitUntilGone(launcher(in: window)))
+    XCTAssertTrue(pane.textViews["terminal"].waitForExistence(timeout: 20))
+    XCTAssertTrue(
+      waitFor(pane.textViews["terminal"], timeout: 40) { $0.contains("% ") },
+      "the new pane never showed a prompt")
+  }
+
+  /// Catches an arrow that does not move the selection, a command field that does not take the
+  /// keyboard, and a program that opens as a shell. Down, then typing, then Return runs the command
+  /// in program mode, where New Tab is off.
+  func testArrowTypeAndReturnOpensProgramMode() {
+    let (app, window) = startedWindow()
+
+    app.typeKey("d", modifierFlags: .command)
+    XCTAssertTrue(launcher(in: window).waitForExistence(timeout: 5))
+
+    app.typeKey(.downArrow, modifierFlags: [])
+    app.typeText("sleep 300")
+    app.typeKey(.return, modifierFlags: [])
+
+    let pane = window.groups["pane-2"]
+    XCTAssertTrue(waitUntilGone(launcher(in: window)))
+    XCTAssertTrue(pane.textViews["terminal"].waitForExistence(timeout: 20))
+
+    app.menuBars.menuBarItems["File"].click()
+    let newTab = app.menuBars.menuItems["New Tab"]
+    XCTAssertTrue(newTab.waitForExistence(timeout: 5))
+    XCTAssertFalse(newTab.isEnabled, "the pane opened as a shell, not as a program")
+    app.typeKey(.escape, modifierFlags: [])
+  }
+
+  /// Catches an Escape that leaves an empty pane behind.
+  func testEscapeClosesTheEmptyPane() {
+    let (app, window) = startedWindow()
+
+    app.typeKey("d", modifierFlags: .command)
+    XCTAssertTrue(launcher(in: window).waitForExistence(timeout: 5))
+
+    app.typeKey(.escape, modifierFlags: [])
+
+    XCTAssertTrue(waitUntilGone(launcher(in: window)))
+    XCTAssertFalse(window.groups["pane-2"].exists)
+    XCTAssertTrue(window.textViews["terminal"].exists, "the first pane went away")
+  }
+
+  /// Catches Cmd-2 reaching the Window menu's Select Tab 2 instead of the launcher. The number
+  /// picks program mode and the keyboard is already in the command field, so typing lands there.
+  func testCommandTwoPicksProgramModeAndFocusesTheCommandField() {
+    let (app, window) = startedWindow()
+
+    app.typeKey("d", modifierFlags: .command)
+    XCTAssertTrue(launcher(in: window).waitForExistence(timeout: 5))
+
+    app.typeKey("2", modifierFlags: .command)
+
+    let command = window.textFields["launcher-command"]
+    XCTAssertTrue(command.waitForExistence(timeout: 5), "Cmd-2 showed no command field")
+
+    app.typeText("htop")
+    XCTAssertEqual(command.value as? String, "htop", "the keyboard was not in the command field")
+
+    app.typeKey(.escape, modifierFlags: [])
+    XCTAssertTrue(waitUntilGone(command), "Escape did not leave the command field")
+    XCTAssertTrue(launcher(in: window).exists, "Escape in the command field closed the pane")
+
+    app.typeText("x")
+    XCTAssertEqual(
+      window.textFields["launcher-filter"].value as? String, "x",
+      "the keyboard did not return to the filter")
+  }
+
+  /// Keeps a picture of the launcher in light and dark, with the terminal selected and with
+  /// program mode open. Unit tests prove the rules. These show that the colors follow the theme.
+  func testLauncherLooksRightInLightAndDark() throws {
+    let app = launchApp()
+    let window = app.windows["main-window"]
+    _ = waitForTerminal(in: app)
+
+    try? FileManager.default.createDirectory(
+      at: Self.shotsDirectory, withIntermediateDirectories: true)
+
+    for (name, button) in [("light", "Light"), ("dark", "Dark")] {
+      app.typeKey(",", modifierFlags: .command)
+      let settings = app.windows["settings-window"]
+      XCTAssertTrue(settings.waitForExistence(timeout: 5))
+      settings.radioGroups["appearance-control"].radioButtons[button].click()
+      app.typeKey("w", modifierFlags: .command)
+      XCTAssertTrue(waitUntilGone(settings, timeout: 5))
+
+      app.typeKey("d", modifierFlags: .command)
+      XCTAssertTrue(launcher(in: window).waitForExistence(timeout: 5))
+      Thread.sleep(forTimeInterval: 0.5)
+      attach(window, named: "launcher-\(name)")
+
+      app.typeKey("2", modifierFlags: .command)
+      XCTAssertTrue(window.textFields["launcher-command"].waitForExistence(timeout: 5))
+      app.typeText("htop")
+      Thread.sleep(forTimeInterval: 0.5)
+      attach(window, named: "launcher-program-\(name)")
+
+      app.typeKey(.escape, modifierFlags: [])
+      app.typeKey(.escape, modifierFlags: [])
+      XCTAssertTrue(waitUntilGone(launcher(in: window)))
+    }
+  }
+
+  private func attach(_ element: XCUIElement, named name: String) {
+    let screenshot = element.screenshot()
+
+    let attachment = XCTAttachment(screenshot: screenshot)
+    attachment.name = name
+    attachment.lifetime = .keepAlways
+    add(attachment)
+
+    try? screenshot.pngRepresentation.write(
+      to: Self.shotsDirectory.appendingPathComponent("\(name).png"))
+  }
+}

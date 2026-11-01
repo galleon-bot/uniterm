@@ -36,14 +36,11 @@ final class WindowsUITests: UnitermUITestCase {
     let one = mainWindow(1, in: app)
     let two = mainWindow(2, in: app)
 
-    app.typeKey("d", modifierFlags: .command)
-    XCTAssertTrue(two.sheets.firstMatch.waitForExistence(timeout: 5), "the picker never opened")
-    app.typeKey(.return, modifierFlags: [])
-    XCTAssertTrue(waitForNoSheet(in: two))
+    openPane(in: app, window: 2, keys: "d", modifiers: .command)
 
     XCTAssertTrue(waitForPaneCount(2, in: two), "the second window never split")
     XCTAssertEqual(paneGroups(in: one).count, 1, "the split reached the first window")
-    XCTAssertFalse(one.sheets.firstMatch.exists)
+    XCTAssertFalse(launcher(in: one).exists)
   }
 
   /// Catches a status message that shows in every window. The error posted at launch belongs to the

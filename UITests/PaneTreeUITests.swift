@@ -207,7 +207,7 @@ final class PaneTreeUITests: UnitermUITestCase {
   }
 
   /// Catches a split that is refused silently: with three panes in a row, a fourth does not fit.
-  /// The status bar says so, and the sheet never opens.
+  /// The status bar says so, and no launcher opens.
   func testASplitThatDoesNotFitIsRefusedWithAMessage() {
     let app = launchApp()
     let window = app.windows["main-window"]
@@ -222,72 +222,11 @@ final class PaneTreeUITests: UnitermUITestCase {
 
     let message = window.staticTexts["status-message"]
     XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("not enough room") })
-    XCTAssertFalse(window.sheets.firstMatch.exists)
+    XCTAssertFalse(launcher(in: window).exists)
     XCTAssertEqual(paneGroups(in: window).count, 3)
   }
 
-  /// Catches a picker that offers no program mode: the sheet lists the terminal in shell mode and
-  /// in program mode, the command field appears only for program mode, and Open stays disabled
-  /// until a command is typed. Opening it adds a pane that runs the program.
-  func testThePickerOffersProgramModeWithACommand() {
-    let app = launchApp()
-    let window = app.windows["main-window"]
-    _ = waitForTerminal(in: app)
-
-    app.typeKey("d", modifierFlags: .command)
-    let sheet = window.sheets.firstMatch
-    XCTAssertTrue(sheet.waitForExistence(timeout: 5))
-    XCTAssertFalse(sheet.textFields["pane-command"].exists)
-
-    let popup = sheet.popUpButtons["pane-applet"]
-    popup.click()
-    XCTAssertTrue(app.menuItems["Terminal"].waitForExistence(timeout: 5))
-    app.menuItems["Terminal running a program"].click()
-
-    let field = sheet.textFields["pane-command"]
-    XCTAssertTrue(field.waitForExistence(timeout: 5))
-    XCTAssertFalse(sheet.buttons["Open"].isEnabled)
-
-    field.click()
-    field.typeText("sh -c \"echo PR:42:; cat\"")
-    XCTAssertTrue(sheet.buttons["Open"].isEnabled)
-
-    sheet.buttons["Open"].click()
-
-    let pane = window.groups["pane-2"]
-    XCTAssertTrue(pane.waitForExistence(timeout: 20), "program mode opened no pane")
-    XCTAssertTrue(waitFor(pane.textViews["terminal"], timeout: 40) { $0.contains("PR:42:") })
-  }
-
-  /// Catches a Cancel that still opens a pane.
-  func testCancellingThePickerOpensNoPane() {
-    let app = launchApp()
-    let window = app.windows["main-window"]
-    _ = waitForTerminal(in: app)
-
-    app.typeKey("d", modifierFlags: .command)
-    XCTAssertTrue(window.sheets.firstMatch.waitForExistence(timeout: 5))
-
-    app.typeKey(.escape, modifierFlags: [])
-
-    XCTAssertTrue(waitForNoSheet(in: window))
-    XCTAssertFalse(window.groups["pane-2"].exists)
-  }
-
   // MARK: Helpers
-
-  /// Presses a split key, then accepts the picker's default, a terminal in shell mode.
-  private func openPane(
-    in app: XCUIApplication, keys: String, modifiers: XCUIElement.KeyModifierFlags
-  ) {
-    let window = app.windows["main-window"]
-
-    app.typeKey(keys, modifierFlags: modifiers)
-    XCTAssertTrue(window.sheets.firstMatch.waitForExistence(timeout: 5), "the picker never opened")
-
-    app.typeKey(.return, modifierFlags: [])
-    XCTAssertTrue(waitForNoSheet(in: window))
-  }
 
   private func paneGroups(in window: XCUIElement) -> XCUIElementQuery {
     window.groups.matching(NSPredicate(format: "identifier BEGINSWITH 'pane-'"))

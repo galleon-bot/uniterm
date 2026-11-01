@@ -1,5 +1,6 @@
 import AppKit
 import AppletKit
+import Theme
 
 /// Stands in for any applet. It holds one tab and cannot open another, as a plain applet would,
 /// until a test says otherwise.
@@ -55,6 +56,11 @@ final class FakeApplet: TabbedApplet {
   func detach() { detachCount += 1 }
   func reattach() { reattachCount += 1 }
   func focus() {}
+
+  /// The palettes the host handed over, oldest first.
+  var palettes: [ThemePalette] = []
+
+  func apply(_ palette: ThemePalette) { palettes.append(palette) }
 
   /// When set, the description stays fixed while the title changes, as a terminal's does.
   var fixedDescription: AppletDescription?

@@ -168,6 +168,18 @@ final class PaneAreaView: NSView {
     return (view.applet, hadFocus ? focus : nil, placement)
   }
 
+  /// Puts `applet` in an existing pane, which keeps its ID, its place, and its focus. Returns the
+  /// applet it replaced for the caller to close, or nil when the pane is unknown.
+  func replace(_ pane: NodeID, with applet: any Applet) -> (any Applet)? {
+    guard let view = paneViews[pane] else { return nil }
+
+    let replaced = view.applet
+    view.replaceApplet(applet)
+    changed()
+    layoutSubtreeIfNeeded()
+    return replaced
+  }
+
   private func install(_ applet: any Applet, as pane: NodeID) {
     let view = PaneFrameView(paneID: pane, applet: applet)
     view.apply(palette)

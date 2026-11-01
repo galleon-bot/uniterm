@@ -41,12 +41,17 @@ enum PaneRestoration {
     return RestoredPanes(tree: tree, applets: applets, focus: focus, placeholders: placeholders)
   }
 
-  /// The applet for a description. A description the restorer refuses becomes a placeholder that
-  /// keeps its bytes.
+  /// The applet for a description. The launcher lives in WindowKit, and the app's restorer does
+  /// not know its type, so the window restores it first. A description the restorer refuses becomes a placeholder that keeps
+  /// its bytes.
   static func applet(
     for description: AppletDescription, restorer: AppletRestorer
   ) -> (applet: any Applet, isPlaceholder: Bool) {
     do {
+      if description.type == LauncherApplet.identifier {
+        return (try LauncherApplet(restoring: description), false)
+      }
+
       return (try restorer(description), false)
     } catch {
       return (PlaceholderApplet(keeping: description, reason: reason(for: error)), true)

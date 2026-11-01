@@ -59,7 +59,7 @@ final class TerminalUITests: UnitermUITestCase {
 
   /// Catches Ghostty's built-in bindings catching keys before uniterm. With the terminal focused,
   /// Cmd-T opens a tab, which shows the tab bar, and Cmd-Z reaches uniterm's menu and answers with
-  /// a status message. Cmd-D and Cmd-Shift-D reach it too, and each opens the new-pane sheet.
+  /// a status message. Cmd-D and Cmd-Shift-D reach it too, and each opens the launcher.
   func testCommandKeysReachUnitermWhileTheTerminalIsFocused() {
     let app = launchApp()
     let window = app.windows["main-window"]
@@ -73,15 +73,16 @@ final class TerminalUITests: UnitermUITestCase {
 
     app.typeKey("d", modifierFlags: .command)
     XCTAssertTrue(
-      window.sheets.firstMatch.waitForExistence(timeout: 5), "Cmd-D never opened the sheet")
+      launcher(in: window).waitForExistence(timeout: 5), "Cmd-D never opened the launcher")
     app.typeKey(.escape, modifierFlags: [])
-    XCTAssertTrue(waitForNoSheet(in: window))
+    XCTAssertTrue(waitUntilGone(launcher(in: window)))
 
     app.typeKey("d", modifierFlags: [.command, .shift])
     XCTAssertTrue(
-      window.sheets.firstMatch.waitForExistence(timeout: 5), "Cmd-Shift-D never opened the sheet")
+      launcher(in: window).waitForExistence(timeout: 5),
+      "Cmd-Shift-D never opened the launcher")
     app.typeKey(.escape, modifierFlags: [])
-    XCTAssertTrue(waitForNoSheet(in: window))
+    XCTAssertTrue(waitUntilGone(launcher(in: window)))
 
     app.typeKey("z", modifierFlags: .command)
     XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("no closed pane to undo") })

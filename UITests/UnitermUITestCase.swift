@@ -145,4 +145,26 @@ class UnitermUITestCase: XCTestCase {
       for: [XCTNSPredicateExpectation(predicate: gone, object: sheet)], timeout: timeout)
       == .completed
   }
+
+  // MARK: Launcher
+
+  /// The launcher in a window. It is the whole content of a new pane until an applet is chosen.
+  func launcher(in window: XCUIElement) -> XCUIElement {
+    window.descendants(matching: .any)["launcher"]
+  }
+
+  /// Presses a split key, waits for the launcher, then accepts its default, a terminal in shell
+  /// mode.
+  func openPane(
+    in app: XCUIApplication, window number: Int = 1, keys: String,
+    modifiers: XCUIElement.KeyModifierFlags
+  ) {
+    let window = mainWindow(number, in: app)
+
+    app.typeKey(keys, modifierFlags: modifiers)
+    XCTAssertTrue(launcher(in: window).waitForExistence(timeout: 5), "the launcher never opened")
+
+    app.typeKey(.return, modifierFlags: [])
+    XCTAssertTrue(waitUntilGone(launcher(in: window), timeout: 10), "Return left the launcher")
+  }
 }

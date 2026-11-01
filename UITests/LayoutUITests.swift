@@ -227,18 +227,6 @@ final class LayoutUITests: UnitermUITestCase {
 
   // MARK: Helpers
 
-  private func openPane(
-    in app: XCUIApplication, keys: String, modifiers: XCUIElement.KeyModifierFlags
-  ) {
-    let window = mainWindow(in: app)
-
-    app.typeKey(keys, modifierFlags: modifiers)
-    XCTAssertTrue(window.sheets.firstMatch.waitForExistence(timeout: 5), "the picker never opened")
-
-    app.typeKey(.return, modifierFlags: [])
-    XCTAssertTrue(waitForNoSheet(in: window))
-  }
-
   private func paneGroups(in window: XCUIElement) -> XCUIElementQuery {
     window.groups.matching(NSPredicate(format: "identifier BEGINSWITH 'pane-'"))
   }

@@ -144,18 +144,11 @@ final class TabsUITests: UnitermUITestCase {
     _ = waitForTerminal(in: app)
 
     app.typeKey("d", modifierFlags: .command)
-    let sheet = window.sheets.firstMatch
-    XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+    XCTAssertTrue(launcher(in: window).waitForExistence(timeout: 5))
 
-    sheet.popUpButtons["pane-applet"].click()
-    XCTAssertTrue(app.menuItems["Terminal running a program"].waitForExistence(timeout: 5))
-    app.menuItems["Terminal running a program"].click()
-
-    let field = sheet.textFields["pane-command"]
-    XCTAssertTrue(field.waitForExistence(timeout: 5))
-    field.click()
-    field.typeText("sh -c \"echo PU:42:; cat\"")
-    sheet.buttons["Open"].click()
+    app.typeKey("2", modifierFlags: .command)
+    app.typeText("sh -c \"echo PU:42:; cat\"")
+    app.typeKey(.return, modifierFlags: [])
 
     let pane = window.groups["pane-2"]
     XCTAssertTrue(pane.waitForExistence(timeout: 20))

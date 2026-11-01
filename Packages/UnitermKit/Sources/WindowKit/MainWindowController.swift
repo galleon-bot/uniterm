@@ -120,7 +120,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     super.init(window: window)
 
     window.delegate = self
-    for applet in paneArea.applets { applet.host = self }
+    for applet in paneArea.applets { adopt(applet) }
 
     paneArea.onTreeChange = { [weak self] in self?.updateMinimumSize() }
     paneArea.onLayoutChange = { [weak self] in self?.onLayoutChange?() }
@@ -261,6 +261,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   var focusedPane: NodeID { paneArea.focusedPane }
 
+  /// Makes the window the applet's host. A launcher also learns how to open its choice.
+  private func adopt(_ applet: any Applet) {
+    applet.host = self
+
+    if let launcher = applet as? LauncherApplet {
+      launcher.onChoose = { [weak self, weak launcher] choice in
+        guard let self, let launcher else { return }
+
+        try replace(launcher, with: choice)
+      }
+    }
+  }
+
   /// Splits the focused pane and starts the chosen applet in the new one. Returns nil when the
   /// pane is too small, or the applet could not start. Either way the status bar says why.
   @discardableResult
@@ -278,7 +291,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       return nil
     }
 
-    applet.host = self
+    return place(applet, axis: axis)
+  }
+
+  /// Splits the focused pane and puts a launcher in the new one, which takes the keyboard.
+  @discardableResult
+  func openLauncher(axis: Axis) -> NodeID? {
+    contentController.view.layoutSubtreeIfNeeded()
+
+    return place(LauncherApplet(), axis: axis)
+  }
+
+  private func place(_ applet: any Applet, axis: Axis) -> NodeID? {
+    adopt(applet)
 
     let created: NodeID
     do {
@@ -294,12 +319,34 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     return created
   }
 
+  /// Runs the choice in the launcher's pane. The pane keeps its ID and its place, and the launcher
+  /// closes. It throws before anything changes when the choice cannot start, so the launcher stays
+  /// and shows the reason.
+  private func replace(_ launcher: LauncherApplet, with choice: AppletChoice) throws {
+    guard let pane = paneArea.paneID(for: launcher) else { return }
+
+    let applet = try makeApplet(choice)
+    adopt(applet)
+
+    guard let replaced = paneArea.replace(pane, with: applet) else {
+      applet.close()
+      return
+    }
+
+    started.remove(ObjectIdentifier(replaced))
+    replaced.close()
+
+    startPendingApplets()
+    paneArea.focus(pane)
+    refreshStatusBar()
+  }
+
   private func postNoRoom() {
     statusCenter.post(
       level: .warning, source: .uniterm, text: "There is not enough room to split this pane.")
   }
 
-  /// A sheet, such as the picker or a clipboard question, holds the window's attention. Pane
+  /// A sheet, such as a close question or a clipboard question, holds the window's attention. Pane
   /// actions wait until it is answered. Cmd-W does not cancel a sheet, and Escape does.
   private var paneActionsEnabled: Bool {
     window?.attachedSheet == nil
@@ -341,7 +388,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   }
 
   private func requestSplit(_ axis: Axis) {
-    guard let window, paneActionsEnabled else { return }
+    guard paneActionsEnabled else { return }
 
     contentController.view.layoutSubtreeIfNeeded()
 
@@ -350,9 +397,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       return
     }
 
-    NewPaneSheet.present(on: window) { [weak self] choice in
-      self?.openPane(choice, axis: axis)
-    }
+    openLauncher(axis: axis)
   }
 
   // MARK: Closing panes
@@ -361,7 +406,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   ///
   /// A pane the user closes ends its applet at once, and its description goes on the undo stack. A
   /// pane that is running something asks first. A pane whose applet ended on its own has nothing to
-  /// undo.
+  /// undo, and neither has a launcher.
   private func closePane(_ pane: NodeID, appletEnded: Bool) {
     guard let applet = paneArea.applet(for: pane) else { return }
 
@@ -370,7 +415,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       return
     }
 
-    if appletEnded || exitedApplets.contains(ObjectIdentifier(applet)) {
+    if appletEnded || exitedApplets.contains(ObjectIdentifier(applet)) || applet is LauncherApplet {
       discard(pane)
     } else if applet.isRunningSomething {
       askBeforeClosing(pane, applet: applet)
@@ -488,7 +533,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     let restored = PaneRestoration.applet(for: closed.description, restorer: restoreApplet)
     let applet = restored.applet
 
-    applet.host = self
+    adopt(applet)
 
     let id: NodeID
     do {

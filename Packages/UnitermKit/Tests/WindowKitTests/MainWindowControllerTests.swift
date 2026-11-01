@@ -299,9 +299,9 @@ final class MainWindowControllerTests: XCTestCase {
     XCTAssertTrue(reused.started)
   }
 
-  /// Catches pane actions that act on the window under a sheet. With the picker or an alert up,
-  /// close and the focus moves do nothing, and their menu items are disabled. Cmd-W while the
-  /// picker is open therefore does nothing. Escape cancels the picker.
+  /// Catches pane actions that act on the window under a sheet. With an alert up, close
+  /// and the focus moves do nothing, and their menu items are disabled. Cmd-W while the alert is
+  /// open therefore does nothing.
   func testPaneActionsAreOffWhileASheetIsUp() throws {
     let controller = try makeController()
     controller.openPane(.terminalShell, axis: .row)

@@ -9,7 +9,7 @@ final class PaneFrameView: NSView {
   static let gutter: CGFloat = 2
 
   let paneID: NodeID
-  let applet: any Applet
+  private(set) var applet: any Applet
 
   private var palette: ThemePalette = .latte
 
@@ -46,6 +46,16 @@ final class PaneFrameView: NSView {
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) is not supported")
+  }
+
+  /// Puts another applet in this pane. The old applet's view leaves, and the caller closes it.
+  func replaceApplet(_ replacement: any Applet) {
+    applet.view.removeFromSuperview()
+    applet = replacement
+
+    replacement.view.frame = innerFrame
+    addSubview(replacement.view)
+    replacement.apply(palette)
   }
 
   private var innerFrame: NSRect {
