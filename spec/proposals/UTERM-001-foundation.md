@@ -1130,17 +1130,21 @@ The proposal ends with the user looking at the finished app.
   The guard decision says cancel reattaches the hidden pane, so the window is kept usable until it can. (work-queue
   best guess)
 - 2026-11-01: ADR candidate (cuts across the system): every applet implements one applet contract: hosted view,
-  lifecycle, segments, detach and reattach, an inert versioned description, and a running-state query. Undecided.
-  Found in M2. Extended 2026-11-01 in M5: the running-state query covers every tab of an applet, since the close
-  guards in M7 depend on it. Extended 2026-11-01 in M7: window close and quit count hidden panes too. Extended 2026-11-01 in M8: descriptions round-trip byte-for-byte when unreadable.
+  lifecycle, segments, detach and reattach, an inert versioned description, and a running-state query. Found in M2.
+  Extended 2026-11-01 in M5: the running-state query covers every tab of an applet, since the close guards in M7
+  depend on it. Extended 2026-11-01 in M7: window close and quit count hidden panes too. Extended 2026-11-01 in M8:
+  descriptions round-trip byte-for-byte when unreadable. Narrowed 2026-11-01: the lifecycle is ADR-05, and description
+  versioning is ADR-06. The rest waits on UTERM-005 to UTERM-010, which may reshape the contract.
 - 2026-11-01: ADR candidate (cuts across the system): a terminal program never reads the clipboard without the user's
   confirmation naming its pane, and a denial sends it nothing. A program may write the clipboard with OSC 52 without
   asking, because the proposal requires confirmation only for reads and a write gives the program nothing back.
   Undecided. Found in M2. Extended 2026-11-01 in the row review for writes.
 - 2026-11-01: ADR candidate (cuts across the system, hard to reverse): undo close has two tiers. A closed pane first
   stays alive and hidden for a grace period, under its own parked node ID, and then only its inert description
-  remains. It interacts with ADR-02, whose wording now says a pane kept for undo keeps its ID, and with ADR-03.
-  Undecided. Found in M7.
+  remains. It interacts with ADR-02, whose wording now says a pane kept for undo keeps its ID, and with ADR-03. Found
+  in M7. Reframed by the user on 2026-11-01: the two tiers are an implementation detail. The invariant is the applet
+  lifecycle: a detached applet goes quiet at once, and its background life is bounded and visible. Written as ADR-05
+  on 2026-11-01.
 - 2026-11-01: ADR candidate (cuts across the system): the main window answers the standard `undo:` selector. It undoes
   the edit in a focused text control, and the pane close otherwise. The Edit menu keeps the standard selector.
   Undecided. Found in M7.
@@ -1157,7 +1161,10 @@ The proposal ends with the user looking at the finished app.
   its own rule. Undecided. Found in M8.
 - 2026-11-01: ADR candidate (cuts across the system, hard to reverse): a stored applet description is kept as its exact
   file bytes. One that cannot be restored becomes a placeholder pane and is written back unchanged, so a newer or
-  unknown description survives a round trip through an older build. Undecided. Found in M8.
+  unknown description survives a round trip through an older build. Found in M8. Reframed by the user on 2026-11-01:
+  placeholder panes are an implementation detail. The invariant is two-layer versioning. uniterm owns the envelope and
+  its schema version. Each applet owns its payload and its version, and bumps it on any change an older reader cannot
+  round-trip. Version skew is lossless per pane. Written as ADR-06 on 2026-11-01.
 
 - 2026-11-01: Row review fixes, M7 and M8. Amended M7's As built, which said undo takes the newest close and trims the
   oldest description by arrival. Both now go by close serial, because panes drop out of the hidden tier out of close
@@ -1190,6 +1197,10 @@ The proposal ends with the user looking at the finished app.
 - [ADR-03](../adr/ADR-03-restored-state-never-runs-a-program.md): restored state never runs a program unasked
 - [ADR-04](../adr/ADR-04-uniterm-owns-key-bindings-and-terminal-config.md): uniterm owns every key binding and its
   terminal config
+- [ADR-05](../adr/ADR-05-detached-applets-quiesce-and-stay-bounded.md): detached applets go quiet, and their
+  background life is bounded and visible
+- [ADR-06](../adr/ADR-06-layout-file-versioning-and-schema-ownership.md): the layout file is versioned in two layers,
+  each with one owner
 
 - Original write-up: `~/projects/private_specs/uniterm/spec/research/original-writeup.md`
 - [Ghostty](https://ghostty.org/docs/about): libghostty is not yet a stable API

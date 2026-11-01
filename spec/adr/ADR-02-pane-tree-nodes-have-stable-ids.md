@@ -50,3 +50,4 @@ different pane. That matters most where the reference crosses a trust boundary, 
 - UTERM-001: "Pane tree shape"
 - UTERM-003: "API naming and shape"
 - UTERM-004: "What anchors trust" and "Group node kind"
+- ADR-05: a detached pane keeps its ID

@@ -58,18 +58,21 @@ Which UTERM-004 levels the browser supports, and which commands it accepts, such
 
 ### The applet contract
 
-Context from UTERM-001, which shipped the applet contract. An ADR for the contract is a candidate in UTERM-001's
-Decision Log. This proposal may reshape it, so it is not written yet. Every applet implements:
+Context from UTERM-001, which shipped the applet contract. ADR-05 and ADR-06 cover its lifecycle and its description
+versioning. An ADR for the rest of the contract is a candidate in UTERM-001's Decision Log. This proposal may reshape
+it, so it is not written yet. Every applet implements:
 
 - A view the pane hosts, a title, and status bar segments.
 - `start`, `close`, `focus`, and a palette update.
 - `detach` and `reattach`. A closed pane's applet is hidden and kept alive for 10 seconds, so undo can bring back the
-  exact session.
+  exact session. ADR-05 says a detached applet goes quiet at once, pausing audio, video, and alerts. Any work it keeps
+  alive is bounded in time and shown by a visible indicator.
 - `isRunningSomething` and `runningLabels`. Closing a window or quitting asks first when any visible or hidden pane is
   running something, and the dialog names it.
 - `describe()`, an inert description with a type and a per-type version. Undo past the grace period and layout restore
-  both rebuild the applet from it. ADR-03 says restoring it never runs a program the user did not ask for. A
-  description this build cannot read is kept byte-for-byte in a placeholder pane.
+  both rebuild the applet from it. ADR-03 says restoring it never runs a program the user did not ask for. ADR-06 says
+  the applet owns its payload and its version. It upgrades its own older versions, and bumps the version on any
+  change an older build cannot round-trip. A description this build cannot read is kept byte-for-byte.
 
 For the browser: a description likely holds each tab's URL. Restoring it loads pages, and a page can run scripts.
 Decide whether that counts as running a program under ADR-03, or whether restore shows the URL and loads it only on
