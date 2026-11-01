@@ -23,6 +23,8 @@
   must supply
 - UTERM-005 through UTERM-010 — "Panes and applets": every applet implements the applet contract
 - UTERM-012 — "Terminal surface behind an internal protocol": blocks need shell integration through that boundary
+- UTERM-013 — "Whether uniterm reads the user's Ghostty config" and "What undo close restores": applet actions move to
+  applet-declared shortcuts, and Cmd-Shift-T replaces Cmd-Z for reopening
 
 ## Summary
 
