@@ -154,22 +154,23 @@ They solve `project.pbxproj` churn that synchronized folders already avoid.
 Original question: keep the closed applet alive for a grace period, restore the layout and relaunch, or let each applet
 define it? Also, how many closes undo remembers, and for how long.
 
-Decision: two tiers, defined by the applet contract.
+Decision: undo reopens a closed pane from its description, in the same place, with the same applet type. Amended
+2026-11-01; see Decision Log.
 
-- The contract has a detach and reattach pair, and a restorable description.
-- A closed pane's applet is detached and kept alive, hidden, for a short grace period. A window segment shows it. Undo
-  within the grace period reattaches the exact session.
-- After the grace period, the applet is torn down. Only its description stays, on a per-window undo stack of the last N
-  closes. Undo then reopens the pane from the description.
+- Closing a pane closes its applet. Its description stays on a per-window undo stack of the last N closes. uniterm
+  keeps no closed applet alive.
+- The applet contract defines the lifecycle events: start, detach, reattach, and close. uniterm sends them, and each
+  applet owns its response, per ADR-05. An applet that wants undo to bring back more saves it in its description.
 - A description is inert state, never a launch recipe. A terminal in shell mode relaunches a fresh shell in each tab's
   working directory. A terminal in program mode reopens showing its command and a Run action. It does not run the
   command until the user asks.
 - The undo stack belongs to its window and closes with it. Closing the last pane closes the window. Undoing a closed
   window is out of scope.
 
-Rationale: the grace tier gives an exact undo for an accidental close, including an unsaved editor buffer. The
-description tier still restores the layout and working directories after the grace period. Persistence (M8) reuses the
-same description, so this is not built for undo alone. An inert description keeps undo, and later relaunch, from
+Rationale: undo restores the layout and each tab's working directory, which is what an accidental close loses most
+often. It is not a snapshot of running processes. Keeping closed applets alive would make the host keep every applet's
+hidden work quiet and bounded, which only the applet can do correctly. Persistence (M8) reuses the same description, so
+this is not built for undo alone. An inert description keeps undo, and later relaunch, from
 running `./deploy.sh` or a migration a second time.
 
 ### How to get libghostty
@@ -228,9 +229,8 @@ Decision: a normalized N-ary tree with stable node IDs.
   siblings.
 - Every node has a stable ID. A node that survives a split, merge, or collapse keeps its ID. A node that is removed,
   such as a split that collapses, has its ID retired and never reused. A pane's ID never changes while the pane
-  exists, and a closed pane kept alive for undo still exists. Its ID retires when the pane is discarded, and only then.
-  Amended 2026-11-01; see Decision Log. Nothing may address a node by its path in the tree, since normalization
-  rewrites paths.
+  exists. A pane reopened by undo gets a new ID. Amended 2026-11-01; see Decision Log. Nothing may address a node by
+  its path in the tree, since normalization rewrites paths.
 - Merge and collapse rules belong to the node kind. This proposal has two kinds, split and pane, and both normalize. A
   later kind may define its own rule.
 
@@ -342,7 +342,7 @@ Decision: a uniterm-owned JSON file that holds descriptions only.
   pane's applet type, and that applet's restorable description. The terminal's description already carries each tab's
   working directory.
 - **What is not restored**: region docking, which is a global setting. Tab titles, since a fresh shell resets them.
-  Scrollback. Hidden grace-tier panes and the undo stack.
+  Scrollback. The undo stack. Amended 2026-11-01; see Decision Log.
 - **Location and writes**: one file in `~/Library/Application Support/uniterm/`. It is written atomically, as a temp
   file then a rename, and is never readable by other users. It is saved after a short debounce on every layout change,
   and synchronously on quit.
@@ -380,28 +380,25 @@ check on quit that no decision defines.
 Decision: confirm wherever undo cannot restore the session. Amended 2026-10-31; see Decision Log.
 
 - Closing a window, including by closing its last pane, asks first when an affected terminal tab is running something.
-  The affected tabs include the window's hidden grace-tier panes.
 - Quitting asks under the same rule, across every window.
 - Closing a single terminal tab asks when that tab is running something. Tab closes are not undoable.
-- Closing a pane in a window that stays open does not ask, since the grace tier can undo it. When no grace slot is
-  free for a pane that is running something, the close asks instead.
+- Closing a pane asks when any of its tabs is running something, since undo reopens a fresh session. An idle pane
+  closes without asking, since undo restores everything it held. Amended 2026-11-01; see Decision Log.
 - Closing an applet's last tab is a pane close, and follows the pane rule.
 - "Running something" is libghostty's `needs_confirm_quit`, reached through the terminal surface protocol. It is true
   unless the cursor sits at an idle shell prompt, which shell integration marks with OSC 133.
 - The dialog lists the affected panes and tabs, by title, and by command for program mode.
 
 Rationale: the guard sits on every close that destroys a running session with no exact undo available, and nowhere
-else. Asking on
-every close makes the user confirm a reversible action and trains them to dismiss the dialog. Leaving an empty window
-after the last pane breaks the convention that Terminal, Ghostty, and iTerm2 share, and adds a zero-pane tree state.
+else. Asking on every close makes the user confirm a reversible action and trains them to dismiss the dialog. Leaving
+an empty window after the last pane breaks the convention that Terminal, Ghostty, and iTerm2 share, and adds a
+zero-pane tree state.
 Keeping closed windows alive narrows the out-of-scope statement on window undo, and a hidden window has no visible
 indicator.
 
-Leaves undone: a closed pane whose grace period runs out is hung up without a dialog. So an accidental close that goes
-unnoticed, such as while the user works in another window, loses a program that does not save on SIGHUP. This is
-accepted, since a dialog on every pane close would make the user confirm a reversible action. A background job started with `&` at an idle prompt
-reports nothing, so it is hung up without a dialog. Ghostty behaves the same. A prompt without OSC 133 marks, such as a remote shell over ssh, always asks. That
-fails safe.
+Leaves undone: a background job started with `&` at an idle prompt reports nothing, so it is hung up without a dialog.
+Ghostty behaves the same. A prompt without OSC 133 marks, such as a remote shell over ssh, always asks. That fails
+safe.
 
 ### Scope
 
@@ -449,9 +446,9 @@ Out of scope, for later proposals:
   it cannot read, or after repeated crashed launches, uniterm starts with a default layout and keeps the old file
   aside. Accepted: a downgrade-then-upgrade round trip loses the newer layout. The kept-aside file stays for manual
   recovery.
-- **Undo close keeps live processes the user thinks are gone** — likelihood: medium, impact: medium.
-  Mitigation: the grace period is short and shown in a window segment that stays visible during a message flood. The
-  segment offers an action that hangs the processes up at once. The number of hidden panes is bounded.
+- **Undo reopens a fresh session, so a confirmed close loses unsaved work** — likelihood: medium, impact: medium.
+  Mitigation: closing a pane that is running something asks first and names its tabs. Amended 2026-11-01; see Decision
+  Log.
 - **The layout file stores working directories and program-mode commands** — likelihood: medium, impact: low.
   A command line can carry a secret, such as `mysql -pSECRET`. The file also reaches Time Machine backups.
   Accepted: the file is never readable by other users. The exposure matches the shell's own history file.
@@ -800,6 +797,9 @@ Out of scope, for later proposals:
 
 **Status:** DONE
 
+The keep-alive checks below record what M7 built. M10 removes the keep-alive tier. Amended 2026-11-01; see Decision
+Log.
+
 - After closing a pane, undo reopens it in its former place in the tree
 - The restored terminal behaves as the settled undo decision says
 - Undo behaves as settled when the closed pane's neighbors have since changed
@@ -975,6 +975,26 @@ The proposal ends with the user looking at the finished app.
 - The user reviews the window chrome, the status bar at the top and at the bottom, and a nested pane layout, and the
   result is recorded in the As built block
 
+### M10: Undo reopens from the description
+
+**Status:** NOT STARTED
+
+Added 2026-11-01 by amendment. It can run before or after the user records M9.
+
+- Closing a pane closes its applet at once. No closed applet stays alive, and nothing hidden counts toward a close or
+  quit guard
+- Undo reopens the newest closed pane from its description, in its former place, with a new ID
+- Closing a pane asks first when any of its tabs is running something, and the dialog names those tabs. An idle pane
+  closes without asking
+- Declining that dialog keeps the pane open. Confirming closes it and puts its description on the undo stack
+- The grace segment, its hang-up control, the grace slots, and the reattach path are gone
+- The pane tree has no parked IDs. An ID is retired when its node leaves the tree, and insert never accepts it again
+- The applet contract sends start, detach, reattach, and close, and documents each applet's duties per ADR-05
+- The terminal applet pauses nothing on detach, since it has nothing to pause, and that is stated where it implements
+  the contract
+- Every M7 check that does not depend on keep-alive still holds: placement, the neighbor fallback, Cmd-Z in a text
+  control, the working-directory rule, program-mode restore, and the window and quit guards
+
 ## Decision Log
 
 - 2026-10-31: Chose Swift, AppKit first with SwiftUI for leaf views, Janet for scripting, and libghostty for the
@@ -1125,7 +1145,8 @@ The proposal ends with the user looking at the finished app.
 - 2026-11-01: Amended "Pane tree shape". It said a removed node's ID is retired and never reused. A closed pane kept
   alive for the undo grace period still exists, and undo must bring it back with its ID. The text now retires a closed
   pane's ID only when the pane is discarded. (work-queue best guess) The user confirmed this reading, and ADR-02's
-  wording was clarified to match on 2026-11-01.
+  wording was clarified to match on 2026-11-01. Superseded later on 2026-11-01: the keep-alive tier was removed, and
+  ADR-02's added sentence with it.
 - 2026-11-01: A dead last pane that stays because no hidden pane fits after a cancel leaves when a hidden pane returns.
   The guard decision says cancel reattaches the hidden pane, so the window is kept usable until it can. (work-queue
   best guess)
@@ -1143,8 +1164,7 @@ The proposal ends with the user looking at the finished app.
   stays alive and hidden for a grace period, under its own parked node ID, and then only its inert description
   remains. It interacts with ADR-02, whose wording now says a pane kept for undo keeps its ID, and with ADR-03. Found
   in M7. Reframed by the user on 2026-11-01: the two tiers are an implementation detail. The invariant is the applet
-  lifecycle: a detached applet goes quiet at once, and its background life is bounded and visible. Written as ADR-05
-  on 2026-11-01.
+  lifecycle: uniterm sends the lifecycle events, and each applet owns its response. Written as ADR-05 on 2026-11-01.
 - 2026-11-01: ADR candidate (cuts across the system): the main window answers the standard `undo:` selector. It undoes
   the edit in a focused text control, and the pane close otherwise. The Edit menu keeps the standard selector.
   Undecided. Found in M7.
@@ -1188,6 +1208,14 @@ The proposal ends with the user looking at the finished app.
   dialog and its request kind are removed. A write question that did arrive from libghostty is answered yes. Writes
   can replace the clipboard with text the user did not choose. The cost is accepted, since terminals such as tmux and
   vim over ssh depend on it. (work-queue best guess)
+- 2026-11-01: Amended "What undo close restores", "Pane tree shape", "What layout persistence restores", "Guarding a
+  close that would kill running processes", and the undo risk, and added M10. The undo decision had two tiers: a closed
+  pane's applet stayed alive and hidden for a grace period so undo could reattach the exact session, and only then
+  dropped to its description. The pane tree parked a closed pane's ID for that reattach. Pane closes asked only when no
+  grace slot was free. The user ruled that undo reopens the same applet in the same place, not a snapshot of running
+  processes. uniterm sends lifecycle events and each applet owns its response, per ADR-05, which was rewritten to say
+  so. So undo now reopens from the description only, and closing a pane that is running something asks first. The user
+  chose to remove the keep-alive tier and to ask on a running pane close.
 
 ## References
 
@@ -1197,8 +1225,8 @@ The proposal ends with the user looking at the finished app.
 - [ADR-03](../adr/ADR-03-restored-state-never-runs-a-program.md): restored state never runs a program unasked
 - [ADR-04](../adr/ADR-04-uniterm-owns-key-bindings-and-terminal-config.md): uniterm owns every key binding and its
   terminal config
-- [ADR-05](../adr/ADR-05-detached-applets-quiesce-and-stay-bounded.md): detached applets go quiet, and their
-  background life is bounded and visible
+- [ADR-05](../adr/ADR-05-applet-lifecycle-events-and-applet-responses.md): uniterm owns the applet lifecycle events,
+  and each applet owns its response
 - [ADR-06](../adr/ADR-06-layout-file-versioning-and-schema-ownership.md): the layout file is versioned in two layers,
   each with one owner
 

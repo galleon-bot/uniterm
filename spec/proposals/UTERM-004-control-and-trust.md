@@ -98,8 +98,7 @@ may revise the settled decision.
 Context from UTERM-001's implementation, in support of an ADR candidate on ID scope:
 
 - Node IDs are unique only within one window, and a trust grant keyed by ID must carry the window too.
-- A pane kept alive for undo keeps its ID, so a grant keyed by ID survives an undo within the 10 second grace period.
-  A pane reopened later from its description gets a new ID, so such a grant does not follow it.
+- A pane reopened by undo gets a new ID, so a grant keyed by ID does not follow it.
 
 ### Saved layouts
 

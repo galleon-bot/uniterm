@@ -77,8 +77,7 @@ The choice also shapes UTERM-004's trust model, since the app must know who is c
   Constraint from UTERM-001 "Pane tree shape": normalization rewrites tree paths, so only stable IDs are durable. A
   removed node's ID is retired and never reused.
   Context from UTERM-001's implementation, in support of an ADR candidate on ID scope:
-  - A pane kept alive for undo keeps its ID. During its 10 second grace period a reference to it fails. It resolves
-    again if the user undoes the close. A pane reopened later from its description gets a new ID.
+  - A pane reopened by undo gets a new ID, so a reference to a closed pane never resolves again.
   - IDs are unique only within one window. Two windows can each have a pane 2.
   - The layout file keeps each window's IDs across a relaunch, along with a per-window ID high-water mark. Windows
     have no saved identity, only their order in the file.

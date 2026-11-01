@@ -21,8 +21,7 @@ Every node in the pane tree has a stable ID.
 
 - A node that survives a split, merge, or collapse keeps its ID.
 - A removed node's ID is retired and never reused, including after a relaunch.
-- A pane's ID never changes while the pane exists. A closed pane that is kept alive so undo can bring it back still
-  exists. It keeps its ID and may return under it. Its ID is retired when the pane is discarded.
+- A pane's ID never changes while the pane exists.
 
 Nothing may address a node by its path in the tree, or by its index among its siblings.
 
@@ -50,4 +49,3 @@ different pane. That matters most where the reference crosses a trust boundary, 
 - UTERM-001: "Pane tree shape"
 - UTERM-003: "API naming and shape"
 - UTERM-004: "What anchors trust" and "Group node kind"
-- ADR-05: a detached pane keeps its ID
