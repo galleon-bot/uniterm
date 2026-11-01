@@ -2,7 +2,7 @@
 
 **Status:** draft
 **Created:** 2026-10-31
-**Updated:** 2026-10-31
+**Updated:** 2026-11-01
 
 ## Dependencies
 
@@ -50,6 +50,24 @@ Standard, satellite, hybrid, and whether a dark map follows the dark theme.
 
 Colors, icons, and grouping of nearby pins.
 
+### The applet contract
+
+Context from UTERM-001, which shipped the applet contract. An ADR for the contract is a candidate in UTERM-001's
+Decision Log. This proposal may reshape it, so it is not written yet. Every applet implements:
+
+- A view the pane hosts, a title, and status bar segments.
+- `start`, `close`, `focus`, and a palette update.
+- `detach` and `reattach`. A closed pane's applet is hidden and kept alive for 10 seconds, so undo can bring back the
+  exact session.
+- `isRunningSomething` and `runningLabels`. Closing a window or quitting asks first when any visible or hidden pane is
+  running something, and the dialog names it.
+- `describe()`, an inert description with a type and a per-type version. Undo past the grace period and layout restore
+  both rebuild the applet from it. ADR-03 says restoring it never runs a program the user did not ask for. A
+  description this build cannot read is kept byte-for-byte in a placeholder pane.
+
+For the map viewer: a description likely holds the visible region and where the pins came from. When pins came from a
+program's output, restoring must not run that program again.
+
 ## Risks
 
 - **MapKit needs network access and may need an entitlement** — likelihood: medium, impact: low.
@@ -74,6 +92,7 @@ Colors, icons, and grouping of nearby pins.
 ## Decision Log
 
 - 2026-10-31: Drafted from the original write-up without an interview. The open questions hold everything undecided.
+- 2026-11-01: Added "The applet contract" with context from UTERM-001's implementation.
 
 ## References
 

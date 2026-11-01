@@ -2,7 +2,7 @@
 
 **Status:** draft
 **Created:** 2026-10-31
-**Updated:** 2026-10-31
+**Updated:** 2026-11-01
 
 ## Dependencies
 
@@ -48,6 +48,24 @@ Fit to pane, actual size, and free zoom with panning.
 
 Which UTERM-004 levels the viewer supports. A script might send it an image or a folder to show.
 
+### The applet contract
+
+Context from UTERM-001, which shipped the applet contract. An ADR for the contract is a candidate in UTERM-001's
+Decision Log. This proposal may reshape it, so it is not written yet. Every applet implements:
+
+- A view the pane hosts, a title, and status bar segments.
+- `start`, `close`, `focus`, and a palette update.
+- `detach` and `reattach`. A closed pane's applet is hidden and kept alive for 10 seconds, so undo can bring back the
+  exact session.
+- `isRunningSomething` and `runningLabels`. Closing a window or quitting asks first when any visible or hidden pane is
+  running something, and the dialog names it.
+- `describe()`, an inert description with a type and a per-type version. Undo past the grace period and layout restore
+  both rebuild the applet from it. ADR-03 says restoring it never runs a program the user did not ask for. A
+  description this build cannot read is kept byte-for-byte in a placeholder pane.
+
+For the image viewer: a description likely holds the folder and the current image. The viewer likely never counts as
+running something.
+
 ## Risks
 
 - **Large folders load slowly** — likelihood: medium, impact: low.
@@ -72,6 +90,7 @@ Which UTERM-004 levels the viewer supports. A script might send it an image or a
 ## Decision Log
 
 - 2026-10-31: Drafted from the original write-up without an interview. The open questions hold everything undecided.
+- 2026-11-01: Added "The applet contract" with context from UTERM-001's implementation.
 
 ## References
 

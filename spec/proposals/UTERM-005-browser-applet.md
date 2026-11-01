@@ -2,7 +2,7 @@
 
 **Status:** draft
 **Created:** 2026-10-31
-**Updated:** 2026-10-31
+**Updated:** 2026-11-01
 
 ## Dependencies
 
@@ -56,6 +56,26 @@ one tab.
 
 Which UTERM-004 levels the browser supports, and which commands it accepts, such as navigate and reload.
 
+### The applet contract
+
+Context from UTERM-001, which shipped the applet contract. An ADR for the contract is a candidate in UTERM-001's
+Decision Log. This proposal may reshape it, so it is not written yet. Every applet implements:
+
+- A view the pane hosts, a title, and status bar segments.
+- `start`, `close`, `focus`, and a palette update.
+- `detach` and `reattach`. A closed pane's applet is hidden and kept alive for 10 seconds, so undo can bring back the
+  exact session.
+- `isRunningSomething` and `runningLabels`. Closing a window or quitting asks first when any visible or hidden pane is
+  running something, and the dialog names it.
+- `describe()`, an inert description with a type and a per-type version. Undo past the grace period and layout restore
+  both rebuild the applet from it. ADR-03 says restoring it never runs a program the user did not ask for. A
+  description this build cannot read is kept byte-for-byte in a placeholder pane.
+
+For the browser: a description likely holds each tab's URL. Restoring it loads pages, and a page can run scripts.
+Decide whether that counts as running a program under ADR-03, or whether restore shows the URL and loads it only on
+request. Also decide what counts as running something, such as a download or a form with unsent input. A detached
+page keeps running during the grace period, audio included.
+
 ## Risks
 
 - **Web content is untrusted input inside the app** — likelihood: high, impact: medium.
@@ -90,6 +110,7 @@ Which UTERM-004 levels the browser supports, and which commands it accepts, such
 ## Decision Log
 
 - 2026-10-31: Drafted from the original write-up without an interview. The open questions hold everything undecided.
+- 2026-11-01: Added "The applet contract" with context from UTERM-001's implementation.
 
 ## References
 

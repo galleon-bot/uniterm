@@ -2,7 +2,7 @@
 
 **Status:** draft
 **Created:** 2026-10-31
-**Updated:** 2026-10-31
+**Updated:** 2026-11-01
 
 ## Dependencies
 
@@ -76,6 +76,13 @@ The choice also shapes UTERM-004's trust model, since the app must know who is c
 - How panes are identified: stable IDs, paths in the tree, or both.
   Constraint from UTERM-001 "Pane tree shape": normalization rewrites tree paths, so only stable IDs are durable. A
   removed node's ID is retired and never reused.
+  Context from UTERM-001's implementation, in support of an ADR candidate on ID scope:
+  - A pane kept alive for undo keeps its ID. During its 10 second grace period a reference to it fails. It resolves
+    again if the user undoes the close. A pane reopened later from its description gets a new ID.
+  - IDs are unique only within one window. Two windows can each have a pane 2.
+  - The layout file keeps each window's IDs across a relaunch, along with a per-window ID high-water mark. Windows
+    have no saved identity, only their order in the file.
+  - So addressing a pane from outside its window needs a window identity that this proposal or UTERM-004 defines.
 
 ### REPL features
 
@@ -133,6 +140,8 @@ The choice also shapes UTERM-004's trust model, since the app must know who is c
 ## Decision Log
 
 - 2026-10-31: Drafted from the original write-up without an interview. The open questions hold everything undecided.
+- 2026-11-01: Added context from UTERM-001's implementation to "API naming and shape": pane ID scope and
+  undo.
 
 ## References
 
