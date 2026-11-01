@@ -147,20 +147,6 @@ final class StatusBarUITests: UnitermUITestCase {
     return false
   }
 
-  /// Opens Settings, picks a position, and closes Settings so the main window is key again.
-  private func chooseStatusBarPosition(_ title: String, in app: XCUIApplication) {
-    app.typeKey(",", modifierFlags: .command)
-    let settings = app.windows["settings-window"]
-    XCTAssertTrue(settings.waitForExistence(timeout: 5))
-
-    let control = settings.radioGroups["status-bar-position-control"]
-    XCTAssertTrue(control.waitForExistence(timeout: 5))
-    control.radioButtons[title].click()
-
-    app.typeKey("w", modifierFlags: .command)
-    XCTAssertTrue(waitForGone(settings))
-  }
-
   private func waitForFrame(_ element: XCUIElement, _ condition: @escaping (CGRect) -> Bool)
     -> Bool
   {

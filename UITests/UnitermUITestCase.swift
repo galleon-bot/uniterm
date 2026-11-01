@@ -53,8 +53,16 @@ class UnitermUITestCase: XCTestCase {
 
   // MARK: Waiting
 
-  func waitForTerminal(in app: XCUIApplication) -> XCUIElement {
-    let terminal = app.windows["main-window"].textViews["terminal"]
+  /// The nth main window in the order opened, counting from 1. The first is `main-window`. A
+  /// number is never reused, so a window opened after a close takes the next one.
+  func mainWindow(_ number: Int = 1, in app: XCUIApplication) -> XCUIElement {
+    app.windows[number == 1 ? "main-window" : "main-window-\(number)"]
+  }
+
+  /// Waits for the window's first terminal to show a prompt. Windows other than the first need
+  /// their own number.
+  func waitForTerminal(in app: XCUIApplication, window number: Int = 1) -> XCUIElement {
+    let terminal = mainWindow(number, in: app).textViews["terminal"]
     XCTAssertTrue(terminal.waitForExistence(timeout: 15))
 
     // Keys typed before the shell reads its terminal can be lost. The fixture's zsh prompt ends in
@@ -87,6 +95,28 @@ class UnitermUITestCase: XCTestCase {
     else { return nil }
 
     return String(text[range])
+  }
+
+  func waitUntilGone(_ element: XCUIElement, timeout: TimeInterval = 10) -> Bool {
+    let gone = NSPredicate(format: "exists == false")
+    return XCTWaiter().wait(
+      for: [XCTNSPredicateExpectation(predicate: gone, object: element)], timeout: timeout)
+      == .completed
+  }
+
+  /// Opens Settings, picks a status bar position, and closes Settings so a main window is key
+  /// again.
+  func chooseStatusBarPosition(_ title: String, in app: XCUIApplication) {
+    app.typeKey(",", modifierFlags: .command)
+    let settings = app.windows["settings-window"]
+    XCTAssertTrue(settings.waitForExistence(timeout: 5))
+
+    let control = settings.radioGroups["status-bar-position-control"]
+    XCTAssertTrue(control.waitForExistence(timeout: 5))
+    control.radioButtons[title].click()
+
+    app.typeKey("w", modifierFlags: .command)
+    XCTAssertTrue(waitUntilGone(settings, timeout: 5))
   }
 
   func waitForNoSheet(in window: XCUIElement, timeout: TimeInterval = 5) -> Bool {

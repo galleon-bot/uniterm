@@ -87,14 +87,15 @@ final class TerminalUITests: UnitermUITestCase {
     XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("no closed pane to undo") })
   }
 
-  /// Cmd-W closes the pane, and with one pane the window closes and the app ends.
+  /// Cmd-W closes the pane, and with one pane the window closes. The app keeps running.
   func testCommandWClosesThePaneAndTheWindow() {
     let app = launchApp()
     _ = waitForTerminal(in: app)
 
     app.typeKey("w", modifierFlags: .command)
 
-    XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
+    XCTAssertTrue(waitUntilGone(mainWindow(in: app), timeout: 15), "the window stayed open")
+    XCTAssertEqual(app.state, .runningForeground)
   }
 
   /// Cmd-Q reaches uniterm while the terminal is focused.
@@ -117,7 +118,8 @@ final class TerminalUITests: UnitermUITestCase {
 
     app.typeText("exit\n")
 
-    XCTAssertTrue(app.wait(for: .notRunning, timeout: 20))
+    XCTAssertTrue(waitUntilGone(mainWindow(in: app), timeout: 20), "the window stayed open")
+    XCTAssertEqual(app.state, .runningForeground)
   }
 
   /// Catches a clear-screen menu item that does not reach the terminal. The marker leaves the

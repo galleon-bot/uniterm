@@ -750,12 +750,47 @@ Out of scope, for later proposals:
 
 ### M6: Multiple windows
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 - The user can open more than one window
 - Each window has its own pane tree and its own status bar
 - A status message posted in one window does not appear in another
 - Changing the dock position in Settings moves the status bar in every open window at once
+- Appearance reaches every open window. Closing a window releases it and ends its sessions. Closing the last window
+  leaves the app running, and Cmd-N or a Dock click opens a window again. Amended 2026-11-01; see Decision Log.
+
+**As built:**
+
+- File > New Window, with Cmd-N, opens another window. Each window has its own pane tree, status bar, and status center.
+  A new window starts one step (28 points) right and down from the active window. It wraps to the top-left of the
+  visible screen when that step would leave it. The first window is centered.
+- The active window is the key window, else the main one, else the one opened last. Menu actions reach it through the
+  responder chain. New Window goes to the app delegate, so it works with no window open. Settings stays one shared
+  window.
+- A message posted in one window shows in that window's bar and history only. Its unseen-error indicator stays in that
+  window.
+- The dock position and the appearance setting reach every open window, and a window opened later starts on the current
+  values.
+- Closing a window closes its applets, which ends their sessions, and releases its controller within one turn of the
+  main actor. A window that had already closed leaves the open list at once. Window identifiers are `main-window` for
+  the first and `main-window-N` for the Nth opened. A number is never reused.
+- Closing the last window leaves the app running. A Dock click with no main window open, or Cmd-N, opens a new one. The
+  close and quit guards are not built here. Those are M7's, and so a window with a running program still closes
+  without asking.
+- A window that fails to open posts an error in the active window. With no window open it shows an alert. A failed open
+  uses no window number.
+- An app-level error posted with no window open, such as a failed terminal color update, is held. The next window that
+  opens shows it once.
+- A Dock click opens a window when no main window is open. The Settings window does not count. The rule is unit-tested,
+  and the real click is left to the user.
+- Mutation checks each failed the named tests, and each was undone: a status center shared between windows, a pane tree
+  shared between windows, a dock change that reaches only the first window, an appearance change that reaches only the
+  first window, a window close that skips its applets, a closed controller kept alive, and a set that cannot open once
+  empty. The last-window quit rule lives in the app delegate and is covered by the UI suite only.
+- The package tests pass. The tests that start programs kill every process they started. A check after the package
+  tests found none left. The existing UI tests that expected the app to end with its window now expect it to keep
+  running. The UI suite passes, 37 tests with no failure. Left to the user: how stacked windows look as they cascade,
+  and a real Dock click reopening a window.
 
 ### M7: Undo close pane
 
@@ -944,6 +979,17 @@ The proposal ends with the user looking at the finished app.
   close and the any-tab running state only. The dialog for a close that would close the window, and for quit, is M7's
   with the other guards in "Guarding a close that would kill running processes", so one place decides when to ask.
   (work-queue best guess)
+- 2026-11-01: Amended M6 with two checks: appearance reaches every window, and the last window closing leaves the app
+  running with Cmd-N or a Dock click to reopen. The approved plan for the run named both, and the original four checks
+  did not. (work-queue best guess)
+- 2026-11-01: New windows cascade 28 points right and down from the active window, and wrap to the top-left of the
+  visible screen at an edge. The active window is the key window, else the main one, else the last opened. Window
+  identifiers are numbered and never reused, so UI tests and assistive tools can tell windows apart. New Window sits in
+  the File menu with Cmd-N and targets the app delegate, so it works when no window is open. A Dock click reopens a
+  window only when no main window is open. A failed open posts to the active window, or shows an alert when there is
+  none. (work-queue best guess)
+- 2026-11-01: An app-level error posted while no window is open is held and shown in the next window that opens, rather
+  than shown in an alert. An alert would interrupt a user who closed every window on purpose. (work-queue best guess)
 - 2026-11-01: ADR candidate (cuts across the system): every applet implements one applet contract: hosted view,
   lifecycle, segments, detach and reattach, an inert versioned description, and a running-state query. Undecided.
   Found in M2. Extended 2026-11-01 in M5: the running-state query covers every tab of an applet, since the close

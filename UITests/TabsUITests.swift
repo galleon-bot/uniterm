@@ -105,7 +105,8 @@ final class TabsUITests: UnitermUITestCase {
 
     app.typeKey("w", modifierFlags: .command)
 
-    XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
+    XCTAssertTrue(waitUntilGone(mainWindow(in: app), timeout: 15), "the window stayed open")
+    XCTAssertEqual(app.state, .runningForeground)
   }
 
   /// Catches a tab close that ends a running program without asking. `cat` is running something.

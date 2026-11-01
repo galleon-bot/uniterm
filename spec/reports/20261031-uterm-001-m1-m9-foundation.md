@@ -21,7 +21,7 @@ The run is in progress. See the run state below.
 | M3 Pane tree | DONE | "Add the normalized pane tree with splits, dividers, and focus" |
 | M4 Status bar region | DONE | "Add the status bar region with docking, segments, and message history" |
 | M5 Terminal tabs and program mode | DONE | "Add terminal tabs and program mode" |
-| M6 Multiple windows | QUEUED | |
+| M6 Multiple windows | DONE | "Add multiple windows with per-window panes and status" |
 | M7 Undo close pane | QUEUED | |
 | M8 Layout persistence | QUEUED | |
 | M9 User visual check | HELD: a check only the user can perform | |
@@ -345,6 +345,55 @@ Checks left to the user: the tab bar's look, and one real program-mode ssh sessi
 `xterm-ghostty` terminfo entry.
 
 Test cost: `swift test` takes 10.8 s of test time for 220 tests. The UI suite takes 231 s for 31 tests.
+
+### M6: Multiple windows
+
+Commit: "Add multiple windows with per-window panes and status".
+
+Checks:
+- The implementer ran `make fmt-check`, `make lint`, `make check`, `make build`, `make test-package`, and a build of
+  the UI test target, and all passed.
+- The coordinator reran `make test-package` independently before the review fixes: 232 tests, 0 failures, and the same
+  4 US-layout skips.
+- The coordinator ran the UI suite before the review fixes: 37 tests, 0 failures, 279 s.
+- After the review fixes, the coordinator reran both suites. `make test-package` ran 236 tests with 0 failures and 4
+  skips. The UI suite ran 37 tests with 0 failures in 279 s.
+- `proposals.py check` and `proposals.py freeze` both print `[]`.
+- The implementer mutation-checked 7 behaviors: a shared status center, a shared pane tree, the dock change reaching one
+  window only, the appearance change reaching one window only, a close that skips applets, a closed controller kept
+  alive, and a set that cannot open again once empty. Each mutation failed a named test.
+
+Restart: the first implementer sat 23 minutes on a cg prompt for `pgrep`. The coordinator had listed `pgrep` as allowed
+in its brief, but `pgrep` was added to `.cg.yaml` after the last cg reload. That error was the coordinator's. Every local
+check had already passed. The second implementer finished from the tree, using `ps` only.
+
+Best guesses from the implementers:
+- File > New Window is Cmd-N. It targets the app delegate, so it works with no window open.
+- New windows cascade 28 points from the active window, and wrap to the top left at a screen edge.
+- Window identifiers are `main-window`, then `main-window-N`. N counts successful opens and is never reused.
+- Closing the last window keeps the app running. Cmd-N or a Dock click opens a window again, and the Settings window
+  does not count as a main window.
+- A closed controller is kept for one main-actor turn, since AppKit still messages it after `willClose`.
+- A message posted with no window open, such as a palette failure, waits for the next window, instead of an alert.
+- Two checks were added to M6, by amendment: appearance reaches every window, and closing the last window leaves the
+  app running. Both follow from the plan and from "Where settings live".
+
+Review findings, none blocking:
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | A comment line over width | Fixed |
+| 2 | The Dock-click reopen rule was untested | Moved into a testable rule. The real Dock click is left to the user |
+| 3 | A palette failure with no window was only logged | It now waits for the next window, and a test failed first |
+| 4 | A failed open burned a window number | Fixed. A test failed on the old code first |
+
+adr-impact: no conflicts. The candidate "the last window closing keeps the app running" fails the ADR bar.
+
+Unowned: about 49 leaked `/bin/sh -c "trap '' TERM; ..."` processes run on the machine, each spawning `sleep 1` children.
+They started on 2026-10-24, before this project existed, and use Rust `tempfile` paths. They come from another project's
+test. They were reported to the user, and were not touched.
+
+Checks left to the user: the look of cascaded windows, and a real Dock click reopening a window.
 
 ## Status
 

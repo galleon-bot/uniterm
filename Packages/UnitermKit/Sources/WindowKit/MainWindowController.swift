@@ -30,10 +30,16 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   private var panesClosed = false
   private var historyVisible = false
 
-  /// The settings store supplies the status bar position, which is global to every window.
+  /// Runs once, when the window closes. The set of windows uses it to let go of the controller.
+  var onClose: ((MainWindowController) -> Void)?
+
+  /// The settings store supplies the status bar position, which is global to every window. The
+  /// identifier names the window to accessibility, so it must differ between open windows.
   public init(
     appearance: AppearanceController, settings: SettingsStore,
-    statusCenter: StatusCenter = StatusCenter(), makeApplet: @escaping AppletFactory
+    statusCenter: StatusCenter = StatusCenter(),
+    identifier: String = "main-window",
+    makeApplet: @escaping AppletFactory
   ) throws {
     self.appearance = appearance
     self.statusCenter = statusCenter
@@ -53,7 +59,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     window.titlebarAppearsTransparent = true
     window.titleVisibility = .hidden
     window.isReleasedWhenClosed = false
-    window.setAccessibilityIdentifier("main-window")
+    window.setAccessibilityIdentifier(identifier)
     window.contentViewController = contentController
     window.setContentSize(NSSize(width: 960, height: 640))
     window.center()
@@ -424,6 +430,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
     panesClosed = true
     for applet in paneArea.applets { applet.close() }
+
+    let handler = onClose
+    onClose = nil
+    handler?(self)
   }
 
   // MARK: Applet host

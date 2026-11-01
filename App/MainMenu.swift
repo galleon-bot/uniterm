@@ -4,15 +4,16 @@ import WindowKit
 
 /// uniterm's menu. It owns every key binding. A focused terminal never keeps a key for itself:
 /// Cmd-Z, Cmd-W, Cmd-T, Cmd-1 to Cmd-9, Cmd-Shift-[ and Cmd-Shift-], Cmd-D, Cmd-Shift-D, Cmd-[ and
-/// Cmd-], Cmd-Option-arrows, and Cmd-Q reach these items first. Items with a nil target find their
-/// receiver on the responder chain, from the focused terminal up to the window controller.
+/// Cmd-], Cmd-Option-arrows, Cmd-N, and Cmd-Q reach these items first. Items with a nil target
+/// find their receiver on the responder chain, from the focused terminal up to the window
+/// controller.
 @MainActor
 enum MainMenu {
   static func make(target: AppDelegate) -> NSMenu {
     let main = NSMenu()
 
     main.addItem(appMenuItem(target: target))
-    main.addItem(fileMenuItem())
+    main.addItem(fileMenuItem(target: target))
     main.addItem(editMenuItem())
     main.addItem(viewMenuItem())
     main.addItem(windowMenuItem())
@@ -40,10 +41,16 @@ enum MainMenu {
     return item
   }
 
-  private static func fileMenuItem() -> NSMenuItem {
+  private static func fileMenuItem(target: AppDelegate) -> NSMenuItem {
     let item = NSMenuItem()
     let menu = NSMenu(title: "File")
 
+    // The app delegate takes this one, so it stays live when the last window has closed.
+    let newWindow = NSMenuItem(
+      title: "New Window", action: #selector(AppDelegate.newWindow(_:)), keyEquivalent: "n")
+    newWindow.target = target
+    menu.addItem(newWindow)
+    menu.addItem(.separator())
     menu.addItem(
       withTitle: "New Tab", action: #selector(MainWindowController.newTab(_:)), keyEquivalent: "t")
     menu.addItem(

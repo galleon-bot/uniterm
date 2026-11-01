@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var appearanceToken: UUID?
   private var paletteSync: TerminalPaletteSync?
   private var terminalEngine: GhosttyTerminalEngine?
-  private var mainWindowController: MainWindowController?
+  private var windowSet: WindowSet?
   private var settingsWindowController: SettingsWindowController?
 
   /// UI tests set `UNITERM_DEFAULTS_PATH` to a plist path inside the test runner's container, so
@@ -71,9 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     NSApp.mainMenu = MainMenu.make(target: self)
 
-    let controller: MainWindowController
-    do {
-      controller = try MainWindowController(appearance: appearance, settings: settings) { choice in
+    let settings = settings
+    let windows = WindowSet { identifier in
+      try MainWindowController(appearance: appearance, settings: settings, identifier: identifier) {
+        choice in
         switch choice {
         case .terminalShell:
           return TerminalApplet(engine: engine)
@@ -82,13 +83,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           return try TerminalApplet(engine: engine, program: command)
         }
       }
+    }
+    windowSet = windows
+
+    let controller: MainWindowController
+    do {
+      controller = try windows.open()
     } catch {
       logger.error("the first pane did not start: \(String(describing: error))")
       NSApp.terminate(nil)
       return
     }
-
-    mainWindowController = controller
 
     let sync = TerminalPaletteSync(engine: engine) { [weak self] error in
       self?.paletteDidNotApply(error)
@@ -98,7 +103,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       sync.apply(palette)
     }
 
-    controller.showWindow(nil)
     NSApp.activate()
 
     postDebugError(to: controller)
@@ -118,14 +122,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     terminalEngine?.removeConfigFile()
   }
 
+  /// Closing the last window leaves the app running, as on macOS generally. Cmd-N or a click on
+  /// the Dock icon opens a new window, and Cmd-Q quits.
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    true
+    false
+  }
+
+  /// A click on the Dock icon opens a window when none is open. The Settings window does not
+  /// count. With a window open, minimized or not, AppKit's own handling brings it back.
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+    !openWindow(onlyIfNone: true)
   }
 
   private func paletteDidNotApply(_ error: any Error) {
     logger.error("the terminal palette did not update: \(String(describing: error))")
-    mainWindowController?.statusCenter.post(
+    windowSet?.post(
       level: .error, source: .uniterm, text: "The terminal colors did not update: \(error)")
+  }
+
+  @objc func newWindow(_ sender: Any?) {
+    openWindow()
+  }
+
+  /// Says whether a window opened. With `onlyIfNone`, an open window means nothing opens.
+  @discardableResult
+  private func openWindow(onlyIfNone: Bool = false) -> Bool {
+    guard let windowSet else { return false }
+
+    do {
+      if onlyIfNone { return try windowSet.openIfNone() }
+
+      try windowSet.open()
+      return true
+    } catch {
+      logger.error("the window did not open: \(String(describing: error))")
+
+      if let active = windowSet.activeController {
+        active.statusCenter.post(
+          level: .error, source: .uniterm, text: "The window did not open: \(error)")
+        return false
+      }
+
+      let alert = NSAlert()
+      alert.alertStyle = .warning
+      alert.messageText = "uniterm could not open a window"
+      alert.informativeText = "\(error)"
+      alert.runModal()
+      return false
+    }
   }
 
   @objc func showSettings(_ sender: Any?) {
