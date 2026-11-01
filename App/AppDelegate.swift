@@ -78,8 +78,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .terminalShell:
           return TerminalApplet(engine: engine)
 
-        case .terminalProgram:
-          throw AppletChoiceError("Program mode is not available yet.")
+        case .terminalProgram(let command):
+          return try TerminalApplet(engine: engine, program: command)
         }
       }
     } catch {

@@ -215,7 +215,7 @@ final class TerminalAppletTests: XCTestCase {
     applet.close()
 
     XCTAssertTrue(session.closed)
-    XCTAssertTrue(applet.view.subviews.isEmpty)
+    XCTAssertNil(session.view.superview)
   }
 
   /// The description follows the shell's last reported directory, and restoring it starts a shell
@@ -273,5 +273,304 @@ final class TerminalAppletTests: XCTestCase {
 
     XCTAssertThrowsError(try TerminalApplet(engine: engine, restoring: description))
     XCTAssertTrue(engine.sessions.isEmpty)
+  }
+
+  // MARK: Tabs
+
+  private func tabBar(of applet: TerminalApplet) throws -> TerminalTabBar {
+    try XCTUnwrap(applet.view.subviews.compactMap { $0 as? TerminalTabBar }.first)
+  }
+
+  /// Catches a tab bar that shows for a single tab, or that stays after the second tab closes.
+  func testTheTabBarShowsOnlyWhileThereIsMoreThanOneTab() async throws {
+    let (applet, _, _, _) = makeApplet()
+    let bar = try tabBar(of: applet)
+    XCTAssertTrue(bar.isHidden)
+
+    applet.openTab()
+    XCTAssertFalse(bar.isHidden)
+
+    let closed = await applet.closeSelectedTab()
+    XCTAssertTrue(closed)
+    XCTAssertTrue(bar.isHidden)
+  }
+
+  /// Catches a new tab that reuses the first tab's session, so both would share one tty. Each tab
+  /// gets its own session, and only the selected one is shown and visible.
+  func testEachTabIsItsOwnSessionAndOnlyTheSelectedOneShows() {
+    let (applet, engine, _, _) = makeApplet()
+
+    applet.openTab()
+
+    XCTAssertEqual(engine.sessions.count, 2)
+    XCTAssertFalse(engine.sessions[0] === engine.sessions[1])
+    XCTAssertTrue(engine.sessions[0].view.isHidden)
+    XCTAssertFalse(engine.sessions[1].view.isHidden)
+    XCTAssertFalse(engine.sessions[0].visible)
+    XCTAssertTrue(engine.sessions[1].visible)
+    XCTAssertEqual(applet.tabCount, 2)
+    XCTAssertEqual(applet.selectedTabIndex, 1)
+
+    applet.selectTab(at: 0)
+
+    XCTAssertFalse(engine.sessions[0].view.isHidden)
+    XCTAssertTrue(engine.sessions[1].view.isHidden)
+    XCTAssertTrue(engine.sessions[0].visible)
+    XCTAssertFalse(engine.sessions[1].visible)
+  }
+
+  /// Catches a terminal that draws under the tab bar. The bar is 28 points. A 300 point applet gives
+  /// 272 to the terminal while there are two tabs and all 300 with one.
+  func testTheTerminalFillsWhatTheBarLeaves() async throws {
+    let (applet, engine, _, _) = makeApplet()
+    applet.view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+    XCTAssertEqual(engine.sessions[0].view.frame, NSRect(x: 0, y: 0, width: 400, height: 300))
+
+    applet.openTab()
+    XCTAssertEqual(engine.sessions[1].view.frame, NSRect(x: 0, y: 28, width: 400, height: 272))
+
+    applet.view.frame = NSRect(x: 0, y: 0, width: 500, height: 200)
+    XCTAssertEqual(engine.sessions[1].view.frame, NSRect(x: 0, y: 28, width: 500, height: 172))
+
+    let closed = await applet.closeSelectedTab()
+    XCTAssertTrue(closed)
+    XCTAssertEqual(engine.sessions[0].view.frame, NSRect(x: 0, y: 0, width: 500, height: 200))
+  }
+
+  /// Catches a new tab that starts elsewhere than the tab it was opened from, or lands at the end.
+  /// With tabs in /a and /b and the first selected, the new tab starts in /a and sits between them.
+  func testANewTabStartsInTheSelectedTabsDirectoryAndSitsRightAfterIt() throws {
+    let (applet, engine, _, first) = makeApplet()
+    first.onEvent?(.workingDirectoryChanged("/a"))
+    applet.openTab()
+    engine.sessions[1].onEvent?(.workingDirectoryChanged("/b"))
+    applet.selectTab(at: 0)
+
+    applet.openTab()
+
+    XCTAssertEqual(engine.sessions[2].launch.workingDirectory, "/a")
+    XCTAssertNil(engine.sessions[2].launch.program)
+    engine.sessions[2].onEvent?(.workingDirectoryChanged("/c"))
+
+    let description = try TerminalDescription.decode(applet.describe())
+    XCTAssertEqual(description.tabs.map(\.workingDirectory), ["/a", "/c", "/b"])
+    XCTAssertEqual(description.selectedTab, 1)
+  }
+
+  /// Catches program mode that opens a second tab. The one tab is the one program.
+  func testProgramModeRunsOneProgramAndOpensNoTab() throws {
+    let engine = FakeEngine()
+    let applet = try TerminalApplet(engine: engine, program: "vim -u NONE -N 'my file'")
+    retained.append(applet)
+    applet.start()
+
+    XCTAssertFalse(applet.canOpenTab)
+    applet.openTab()
+
+    XCTAssertEqual(engine.sessions.count, 1)
+    XCTAssertEqual(applet.tabCount, 1)
+    XCTAssertEqual(engine.sessions[0].launch.program, ["vim", "-u", "NONE", "-N", "my file"])
+    XCTAssertTrue(engine.sessions[0].launch.environment.isEmpty)
+    XCTAssertEqual(applet.title, "vim")
+  }
+
+  /// Catches a description that loses the program or the mode. It stays data: building the applet
+  /// and describing it starts nothing beyond the one session the caller asked for.
+  func testProgramDescriptionKeepsTheModeAndTheCommand() throws {
+    let engine = FakeEngine()
+    let applet = try TerminalApplet(engine: engine, program: "./deploy.sh --dry-run")
+
+    let description = try TerminalDescription.decode(applet.describe())
+
+    XCTAssertEqual(description.mode, .program)
+    XCTAssertEqual(description.command, "./deploy.sh --dry-run")
+    XCTAssertEqual(description.tabs.count, 1)
+    XCTAssertTrue(engine.sessions.isEmpty)
+  }
+
+  /// Catches a command line that reaches a shell. Each of these would run something other than one
+  /// program, or nothing at all, so the applet refuses it before any session starts.
+  func testProgramLinesThatAreNotOneProgramAreRefusedBeforeAnythingStarts() {
+    let engine = FakeEngine()
+    let lines = ["", "   ", "ls | less", "echo 'oops", "rm -rf ~", "echo $HOME", "a; b", "x \\"]
+
+    for line in lines {
+      XCTAssertThrowsError(try TerminalApplet(engine: engine, program: line), "\(line)") {
+        XCTAssertTrue($0 is ShellWordsError, "\(line) threw \($0)")
+      }
+    }
+
+    XCTAssertTrue(engine.sessions.isEmpty)
+  }
+
+  /// Catches `program:` that builds its launch some way other than the program launch, which would
+  /// drop the ssh fallback TERM. The rule itself is owned by the ShellWords and integration tests.
+  func testProgramModeSshGetsAFallbackTerm() throws {
+    let engine = FakeEngine()
+
+    for (line, expected) in [
+      ("ssh -F /dev/null host", "xterm-256color"),
+      ("/usr/bin/ssh host", "xterm-256color"),
+      ("ssh-keygen -l", nil),
+      ("mosh host", nil),
+    ] as [(String, String?)] {
+      let applet = try TerminalApplet(engine: engine, program: line)
+      retained.append(applet)
+      applet.start()
+
+      XCTAssertEqual(engine.sessions.last?.launch.environment["TERM"], expected, line)
+    }
+  }
+
+  /// Catches a tab close that ends a program without asking. An idle tab closes at once. A tab
+  /// running something asks, naming the tab by its title, and stays open when the user declines.
+  func testClosingATabRunningSomethingAsksAndAnIdleTabDoesNot() async {
+    let (applet, engine, host, _) = makeApplet()
+    applet.openTab()
+    engine.sessions[1].onEvent?(.titleChanged("vim notes.txt"))
+
+    let idleClosed = await applet.closeSelectedTab()
+    XCTAssertTrue(idleClosed)
+    XCTAssertTrue(host.confirmations.isEmpty, "an idle prompt asked first")
+    XCTAssertTrue(engine.sessions[1].closed)
+    XCTAssertEqual(applet.tabCount, 1)
+
+    applet.openTab()
+    engine.sessions[2].onEvent?(.titleChanged("vim notes.txt"))
+    engine.sessions[2].isRunningSomething = true
+    host.answer = false
+
+    let declined = await applet.closeSelectedTab()
+    XCTAssertFalse(declined)
+    XCTAssertEqual(host.confirmations.count, 1)
+    XCTAssertTrue(
+      host.confirmations.first?.detail.contains("\u{201C}vim notes.txt\u{201D}") ?? false)
+    XCTAssertEqual(applet.tabCount, 2)
+    XCTAssertFalse(engine.sessions[2].closed)
+
+    host.answer = true
+    let accepted = await applet.closeSelectedTab()
+    XCTAssertTrue(accepted)
+    XCTAssertEqual(host.confirmations.count, 2)
+    XCTAssertEqual(applet.tabCount, 1)
+    XCTAssertTrue(engine.sessions[2].closed)
+  }
+
+  /// Catches the last tab closing as a tab. It is a pane close, which the host owns, so the applet
+  /// refuses and leaves its session running, whatever that session is doing.
+  func testTheLastTabIsNeverClosedAsATab() async {
+    let (applet, _, host, session) = makeApplet()
+    session.isRunningSomething = true
+
+    let closed = await applet.closeSelectedTab()
+
+    XCTAssertFalse(closed)
+    XCTAssertTrue(host.confirmations.isEmpty)
+    XCTAssertFalse(session.closed)
+    XCTAssertEqual(applet.tabCount, 1)
+  }
+
+  /// Catches a pane that reads as idle while a background tab runs something, which would let a
+  /// later close skip its dialog. The pane is running when any tab is, and the labels name them.
+  func testAPaneIsRunningSomethingWhenAnyTabIs() {
+    let (applet, engine, _, first) = makeApplet()
+    first.onEvent?(.titleChanged("vim"))
+    applet.openTab()
+    XCTAssertFalse(applet.isRunningSomething)
+
+    first.isRunningSomething = true
+
+    XCTAssertEqual(applet.selectedTabIndex, 1)
+    XCTAssertTrue(applet.isRunningSomething)
+    XCTAssertEqual(applet.runningTabLabels, ["vim"])
+
+    first.isRunningSomething = false
+    engine.sessions[1].isRunningSomething = true
+    engine.sessions[1].hasExited = true
+    XCTAssertFalse(applet.isRunningSomething, "an exited tab still counts")
+  }
+
+  /// Catches status bar segments that follow the last event instead of the selected tab. Tab one
+  /// is in /var/tmp with a failed command. Tab two starts in the same directory with no failure.
+  func testSegmentsReflectTheSelectedTab() {
+    let (applet, engine, host, first) = makeApplet()
+    first.onEvent?(.workingDirectoryChanged("/var/tmp"))
+    first.onEvent?(.commandFinished(exitCode: 2, duration: .seconds(1)))
+
+    applet.openTab()
+    XCTAssertEqual(applet.segments, [AppletSegment(symbolName: "folder", text: "tmp")])
+
+    engine.sessions[1].onEvent?(.workingDirectoryChanged("/Users/x/proj"))
+    XCTAssertEqual(applet.segments, [AppletSegment(symbolName: "folder", text: "proj")])
+
+    let changes = host.changed
+    first.onEvent?(.workingDirectoryChanged("/etc"))
+    XCTAssertEqual(applet.segments, [AppletSegment(symbolName: "folder", text: "proj")])
+    XCTAssertEqual(host.changed, changes, "a background tab told the host")
+
+    applet.selectTab(at: 0)
+    XCTAssertEqual(
+      applet.segments,
+      [
+        AppletSegment(symbolName: "folder", text: "etc"),
+        AppletSegment(symbolName: "xmark.circle", text: "2", style: .error),
+      ])
+    XCTAssertGreaterThan(host.changed, changes)
+  }
+
+  /// Catches a pane that closes when one of several shells exits, or stays open when the last one
+  /// does.
+  func testAShellExitClosesItsTabAndOnlyTheLastClosesThePane() {
+    let (applet, engine, host, first) = makeApplet()
+    applet.openTab()
+    applet.selectTab(at: 0)
+
+    engine.sessions[1].hasExited = true
+    engine.sessions[1].onEvent?(.exited)
+
+    XCTAssertFalse(host.exited)
+    XCTAssertEqual(applet.tabCount, 1)
+    XCTAssertTrue(engine.sessions[1].closed)
+
+    first.hasExited = true
+    first.onEvent?(.exited)
+
+    XCTAssertTrue(host.exited)
+  }
+
+  /// Catches a pane close that leaves a background tab's shell running.
+  func testClosingTheAppletClosesEveryTab() {
+    let (applet, engine, _, _) = makeApplet()
+    applet.openTab()
+    applet.openTab()
+
+    applet.close()
+
+    XCTAssertEqual(engine.sessions.count, 3)
+    XCTAssertTrue(engine.sessions.allSatisfy { $0.closed })
+  }
+
+  /// Catches a description that drops tabs or the selection. Restoring starts a fresh shell in each
+  /// tab's directory, runs no program, and selects the same tab.
+  func testDescriptionKeepsEveryTabAndRestoresThem() throws {
+    let (applet, engine, _, first) = makeApplet()
+    first.onEvent?(.workingDirectoryChanged("/one"))
+    applet.openTab()
+    engine.sessions[1].onEvent?(.workingDirectoryChanged("/two"))
+    applet.openTab()
+    engine.sessions[2].onEvent?(.workingDirectoryChanged("/three"))
+    applet.selectTab(at: 1)
+
+    let description = applet.describe()
+    let restored = try TerminalApplet(engine: engine, restoring: description)
+    retained.append(restored)
+    restored.start()
+
+    XCTAssertEqual(engine.sessions.count, 6)
+    XCTAssertEqual(
+      engine.sessions[3...].map { $0.launch.workingDirectory }, ["/one", "/two", "/three"])
+    XCTAssertTrue(engine.sessions[3...].allSatisfy { $0.launch.program == nil })
+    XCTAssertEqual(restored.tabCount, 3)
+    XCTAssertEqual(restored.selectedTabIndex, 1)
   }
 }

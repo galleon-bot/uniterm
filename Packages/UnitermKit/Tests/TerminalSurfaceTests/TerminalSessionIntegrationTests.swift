@@ -16,6 +16,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
   private var window: NSWindow!
   private var sessions: [any TerminalSession] = []
   private var savedEnvironment: [String: String?] = [:]
+  private var baselineChildren: Set<pid_t> = []
 
   override func setUp() async throws {
     continueAfterFailure = false
@@ -56,13 +57,23 @@ final class TerminalSessionIntegrationTests: XCTestCase {
       contentRect: NSRect(x: 0, y: 0, width: 800, height: 400), styleMask: [.titled],
       backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
+    baselineChildren = Set(children(of: getpid()))
   }
 
   override func tearDown() async throws {
+    // A program a test starts can outlive its session. Everything the test process started since
+    // setUp is ended, children first, so no test leaves an orphan.
+    let started = Set(children(of: getpid())).subtracting(baselineChildren)
+    let stragglers = started.flatMap { tree(of: $0) }
+
     for session in sessions {
       session.close()
     }
     sessions = []
+
+    for pid in stragglers.reversed() {
+      kill(pid, SIGKILL)
+    }
     engine = nil
     window.close()
     try? FileManager.default.removeItem(at: sandbox)
@@ -81,7 +92,16 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     let launch = TerminalLaunch.loginShell(
       workingDirectory: sandbox.appending(path: "work").path,
       environment: ["HOME": sandbox.appending(path: "home").path])
-    let session = try engine.makeSession(launch: launch)
+    return host(try engine.makeSession(launch: launch))
+  }
+
+  private func startProgram(_ words: [String]) throws -> any TerminalSession {
+    let launch = TerminalLaunch.program(
+      words, workingDirectory: sandbox.appending(path: "work").path)
+    return host(try engine.makeSession(launch: launch))
+  }
+
+  private func host(_ session: any TerminalSession) -> any TerminalSession {
     sessions.append(session)
 
     session.view.frame = window.contentView!.bounds
@@ -578,5 +598,107 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     XCTAssertTrue(
       view.tryToPerform(#selector(TerminalMenuActions.clearTerminalScreen(_:)), with: nil))
     try await waitUntil("the cleared screen") { !self.screen(session).contains("M:42:") }
+  }
+
+  // MARK: Tabs and program mode
+
+  /// Catches a second session that shares the first one's tty, which tabs must never do. Two shells
+  /// report different terminal devices. A foreground `cat` in the first makes only the first read
+  /// as running, since the query is per session.
+  func testTwoSessionsAreIndependentTerminals() async throws {
+    let first = try startShell()
+    let second = try startShell()
+    try await waitUntil("two idle prompts") {
+      !first.isRunningSomething && !second.isRunningSomething
+    }
+
+    try run("echo \"Y:$(tty):\"", in: first)
+    try run("echo \"Y:$(tty):\"", in: second)
+
+    let pattern = #"Y:(/dev/ttys\d+):"#
+    try await waitUntil("both devices") {
+      self.firstMatch(pattern, in: self.screen(first)) != nil
+        && self.firstMatch(pattern, in: self.screen(second)) != nil
+    }
+
+    let one = try XCTUnwrap(firstMatch(pattern, in: screen(first)))
+    let two = try XCTUnwrap(firstMatch(pattern, in: screen(second)))
+    XCTAssertNotEqual(one, two)
+
+    try run("cat", in: first)
+    try await waitUntil("cat to run in the first session") { first.isRunningSomething }
+
+    try run("echo \"Z:$((6*7)):\"", in: second)
+    try await waitUntil("the second session's own command to finish") {
+      self.screen(second).contains("Z:42:") && !second.isRunningSomething
+    }
+    XCTAssertTrue(first.isRunningSomething, "the first session stopped reading as running")
+  }
+
+  private func firstMatch(_ pattern: String, in text: String) -> String? {
+    guard let expression = try? NSRegularExpression(pattern: pattern),
+      let match = expression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+      match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: text)
+    else { return nil }
+
+    return String(text[range])
+  }
+
+  /// Catches program mode that runs a shell instead of the program, that rewrites its arguments, or
+  /// that closes the pane before its output can be read. The program prints its arguments, which
+  /// hold a space, an apostrophe, a semicolon, a glob, and a variable name. None of them may be
+  /// interpreted. The program reads a line, so it is running until Return. After it ends the query
+  /// reads idle, the pane stays, and the next key closes it.
+  func testProgramRunsWithItsArgumentsIntactAndStaysUntilAKey() async throws {
+    let session = try startProgram([
+      "/bin/sh", "-c", #"printf 'A:%s:%s:%s:\n' "$1" "$2" "$3"; read x"#, "sh",
+      "two words", "it's;*", "$HOME",
+    ])
+    var exited = false
+    session.onEvent = { event in
+      if case .exited = event { exited = true }
+    }
+
+    try await waitUntil("the arguments") {
+      self.screen(session).contains("A:two words:it's;*:$HOME:")
+    }
+    XCTAssertTrue(session.isRunningSomething, "a program waiting for input reads as idle")
+
+    try press(session, keyCode: 0x24, characters: "\r")
+    try await waitUntil("the program to end") { !session.isRunningSomething }
+
+    // No event announces that the pane stayed open, so a missing exit event can only be seen by
+    // waiting. The wait is bounded and only ever delays the failure case.
+    try await Task.sleep(for: .milliseconds(300))
+    XCTAssertFalse(exited, "the pane closed before a key was pressed")
+
+    try press(session, keyCode: 0x24, characters: "\r")
+    try await waitUntil("the exit event") { exited }
+  }
+
+  /// Catches a program launch that loses Ghostty's TERM, or an ssh launch that keeps it. A plain
+  /// program sees xterm-ghostty. An ssh program, by name or by path, hands xterm-256color to the
+  /// process that ssh starts. The probe is ssh's ProxyCommand, which runs locally with ssh's own
+  /// environment, so no remote host is needed. A real host without the terminfo entry is not
+  /// reachable from here.
+  func testProgramModeKeepsGhosttyTermExceptForSsh() async throws {
+    let plain = try startProgram(["/bin/sh", "-c", #"echo "T:$TERM:"; read x"#])
+    try await waitUntil("the plain program's TERM") {
+      self.screen(plain).contains("T:xterm-ghostty:")
+    }
+
+    // ssh runs the proxy command as `exec <command>`, so only the echo runs and ssh then fails
+    // within 250 ms. libghostty adds an error screen below the output, which keeps the echo line.
+    let probe = #"ProxyCommand=echo "PT:$TERM:" >&2"#
+
+    for ssh in ["ssh", "/usr/bin/ssh"] {
+      let session = try startProgram(
+        [ssh, "-F", "/dev/null", "-o", "BatchMode=yes", "-o", probe, "nowhere"])
+
+      try await waitUntil("the TERM that \(ssh) passes on") {
+        self.screen(session).contains("PT:xterm-256color:")
+      }
+      XCTAssertFalse(screen(session).contains("PT:xterm-ghostty:"), ssh)
+    }
   }
 }

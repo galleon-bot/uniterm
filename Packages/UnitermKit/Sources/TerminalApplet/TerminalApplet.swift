@@ -2,38 +2,96 @@ import AppKit
 import AppletKit
 import StatusKit
 import TerminalSurface
+import Theme
+
+/// Lays out the tab bar above the terminals. A tab's view fills the space under the bar.
+@MainActor
+private final class TerminalContainerView: NSView {
+  var onResize: (() -> Void)?
+
+  override var isFlipped: Bool { true }
+
+  override func resizeSubviews(withOldSize oldSize: NSSize) {
+    super.resizeSubviews(withOldSize: oldSize)
+    onResize?()
+  }
+}
 
 /// The terminal applet. It talks to the terminal only through the session protocol.
 ///
-/// It runs one shell in one tab. The description already keeps a list of tabs, so tabs and program
-/// mode fit later without a new format.
+/// Shell mode runs the user's login shell in any number of tabs. Each tab is its own session, so
+/// each has its own tty. Program mode runs one program in one tab and opens no others. The tab bar
+/// shows only while there is more than one tab.
 @MainActor
-public final class TerminalApplet: Applet {
+public final class TerminalApplet: TabbedApplet {
   /// The longest notification text that reaches the status bar.
   static let maximumMessageLength = 200
 
-  public let typeID = TerminalDescription.typeID
-  public let view: NSView = NSView()
-  public weak var host: (any AppletHost)?
+  /// One tab: a session, and what the applet knows about it.
+  @MainActor
+  private final class Tab {
+    let launch: TerminalLaunch
+    var session: (any TerminalSession)?
+    var title: String
+    var workingDirectory: String?
+    var failedExitCode: Int?
 
-  public private(set) var title = "Terminal"
-  public private(set) var segments: [AppletSegment] = []
+    init(launch: TerminalLaunch, title: String) {
+      self.launch = launch
+      self.title = title
+      self.workingDirectory = launch.workingDirectory
+    }
 
-  private let engine: any TerminalEngine
-  private var launch: TerminalLaunch
-  private var session: (any TerminalSession)?
-  private var workingDirectory: String?
-  private var failedExitCode: Int?
-  private var detached = false
+    var isRunningSomething: Bool {
+      guard let session, !session.hasExited else { return false }
 
-  public init(engine: any TerminalEngine, launch: TerminalLaunch = .loginShell()) {
-    self.engine = engine
-    self.launch = launch
-    self.workingDirectory = launch.workingDirectory
-    view.setAccessibilityIdentifier("terminal-applet")
+      return session.isRunningSomething
+    }
   }
 
-  /// Restores an applet from a description. It starts a fresh shell and runs nothing else.
+  private static let defaultTitle = "Terminal"
+
+  public let typeID = TerminalDescription.typeID
+  public let view: NSView
+
+  public weak var host: (any AppletHost)?
+
+  public private(set) var segments: [AppletSegment] = []
+
+  private let container = TerminalContainerView()
+  private let tabBar = TerminalTabBar()
+  private let engine: any TerminalEngine
+  private let mode: TerminalDescription.Mode
+  private let commandLine: String?
+  private let shellEnvironment: [String: String]
+  private var tabs: [Tab]
+  private var selectedIndex: Int
+  private var started = false
+  private var detached = false
+  private var closingTab = false
+
+  /// A shell in one tab.
+  public convenience init(engine: any TerminalEngine, launch: TerminalLaunch = .loginShell()) {
+    self.init(
+      engine: engine, mode: .shell, commandLine: nil, shellEnvironment: launch.environment,
+      launches: [launch], selected: 0)
+  }
+
+  /// One program in one tab. The line is split into words, and no shell interprets the user's
+  /// text. It throws when the line is empty, has an unclosed quote, or holds shell syntax that is
+  /// not quoted.
+  public convenience init(
+    engine: any TerminalEngine, program line: String, workingDirectory: String? = nil
+  ) throws {
+    let words = try ShellWords.split(line)
+
+    self.init(
+      engine: engine, mode: .program, commandLine: line, shellEnvironment: [:],
+      launches: [.program(words, workingDirectory: workingDirectory)], selected: 0)
+  }
+
+  /// Restores an applet from a description. A shell description starts a fresh shell in each
+  /// tab's directory and runs nothing else.
   public convenience init(engine: any TerminalEngine, restoring description: AppletDescription)
     throws
   {
@@ -44,62 +102,138 @@ public final class TerminalApplet: Applet {
     }
 
     self.init(
-      engine: engine,
-      launch: .loginShell(workingDirectory: decoded.tabs[decoded.selectedTab].workingDirectory))
+      engine: engine, mode: .shell, commandLine: nil, shellEnvironment: [:],
+      launches: decoded.tabs.map { .loginShell(workingDirectory: $0.workingDirectory) },
+      selected: decoded.selectedTab)
   }
 
-  public var isRunningSomething: Bool {
-    guard let session, !session.hasExited else { return false }
+  private init(
+    engine: any TerminalEngine, mode: TerminalDescription.Mode, commandLine: String?,
+    shellEnvironment: [String: String], launches: [TerminalLaunch], selected: Int
+  ) {
+    self.engine = engine
+    self.mode = mode
+    self.commandLine = commandLine
+    self.shellEnvironment = shellEnvironment
+    self.selectedIndex = selected
+    self.view = container
 
-    return session.isRunningSomething
+    tabs = launches.map { launch in
+      Tab(launch: launch, title: Self.initialTitle(for: launch))
+    }
+
+    container.setAccessibilityIdentifier("terminal-applet")
+    container.addSubview(tabBar)
+    container.onResize = { [weak self] in self?.layoutContents() }
+
+    tabBar.onSelect = { [weak self] index in self?.selectTab(at: index) }
+    tabBar.onNew = { [weak self] in self?.openTab() }
+    tabBar.onClose = { [weak self] index in
+      Task { @MainActor [weak self] in _ = await self?.closeTab(at: index) }
+    }
+
+    refreshTabs()
+  }
+
+  private static func initialTitle(for launch: TerminalLaunch) -> String {
+    guard let first = launch.program?.first else { return defaultTitle }
+
+    let name = (first as NSString).lastPathComponent
+    return name.isEmpty ? first : sanitized(name, limit: 80)
+  }
+
+  // MARK: Applet
+
+  private var selectedTab: Tab? {
+    tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil
+  }
+
+  public var title: String { selectedTab?.title ?? Self.defaultTitle }
+
+  /// True when any tab is running something. A tab at an idle shell prompt is not.
+  public var isRunningSomething: Bool {
+    tabs.contains { $0.isRunningSomething }
+  }
+
+  /// What each tab running something is called: its title, or the command in program mode. A
+  /// confirmation dialog lists them.
+  public var runningTabLabels: [String] {
+    tabs.filter { $0.isRunningSomething }.map { label(of: $0) }
   }
 
   public func start() {
-    guard session == nil else { return }
+    guard !started else { return }
 
-    do {
-      let session = try engine.makeSession(launch: launch)
-      self.session = session
-      session.onEvent = { [weak self] event in self?.handle(event) }
+    started = true
 
-      let terminalView = session.view
-      terminalView.frame = view.bounds
-      terminalView.autoresizingMask = [.width, .height]
-      view.addSubview(terminalView)
-    } catch {
-      host?.applet(self, post: .error, text: "The terminal could not start: \(error)")
-      host?.appletDidExit(self)
+    var failure: (any Error)?
+
+    for tab in tabs where tab.session == nil {
+      do {
+        try startSession(for: tab)
+      } catch {
+        failure = error
+      }
     }
+
+    if let failure {
+      host?.applet(self, post: .error, text: "The terminal could not start: \(failure)")
+    }
+
+    let live = tabs.filter { $0.session != nil }
+
+    guard !live.isEmpty else {
+      host?.appletDidExit(self)
+      return
+    }
+
+    if live.count != tabs.count {
+      let selected = selectedTab
+      tabs = live
+      selectedIndex = selected.flatMap { selected in tabs.firstIndex { $0 === selected } } ?? 0
+    }
+
+    refreshTabs()
+    updateSegments()
   }
 
   public func close() {
-    session?.close()
-    session = nil
-    for subview in view.subviews {
-      subview.removeFromSuperview()
+    for tab in tabs {
+      tab.session?.view.removeFromSuperview()
+      tab.session?.close()
+      tab.session = nil
     }
   }
 
   public func detach() {
     detached = true
-    session?.setFocused(false)
-    session?.setVisible(false)
+
+    for tab in tabs {
+      tab.session?.setFocused(false)
+      tab.session?.setVisible(false)
+    }
   }
 
   public func reattach() {
     detached = false
-    session?.setVisible(true)
+    selectedTab?.session?.setVisible(true)
   }
 
   public func focus() {
-    guard let terminalView = session?.view else { return }
+    guard let terminalView = selectedTab?.session?.view else { return }
 
     terminalView.window?.makeFirstResponder(terminalView)
   }
 
+  public func apply(_ palette: ThemePalette) {
+    tabBar.apply(palette)
+  }
+
   public func describe() -> AppletDescription {
     let description = TerminalDescription(
-      mode: .shell, tabs: [TerminalDescription.Tab(workingDirectory: workingDirectory)])
+      mode: mode, command: commandLine,
+      tabs: tabs.map { TerminalDescription.Tab(workingDirectory: $0.workingDirectory) },
+      selectedTab: selectedIndex)
 
     do {
       return try description.appletDescription()
@@ -108,20 +242,194 @@ public final class TerminalApplet: Applet {
     }
   }
 
-  private func handle(_ event: TerminalEvent) {
+  // MARK: Tabs
+
+  public var tabCount: Int { tabs.count }
+
+  public var selectedTabIndex: Int { selectedIndex }
+
+  /// Program mode runs its one program in its one tab and never opens another.
+  public var canOpenTab: Bool { mode == .shell }
+
+  /// Opens a shell right after the selected tab, in the directory that tab last reported, and
+  /// selects it. A directory that does not exist locally, as after an ssh login, is skipped by the
+  /// terminal engine.
+  public func openTab() {
+    guard canOpenTab else { return }
+
+    let launch = TerminalLaunch.loginShell(
+      workingDirectory: selectedTab?.workingDirectory, environment: shellEnvironment)
+    let tab = Tab(launch: launch, title: Self.defaultTitle)
+
+    if started {
+      do {
+        try startSession(for: tab)
+      } catch {
+        host?.applet(self, post: .error, text: "The tab could not open: \(error)")
+        return
+      }
+    }
+
+    let position = min(selectedIndex + 1, tabs.count)
+    tabs.insert(tab, at: position)
+    selectedIndex = position
+
+    refreshTabs()
+    updateSegments()
+    host?.appletDidChange(self)
+    focus()
+  }
+
+  public func selectTab(at index: Int) {
+    guard tabs.indices.contains(index), index != selectedIndex else { return }
+
+    let hadFocus = hasFocus
+    selectedIndex = index
+
+    refreshTabs()
+    updateSegments()
+    host?.appletDidChange(self)
+
+    if hadFocus { focus() }
+  }
+
+  public func closeSelectedTab() async -> Bool {
+    await closeTab(at: selectedIndex)
+  }
+
+  /// Closes a tab. It asks first when the tab is running something. A tab at an idle prompt closes
+  /// at once. The last tab never closes here, since that is a pane close.
+  func closeTab(at index: Int) async -> Bool {
+    guard tabs.count > 1, tabs.indices.contains(index), !closingTab else { return false }
+
+    let tab = tabs[index]
+
+    if tab.isRunningSomething {
+      guard let host else { return false }
+
+      closingTab = true
+      defer { closingTab = false }
+
+      let confirmation = AppletConfirmation(
+        title: "Close this tab?",
+        detail: "\u{201C}\(label(of: tab))\u{201D} is running something. Closing the tab ends it.",
+        confirmTitle: "Close Tab", cancelTitle: "Cancel")
+
+      guard await host.applet(self, confirm: confirmation) else { return false }
+    }
+
+    guard let current = tabs.firstIndex(where: { $0 === tab }) else { return true }
+
+    guard tabs.count > 1 else { return false }
+
+    removeTab(at: current)
+    return true
+  }
+
+  /// A tab shows its title. In program mode the one tab shows the command.
+  private func label(of tab: Tab) -> String {
+    if mode == .program, let commandLine { return Self.sanitized(commandLine, limit: 80) }
+
+    return tab.title
+  }
+
+  private func removeTab(at index: Int) {
+    let hadFocus = hasFocus
+    let tab = tabs.remove(at: index)
+
+    tab.session?.view.removeFromSuperview()
+    tab.session?.close()
+    tab.session = nil
+
+    if index < selectedIndex {
+      selectedIndex -= 1
+    } else {
+      selectedIndex = min(selectedIndex, tabs.count - 1)
+    }
+
+    refreshTabs()
+    updateSegments()
+    host?.appletDidChange(self)
+
+    if hadFocus { focus() }
+  }
+
+  private func startSession(for tab: Tab) throws {
+    let session = try engine.makeSession(launch: tab.launch)
+    tab.session = session
+    session.onEvent = { [weak self, weak tab] event in
+      guard let self, let tab else { return }
+
+      self.handle(event, in: tab)
+    }
+
+    session.view.isHidden = true
+    container.addSubview(session.view)
+  }
+
+  private var hasFocus: Bool {
+    guard let responder = view.window?.firstResponder as? NSView else { return false }
+
+    return responder.isDescendant(of: view)
+  }
+
+  /// Shows the selected tab's terminal and hides the others, then updates the bar and the layout.
+  private func refreshTabs() {
+    for (index, tab) in tabs.enumerated() {
+      let shown = index == selectedIndex
+
+      tab.session?.view.isHidden = !shown
+
+      if !shown {
+        tab.session?.setFocused(false)
+      }
+
+      tab.session?.setVisible(shown && !detached)
+    }
+
+    tabBar.update(
+      titles: tabs.map { $0.title }, selected: selectedIndex, canOpenTab: canOpenTab)
+    tabBar.isHidden = tabs.count < 2
+    layoutContents()
+  }
+
+  private func layoutContents() {
+    let bounds = container.bounds
+    let barHeight = tabBar.isHidden ? 0 : TerminalTabBar.height
+
+    tabBar.frame = NSRect(x: 0, y: 0, width: bounds.width, height: TerminalTabBar.height)
+
+    let content = NSRect(
+      x: 0, y: barHeight, width: bounds.width, height: max(0, bounds.height - barHeight))
+
+    for tab in tabs {
+      tab.session?.view.frame = content
+    }
+  }
+
+  // MARK: Events
+
+  private func handle(_ event: TerminalEvent, in tab: Tab) {
+    let isSelected = tab === selectedTab
+
     switch event {
     case .titleChanged(let value):
-      title = Self.sanitized(value, limit: 80)
-      if title.isEmpty { title = "Terminal" }
-      host?.appletDidChange(self)
+      let cleaned = Self.sanitized(value, limit: 80)
+      tab.title = cleaned.isEmpty ? Self.defaultTitle : cleaned
+      tabBar.update(
+        titles: tabs.map { $0.title }, selected: selectedIndex, canOpenTab: canOpenTab)
+
+      if isSelected { host?.appletDidChange(self) }
 
     case .workingDirectoryChanged(let path):
-      workingDirectory = path
-      rebuildSegments()
+      tab.workingDirectory = path
+
+      if isSelected { rebuildSegments() }
 
     case .commandFinished(let exitCode, _):
-      failedExitCode = exitCode.flatMap { $0 != 0 ? $0 : nil }
-      rebuildSegments()
+      tab.failedExitCode = exitCode.flatMap { $0 != 0 ? $0 : nil }
+
+      if isSelected { rebuildSegments() }
 
     case .notification(let title, let body):
       let text = [title, body].map { Self.sanitized($0) }.filter { !$0.isEmpty }.joined(
@@ -137,27 +445,40 @@ public final class TerminalApplet: Applet {
       break
 
     case .exited:
-      host?.appletDidExit(self)
+      guard let index = tabs.firstIndex(where: { $0 === tab }) else { return }
+
+      if tabs.count == 1 {
+        host?.appletDidExit(self)
+      } else {
+        removeTab(at: index)
+      }
     }
   }
 
   /// The terminal's state is its directory and the exit code of the last command when it failed.
-  /// The directory shows as its last component, or `~` for the home folder.
-  private func rebuildSegments() {
+  /// The directory shows as its last component, or `~` for the home folder. The selected tab
+  /// supplies both.
+  private func updateSegments() {
     var result: [AppletSegment] = []
 
-    if let workingDirectory {
-      result.append(
-        AppletSegment(
-          symbolName: "folder", text: Self.directoryLabel(workingDirectory), style: .normal))
-    }
+    if let tab = selectedTab {
+      if let workingDirectory = tab.workingDirectory {
+        result.append(
+          AppletSegment(
+            symbolName: "folder", text: Self.directoryLabel(workingDirectory), style: .normal))
+      }
 
-    if let failedExitCode {
-      result.append(
-        AppletSegment(symbolName: "xmark.circle", text: "\(failedExitCode)", style: .error))
+      if let failedExitCode = tab.failedExitCode {
+        result.append(
+          AppletSegment(symbolName: "xmark.circle", text: "\(failedExitCode)", style: .error))
+      }
     }
 
     segments = result
+  }
+
+  private func rebuildSegments() {
+    updateSegments()
     host?.appletDidChange(self)
   }
 

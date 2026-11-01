@@ -700,7 +700,7 @@ Out of scope, for later proposals:
 
 ### M5: Terminal tabs and program mode
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 - A terminal applet in shell mode opens, switches, and closes tabs
 - Each tab runs an independent tty
@@ -709,10 +709,44 @@ Out of scope, for later proposals:
 - Closing a pane closes every tab in its applet
 - Cmd-W in an applet with several tabs closes the current tab only
 - Closing a tab that is running something asks first. Closing a tab at an idle prompt does not ask
-- Closing an applet's last tab follows the pane rule: no dialog in a window that stays open, and a dialog when it
-  would close the window
+- Closing an applet's last tab follows the pane rule: no dialog in a window that stays open. The dialog for a close that
+  would close the window is M7's. Amended 2026-11-01; see Decision Log.
 - A program-mode `ssh`, by name or full path, to a host without the `xterm-ghostty` terminfo entry gets a working
   TERM. Other routes, such as `mosh` or a wrapper script, are not covered
+
+**As built:**
+
+- Shell mode holds any number of tabs, each its own session and so its own tty. A new tab opens right after the
+  selected one, in the directory that tab last reported. The tab bar is 28 points tall and shows only with two or more
+  tabs. The terminal fills what the bar leaves.
+- Keys are menu items: Cmd-T, Cmd-1 to Cmd-8, Cmd-9 for the last tab, and Cmd-Shift-] and Cmd-Shift-[ to step with wrap.
+  The switching items are disabled with one tab. New Tab is disabled when the focused applet cannot open one.
+- Cmd-W closes the selected tab while the applet has two or more. The menu item reads Close Tab then. With one tab it
+  closes the pane, and closing a pane closes every tab. A shell that exits closes its own tab. The last one closes the
+  pane.
+- A tab running something asks first, naming the tab by its title, or by its command in program mode. An idle tab
+  closes at once. Declining keeps the tab. The applet never closes its last tab, since that is a pane close.
+- The applet's running-state query is true when any tab is running something, and it lists those tabs' labels. M7 uses
+  both. The window, quit, and grace-slot guards are not built here.
+- Program mode runs one program in one tab and opens no other. Its command line is split into words, and the shell
+  never interprets the user's text. The picker's command now launches for real. A line with unquoted shell syntax, an unclosed quote, a second
+  line, a NUL, or no program is refused with a message before anything starts. libghostty runs a command through
+  `/bin/sh -c`, so every word is single-quoted on the way in, and a test reads the quoted string back through a real sh.
+  libghostty keeps the pane open after the program ends until a key is pressed.
+- A program whose basename is exactly `ssh` gets `TERM=xterm-256color`, by name or by path. The check used ssh's
+  ProxyCommand with `-F /dev/null`, so no remote host was used. `mosh`, wrappers, and names that only contain ssh are
+  not covered.
+- The description carries each tab's directory and the selected tab, plus the mode and command. It is inert. A shell
+  description restores a fresh shell in each tab's directory. A program-mode description is still refused on restore.
+- Status segments follow the selected tab. Only a background tab's title, directory, and exit-code events leave the
+  host and segments alone. Its notifications and clipboard requests still post and ask the user. A tab's title shows in
+  its tab and the applet title follows the selected tab.
+- Mutation checks each failed the named tests, and each was undone: the ssh name match, Cmd-W taking a tab before a
+  pane, closing the selected tab and not another, the guard asking only for a running tab, both ways, the bar hidden at
+  one tab, program mode refusing a new tab, the description staying inert on restore, and "running" meaning any tab.
+- Tests that start programs kill every process they started. A check after the package tests found none left.
+- The UI suite passes, 31 tests with no failure, including the tab tests. Left to the user: how the tab bar looks, and
+  one real ssh session to a host without the `xterm-ghostty` terminfo entry in program mode.
 
 ### M6: Multiple windows
 
@@ -898,9 +932,22 @@ The proposal ends with the user looking at the finished app.
   themselves, so the item and the glyph are live only while an error is showing. Dismissing does not clear the
   unseen-error indicator, which only opening the history clears. The UI tests get their error from a debug-only
   launch variable, since no durable error path exists yet. (work-queue best guess)
+- 2026-11-01: M5 best guesses. A program-mode command line is split like a shell splits quotes and backslashes, and
+  nothing else. Pipes, redirects, globs, `$`, backticks, a leading `~` or `#`, and newlines are refused unless quoted,
+  since reading them literally would run something other than what the user typed. A user who wants a pipeline runs
+  `sh -c` with the script quoted. Program mode keeps Ghostty's `TERM` except for `ssh`. A new tab starts in the
+  selected tab's directory and sits right after it. Cmd-9 selects the last tab, as Terminal and Ghostty do. Tab
+  switching is disabled with one tab. The tab bar belongs to the applet, so a tabbed-applet protocol lets the window
+  route the keys without knowing the terminal. The applet takes the palette from the window to draw its bar. The
+  program-mode description is still refused on restore, and M7 owns the Run action. (work-queue best guess)
+- 2026-11-01: Amended M5's check on the last tab. It said "a dialog when it would close the window". M5 builds the tab
+  close and the any-tab running state only. The dialog for a close that would close the window, and for quit, is M7's
+  with the other guards in "Guarding a close that would kill running processes", so one place decides when to ask.
+  (work-queue best guess)
 - 2026-11-01: ADR candidate (cuts across the system): every applet implements one applet contract: hosted view,
   lifecycle, segments, detach and reattach, an inert versioned description, and a running-state query. Undecided.
-  Found in M2.
+  Found in M2. Extended 2026-11-01 in M5: the running-state query covers every tab of an applet, since the close
+  guards in M7 depend on it.
 - 2026-11-01: ADR candidate (cuts across the system): a terminal program never reads the clipboard without the user's
   confirmation naming its pane, and a denial sends it nothing. Undecided. Found in M2.
 

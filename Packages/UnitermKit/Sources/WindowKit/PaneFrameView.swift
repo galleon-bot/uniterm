@@ -58,6 +58,7 @@ final class PaneFrameView: NSView {
 
   func apply(_ palette: ThemePalette) {
     self.palette = palette
+    applet.apply(palette)
     refresh()
   }
 

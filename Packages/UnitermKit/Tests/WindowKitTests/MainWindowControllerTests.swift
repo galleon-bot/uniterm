@@ -81,14 +81,13 @@ final class MainWindowControllerTests: XCTestCase {
     XCTAssertTrue(made[0].started)
   }
 
-  /// Cmd-T and Cmd-Z are menu items answered by the window until their features exist.
+  /// Cmd-Z is a menu item answered by the window until undo exists.
   func testPlaceholderActionsAnswerWithAMessage() throws {
     let controller = try makeController()
 
-    controller.newTab(nil)
     controller.undoClosePane(nil)
 
-    XCTAssertEqual(controller.statusCenter.history.count, 2)
+    XCTAssertEqual(controller.statusCenter.history.count, 1)
     XCTAssertTrue(controller.statusCenter.history.allSatisfy { $0.source == .uniterm })
   }
 
@@ -336,6 +335,118 @@ final class MainWindowControllerTests: XCTestCase {
       controller.validateMenuItem(
         NSMenuItem(
           title: "x", action: #selector(MainWindowController.closePane(_:)), keyEquivalent: "")))
+  }
+
+  // MARK: Tabs
+
+  /// Catches Cmd-W that closes a pane while its applet still has tabs. With two tabs it closes the
+  /// tab and keeps the pane. With one tab left it closes the pane. Closing the pane ends the applet
+  /// and so every tab in it.
+  func testCloseTakesATabFirstAndThePaneWhenOneTabIsLeft() async throws {
+    let controller = try makeController()
+    controller.openPane(.terminalShell, axis: .row)
+    let tabbed = made[1]
+    tabbed.tabCount = 2
+
+    controller.closePane(nil)
+    let closedTab = await waitUntil { tabbed.tabsClosed == 1 }
+
+    XCTAssertTrue(closedTab)
+    XCTAssertEqual(controller.paneIDs.count, 2)
+    XCTAssertFalse(tabbed.closed)
+
+    controller.closePane(nil)
+
+    XCTAssertEqual(controller.paneIDs.count, 1)
+    XCTAssertTrue(tabbed.closed)
+    XCTAssertEqual(tabbed.tabsClosed, 1)
+  }
+
+  /// Catches a close item that reads Close Pane while Cmd-W would close only a tab.
+  func testTheCloseItemNamesWhatItCloses() throws {
+    let controller = try makeController()
+    let item = NSMenuItem(
+      title: "Close Pane", action: #selector(MainWindowController.closePane(_:)), keyEquivalent: "w"
+    )
+
+    XCTAssertTrue(controller.validateMenuItem(item))
+    XCTAssertEqual(item.title, "Close Pane")
+
+    made[0].tabCount = 2
+    XCTAssertTrue(controller.validateMenuItem(item))
+    XCTAssertEqual(item.title, "Close Tab")
+  }
+
+  /// Catches New Tab that opens a tab in an applet that cannot, as program mode cannot. The item
+  /// is disabled for it and the action does nothing. It is live for an applet that can.
+  func testNewTabNeedsAnAppletThatCanOpenOne() throws {
+    let controller = try makeController()
+    let item = NSMenuItem(
+      title: "New Tab", action: #selector(MainWindowController.newTab(_:)), keyEquivalent: "t")
+
+    XCTAssertFalse(controller.validateMenuItem(item))
+    controller.newTab(nil)
+    XCTAssertEqual(made[0].openedTabs, 0)
+
+    made[0].canOpenTab = true
+    XCTAssertTrue(controller.validateMenuItem(item))
+    controller.newTab(nil)
+    XCTAssertEqual(made[0].openedTabs, 1)
+    XCTAssertEqual(made[0].tabCount, 2)
+  }
+
+  /// Catches tab stepping that stops at the ends, and numbers that miss their tab. Three tabs with
+  /// the last selected: next wraps to the first, previous wraps back to the last. Cmd-2 selects the
+  /// second, Cmd-9 selects the last, and Cmd-5 with three tabs changes nothing.
+  func testTabStepsWrapAndNumbersSelectByPosition() throws {
+    let controller = try makeController()
+    let applet = made[0]
+    applet.tabCount = 3
+    applet.selectedTabIndex = 2
+
+    controller.selectNextTab(nil)
+    XCTAssertEqual(applet.selectedTabIndex, 0)
+
+    controller.selectPreviousTab(nil)
+    XCTAssertEqual(applet.selectedTabIndex, 2)
+
+    func number(_ tag: Int) {
+      let item = NSMenuItem(title: "x", action: nil, keyEquivalent: "")
+      item.tag = tag
+      controller.selectTabByNumber(item)
+    }
+
+    number(2)
+    XCTAssertEqual(applet.selectedTabIndex, 1)
+
+    number(9)
+    XCTAssertEqual(applet.selectedTabIndex, 2)
+
+    number(1)
+    number(5)
+    XCTAssertEqual(applet.selectedTabIndex, 0)
+  }
+
+  /// Catches tab switching items that are live with one tab, or under a sheet.
+  func testTabSwitchingItemsNeedSeveralTabs() throws {
+    let controller = try makeController()
+    let actions: [Selector] = [
+      #selector(MainWindowController.selectNextTab(_:)),
+      #selector(MainWindowController.selectPreviousTab(_:)),
+      #selector(MainWindowController.selectTabByNumber(_:)),
+    ]
+
+    for action in actions {
+      XCTAssertFalse(
+        controller.validateMenuItem(NSMenuItem(title: "x", action: action, keyEquivalent: "")))
+    }
+
+    made[0].tabCount = 2
+
+    for action in actions {
+      XCTAssertTrue(
+        controller.validateMenuItem(NSMenuItem(title: "x", action: action, keyEquivalent: "")))
+    }
   }
 
   // MARK: Focus and dividers

@@ -58,8 +58,8 @@ final class TerminalUITests: UnitermUITestCase {
   }
 
   /// Catches Ghostty's built-in bindings catching keys before uniterm. With the terminal focused,
-  /// Cmd-T and Cmd-Z reach uniterm's menu and answer with a status message. Cmd-D and Cmd-Shift-D
-  /// reach it too, and each opens the new-pane sheet.
+  /// Cmd-T opens a tab, which shows the tab bar, and Cmd-Z reaches uniterm's menu and answers with
+  /// a status message. Cmd-D and Cmd-Shift-D reach it too, and each opens the new-pane sheet.
   func testCommandKeysReachUnitermWhileTheTerminalIsFocused() {
     let app = launchApp()
     let window = app.windows["main-window"]
@@ -67,7 +67,9 @@ final class TerminalUITests: UnitermUITestCase {
     let message = window.staticTexts["status-message"]
 
     app.typeKey("t", modifierFlags: .command)
-    XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("Tabs are not available yet.") })
+    XCTAssertTrue(
+      app.descendants(matching: .any)["tab-1"].waitForExistence(timeout: 10),
+      "Cmd-T never opened a tab")
 
     app.typeKey("d", modifierFlags: .command)
     XCTAssertTrue(

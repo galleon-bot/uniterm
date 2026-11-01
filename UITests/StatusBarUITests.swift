@@ -58,10 +58,9 @@ final class StatusBarUITests: UnitermUITestCase {
     _ = waitForTerminal(in: app)
     let message = window.staticTexts["status-message"]
 
-    app.typeKey("t", modifierFlags: .command)
-    XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("Tabs are not available yet.") })
     app.typeKey("z", modifierFlags: .command)
-    XCTAssertTrue(waitFor(message, timeout: 10) { $0.contains("no closed pane to undo") })
+    XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("no closed pane to undo") })
+    app.typeKey("z", modifierFlags: .command)
 
     let bar = window.groups["status-bar"]
     bar.click()
@@ -73,7 +72,8 @@ final class StatusBarUITests: UnitermUITestCase {
       rows.element(boundBy: 0).value as? String,
       "info  uniterm: There is no closed pane to undo yet.")
     XCTAssertEqual(
-      rows.element(boundBy: 1).value as? String, "info  uniterm: Tabs are not available yet.")
+      rows.element(boundBy: 1).value as? String,
+      "info  uniterm: There is no closed pane to undo yet.")
 
     bar.click()
     XCTAssertTrue(waitForGone(rows.firstMatch), "a second click left the history open")

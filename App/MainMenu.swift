@@ -3,9 +3,9 @@ import TerminalSurface
 import WindowKit
 
 /// uniterm's menu. It owns every key binding. A focused terminal never keeps a key for itself:
-/// Cmd-Z, Cmd-W, Cmd-T, Cmd-D, Cmd-Shift-D, Cmd-[ and Cmd-], Cmd-Option-arrows, and Cmd-Q reach
-/// these items first. Items with a nil target find their receiver on the responder chain, from the
-/// focused terminal up to the window controller.
+/// Cmd-Z, Cmd-W, Cmd-T, Cmd-1 to Cmd-9, Cmd-Shift-[ and Cmd-Shift-], Cmd-D, Cmd-Shift-D, Cmd-[ and
+/// Cmd-], Cmd-Option-arrows, and Cmd-Q reach these items first. Items with a nil target find their
+/// receiver on the responder chain, from the focused terminal up to the window controller.
 @MainActor
 enum MainMenu {
   static func make(target: AppDelegate) -> NSMenu {
@@ -56,6 +56,7 @@ enum MainMenu {
     splitDown.keyEquivalentModifierMask = [.command, .shift]
     menu.addItem(splitDown)
     menu.addItem(.separator())
+    // The title reads Close Tab while the focused applet has several tabs.
     menu.addItem(
       withTitle: "Close Pane", action: #selector(MainWindowController.closePane(_:)),
       keyEquivalent: "w")
@@ -127,6 +128,31 @@ enum MainMenu {
 
     menu.addItem(
       withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+    menu.addItem(.separator())
+
+    // With Shift held, a bracket key produces the brace, so the key equivalent is the brace and
+    // the mask names Shift too.
+    let nextTab = NSMenuItem(
+      title: "Select Next Tab", action: #selector(MainWindowController.selectNextTab(_:)),
+      keyEquivalent: "}")
+    nextTab.keyEquivalentModifierMask = [.command, .shift]
+    menu.addItem(nextTab)
+
+    let previousTab = NSMenuItem(
+      title: "Select Previous Tab", action: #selector(MainWindowController.selectPreviousTab(_:)),
+      keyEquivalent: "{")
+    previousTab.keyEquivalentModifierMask = [.command, .shift]
+    menu.addItem(previousTab)
+
+    for number in 1...9 {
+      let item = NSMenuItem(
+        title: number == 9 ? "Select Last Tab" : "Select Tab \(number)",
+        action: #selector(MainWindowController.selectTabByNumber(_:)),
+        keyEquivalent: String(number))
+      item.tag = number
+      menu.addItem(item)
+    }
+
     menu.addItem(.separator())
     menu.addItem(
       withTitle: "Focus Next Pane", action: #selector(MainWindowController.focusNextPane(_:)),

@@ -10,7 +10,8 @@ The run is in progress. See the run state below.
 
 ## Run state
 
-- Base commit for the run and for the row: "Schedule UTERM-001 M1-M9 as the first queue row"
+- Base commit for the run and for the row: "Merge pull request #2 from space-armada/agent/uterm-spec/accept". The
+  branch was rebased onto it after M4, and the tree was unchanged.
 - Specs commits: the specs live in the code repo, so the milestone commits are the specs commits
 
 | Milestone | Run status | Commit |
@@ -19,7 +20,7 @@ The run is in progress. See the run state below.
 | M2 Terminal applet in a single pane | DONE | "Add the terminal applet behind a libghostty surface protocol" |
 | M3 Pane tree | DONE | "Add the normalized pane tree with splits, dividers, and focus" |
 | M4 Status bar region | DONE | "Add the status bar region with docking, segments, and message history" |
-| M5 Terminal tabs and program mode | QUEUED | |
+| M5 Terminal tabs and program mode | DONE | "Add terminal tabs and program mode" |
 | M6 Multiple windows | QUEUED | |
 | M7 Undo close pane | QUEUED | |
 | M8 Layout persistence | QUEUED | |
@@ -284,6 +285,66 @@ Process note: the implementer waited 15 minutes on cg's allowlist for `xcrun xcr
 `.cg.yaml`, and later added `codesign -d` and `plutil -p`.
 
 Test cost: `swift test` takes 10.5 s of test time for 191 tests. The UI suite takes 187 s for 26 tests.
+
+### M5: Terminal tabs and program mode
+
+Commit: "Add terminal tabs and program mode".
+
+Checks:
+- The implementer ran `make fmt-check`, `make lint`, `make check`, `make build`, a build of the UI test target, and
+  `make test-package`, and all passed.
+- The coordinator reran `make test-package` independently: 220 tests, 0 failures, and the same 4 US-layout skips.
+- The coordinator ran the UI suite once: 31 tests, 0 failures, 231 s. The review fixes that followed changed only
+  comments, the proposal, and package tests.
+- `proposals.py check` and `proposals.py freeze` both print `[]`.
+- The implementer mutation-checked 9 behaviors: the ssh TERM match, Cmd-W taking a tab first, closing the selected tab,
+  the guard both ways, the tab bar at one tab, program mode with no new tab, the inert program description, and the
+  any-tab running rule. Each mutation failed a named test.
+
+Restarts: three implementers worked on M5.
+- The first sat 50 minutes on a cg prompt for `pgrep`, which was not on the allowlist. The coordinator stopped it after
+  its code was written and before its checks ran.
+- The second sat 30 minutes on a cg prompt for a mutation script in the scratchpad. The coordinator stopped it after
+  every local check had passed.
+- The third was briefed with the exact list of allowed commands. It finished the mutation checks and the proposal.
+- The coordinator confirmed that neither stop left a mutated source file or stray processes.
+
+Best guesses from the implementers:
+- A program-mode command is split shell-word style on quotes and backslashes. Unquoted shell syntax is refused with a
+  message, and so is `$` or a backtick inside double quotes, a leading `~` or `#`, and newlines. libghostty runs the
+  command through `/bin/sh -c`, so every word is single-quoted. The shell never interprets the user's text.
+- Program mode keeps `TERM=xterm-ghostty`, except when the executable's basename is exactly `ssh`.
+- New tabs open after the selected tab, in its last directory. The keys are Cmd-T, Cmd-Shift-] and Cmd-Shift-[ with
+  wrap, and Cmd-1 to Cmd-9, where Cmd-9 selects the last tab. The Cmd-W item reads "Close Tab" while a pane has more
+  than one tab.
+- A `TabbedApplet` protocol lets the window route tab keys. `Applet.apply(palette)` has a default no-op. AppletKit now
+  depends on Theme.
+- Program-mode restore is still refused. M7 builds the Run action.
+- The tab-close dialog names a program-mode tab by its command, capped at 80 characters.
+
+Deviations: M5's last-tab check said "a dialog when it would close the window". That dialog belongs to M7's window-close
+guard, so the check was amended in place.
+
+Review findings:
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | The Decision Log said M8 owns the Run action | Fixed to M7 |
+| 2 | As built said a background tab's events never reach the host | Wording narrowed. Notifications and clipboard reads still post, as intended |
+| 3 | "Without a shell" was inaccurate | Reworded everywhere |
+| 4 | Two fixed 300 ms negative waits | One replaced with a deterministic signal. One kept, with the reason in a comment |
+| 5 | Test comment scope and a comment wrap | Fixed |
+
+The reviewer found no injection in program-mode quoting. `it's;*` and `$HOME` reach the program verbatim through real
+libghostty.
+
+adr-impact: no conflicts. Both of the implementer's candidates fail the ADR bar. The tab-wide running-state rule was
+folded into the existing applet-contract candidate.
+
+Checks left to the user: the tab bar's look, and one real program-mode ssh session to a host without the
+`xterm-ghostty` terminfo entry.
+
+Test cost: `swift test` takes 10.8 s of test time for 220 tests. The UI suite takes 231 s for 31 tests.
 
 ## Status
 

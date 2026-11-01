@@ -1,5 +1,6 @@
 import AppKit
 import StatusKit
+import Theme
 
 /// One slot an applet fills in the status bar, such as a mode or a line and column.
 public struct AppletSegment: Sendable, Equatable {
@@ -86,4 +87,33 @@ public protocol Applet: AnyObject {
   func focus()
 
   func describe() -> AppletDescription
+
+  /// Tells the applet the palette to draw its own chrome with. The host calls it when the applet
+  /// is installed and whenever the palette changes.
+  func apply(_ palette: ThemePalette)
+}
+
+extension Applet {
+  public func apply(_ palette: ThemePalette) {}
+}
+
+/// An applet that holds several tabs. The host routes the tab menu items and Cmd-W to it.
+///
+/// Closing the last tab is not a tab close. It is a pane close, which the host owns.
+@MainActor
+public protocol TabbedApplet: Applet {
+  var tabCount: Int { get }
+  var selectedTabIndex: Int { get }
+
+  /// False in a mode that runs one program in one tab.
+  var canOpenTab: Bool { get }
+
+  func openTab()
+
+  /// Selects a tab. An index outside the tabs does nothing.
+  func selectTab(at index: Int)
+
+  /// Closes the selected tab, after asking when it is running something. Returns false when the
+  /// user declined, or when the applet has only one tab.
+  func closeSelectedTab() async -> Bool
 }

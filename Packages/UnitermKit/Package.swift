@@ -31,7 +31,7 @@ let package = Package(
     .target(name: "Theme"),
     .target(name: "Preferences"),
     .target(name: "StatusKit"),
-    .target(name: "AppletKit", dependencies: ["StatusKit"]),
+    .target(name: "AppletKit", dependencies: ["StatusKit", "Theme"]),
     .target(name: "PaneModel"),
     .target(
       name: "WindowKit",

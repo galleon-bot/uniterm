@@ -6,11 +6,35 @@ public struct TerminalLaunch: Sendable, Equatable {
   public var workingDirectory: String?
   public var environment: [String: String]
 
+  /// The program and its arguments, or nil for the user's login shell. libghostty starts a program
+  /// through `/bin/sh -c` with every word single-quoted, so no shell interprets the user's text.
+  /// Shell integration never wraps it.
+  public var program: [String]?
+
   /// Starts the user's default login shell, from `$SHELL` or the passwd entry.
   public static func loginShell(
     workingDirectory: String? = nil, environment: [String: String] = [:]
   ) -> TerminalLaunch {
-    TerminalLaunch(workingDirectory: workingDirectory, environment: environment)
+    TerminalLaunch(workingDirectory: workingDirectory, environment: environment, program: nil)
+  }
+
+  /// Starts one program. The words are the program and its arguments, exactly as given.
+  ///
+  /// A program that is `ssh`, by name or by path, gets `TERM=xterm-256color`. Ghostty's `ssh-env`
+  /// fallback lives in the shell integration, which a program launch bypasses. A host without the
+  /// `xterm-ghostty` terminfo entry would otherwise break the remote session. Other routes to a
+  /// remote host, such as `mosh` or a wrapper script, are not covered.
+  public static func program(
+    _ words: [String], workingDirectory: String? = nil, environment: [String: String] = [:]
+  ) -> TerminalLaunch {
+    var environment = environment
+
+    if let name = words.first.map({ ($0 as NSString).lastPathComponent }), name == "ssh" {
+      environment["TERM"] = "xterm-256color"
+    }
+
+    return TerminalLaunch(
+      workingDirectory: workingDirectory, environment: environment, program: words)
   }
 }
 

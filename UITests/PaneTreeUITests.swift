@@ -199,8 +199,7 @@ final class PaneTreeUITests: UnitermUITestCase {
 
   /// Catches a picker that offers no program mode: the sheet lists the terminal in shell mode and
   /// in program mode, the command field appears only for program mode, and Open stays disabled
-  /// until a command is typed. Program mode is not available yet, so opening it adds no pane and
-  /// says so in the status bar.
+  /// until a command is typed. Opening it adds a pane that runs the program.
   func testThePickerOffersProgramModeWithACommand() {
     let app = launchApp()
     let window = app.windows["main-window"]
@@ -221,14 +220,14 @@ final class PaneTreeUITests: UnitermUITestCase {
     XCTAssertFalse(sheet.buttons["Open"].isEnabled)
 
     field.click()
-    field.typeText("htop")
+    field.typeText("sh -c \"echo PR:42:; cat\"")
     XCTAssertTrue(sheet.buttons["Open"].isEnabled)
 
     sheet.buttons["Open"].click()
 
-    let message = window.staticTexts["status-message"]
-    XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("Program mode is not available") })
-    XCTAssertFalse(window.groups["pane-2"].exists)
+    let pane = window.groups["pane-2"]
+    XCTAssertTrue(pane.waitForExistence(timeout: 20), "program mode opened no pane")
+    XCTAssertTrue(waitFor(pane.textViews["terminal"], timeout: 40) { $0.contains("PR:42:") })
   }
 
   /// Catches a Cancel that still opens a pane.

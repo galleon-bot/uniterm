@@ -233,9 +233,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     case #selector(splitRight(_:)), #selector(splitDown(_:)),
       #selector(focusNextPane(_:)), #selector(focusPreviousPane(_:)),
       #selector(focusPaneLeft(_:)), #selector(focusPaneRight(_:)),
-      #selector(focusPaneUp(_:)), #selector(focusPaneDown(_:)),
-      #selector(closePane(_:)):
+      #selector(focusPaneUp(_:)), #selector(focusPaneDown(_:)):
       return paneActionsEnabled
+
+    case #selector(closePane(_:)):
+      item.title = (focusedTabbedApplet?.tabCount ?? 1) > 1 ? "Close Tab" : "Close Pane"
+      return paneActionsEnabled
+
+    case #selector(newTab(_:)):
+      return paneActionsEnabled && focusedTabbedApplet?.canOpenTab == true
+
+    case #selector(selectNextTab(_:)), #selector(selectPreviousTab(_:)),
+      #selector(selectTabByNumber(_:)):
+      return paneActionsEnabled && (focusedTabbedApplet?.tabCount ?? 1) > 1
 
     case #selector(toggleMessageHistory(_:)):
       item.title = historyVisible ? "Hide Message History" : "Show Message History"
@@ -293,8 +303,42 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   // MARK: Menu actions
 
+  /// The focused pane's applet when it holds tabs.
+  private var focusedTabbedApplet: (any TabbedApplet)? {
+    paneArea.applet(for: paneArea.focusedPane) as? any TabbedApplet
+  }
+
+  /// Opens a tab in the focused pane's applet. A program-mode terminal has one tab, so the item is
+  /// disabled there.
   @objc public func newTab(_ sender: Any?) {
-    statusCenter.post(level: .info, source: .uniterm, text: "Tabs are not available yet.")
+    guard paneActionsEnabled, let applet = focusedTabbedApplet, applet.canOpenTab else { return }
+
+    applet.openTab()
+  }
+
+  @objc public func selectNextTab(_ sender: Any?) {
+    stepTab(by: 1)
+  }
+
+  @objc public func selectPreviousTab(_ sender: Any?) {
+    stepTab(by: -1)
+  }
+
+  /// Selects the tab numbered by the sender's tag, counting from 1. Tag 9 selects the last tab,
+  /// as Terminal and Ghostty do.
+  @objc public func selectTabByNumber(_ sender: Any?) {
+    guard paneActionsEnabled, let applet = focusedTabbedApplet,
+      let number = (sender as? NSMenuItem)?.tag, number > 0
+    else { return }
+
+    applet.selectTab(at: number == 9 ? applet.tabCount - 1 : number - 1)
+  }
+
+  private func stepTab(by step: Int) {
+    guard paneActionsEnabled, let applet = focusedTabbedApplet, applet.tabCount > 1 else { return }
+
+    let count = applet.tabCount
+    applet.selectTab(at: (applet.selectedTabIndex + step + count) % count)
   }
 
   @objc public func splitRight(_ sender: Any?) {
@@ -357,9 +401,18 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     statusCenter.post(level: .info, source: .uniterm, text: "There is no closed pane to undo yet.")
   }
 
-  /// Closes the focused pane. With one pane left, the window closes too.
+  /// Closes the focused pane's selected tab when its applet has several. Otherwise it closes the
+  /// pane, and with one pane left the window closes too.
+  ///
+  /// A tab running something asks first, and the applet does the asking. A pane close asks nothing
+  /// here, since the pane, window, and quit guards come with undo.
   @objc public func closePane(_ sender: Any?) {
     guard paneActionsEnabled else { return }
+
+    if let applet = focusedTabbedApplet, applet.tabCount > 1 {
+      Task { @MainActor in _ = await applet.closeSelectedTab() }
+      return
+    }
 
     closePane(paneArea.focusedPane, appletEnded: false)
   }
