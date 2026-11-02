@@ -129,7 +129,9 @@ final class StatusBarContentTests: XCTestCase {
 
   /// Catches a dock edge that does not follow the setting.
   func testTheDockEdgeFollowsTheSetting() {
-    XCTAssertEqual(DockEdge(.top), .top)
-    XCTAssertEqual(DockEdge(.bottom), .bottom)
+    XCTAssertEqual(DockEdge(StatusBarPosition.top), .top)
+    XCTAssertEqual(DockEdge(StatusBarPosition.bottom), .bottom)
+    XCTAssertEqual(DockEdge(PaletteDockEdge.top), .top)
+    XCTAssertEqual(DockEdge(PaletteDockEdge.bottom), .bottom)
   }
 }

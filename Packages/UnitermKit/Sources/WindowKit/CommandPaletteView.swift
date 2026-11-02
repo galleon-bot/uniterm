@@ -1,12 +1,16 @@
 import AppKit
 import Theme
 
-/// The floating command palette: a search field over a list of results. It floats over the pane
-/// area, so showing it never resizes a pane.
+/// The command palette's search field and the list of results under it.
 ///
-/// The view holds no commands. The window gives it entries and learns what the user chose. The
-/// keyboard always belongs to the field. The arrow keys, Return, and Escape reach the list through
-/// the field's delegate, and a click on a row never takes the keyboard from the field.
+/// This view is the field. The results live in a separate panel that the window places beside it,
+/// over the pane area. A floating palette and a docked one share both. The field sits in the window
+/// either way, and the panel opens away from it, so showing results never resizes a pane.
+///
+/// The view holds no commands. The window gives it entries and learns what the user chose. While
+/// active, the keyboard belongs to the field. The arrow keys, Return, and Escape reach the list
+/// through the field's delegate, and a click on a row never takes the keyboard from the field. An
+/// inactive docked palette takes no keyboard at all. A click on it asks the window to activate it.
 @MainActor
 final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource,
   NSTableViewDelegate
@@ -16,13 +20,28 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
   static let fieldHeight: CGFloat = 40
   static let maximumVisibleRows = 8
 
-  let field = NSTextField()
+  /// How the window presents the palette. A floating palette is hidden until it is active. A docked
+  /// one is always on show.
+  enum Presentation {
+    case floating
+    case docked
+  }
 
-  private let scroll = NSScrollView()
+  let field = PaletteField()
+
+  /// The results, in a view of their own so a docked palette can open them over the panes.
+  let results = PaletteResultsPanel()
+
   private let table = PaletteTableView()
-  private let divider = NSView()
   private var palette: ThemePalette = .latte
-  private var heightConstraint: NSLayoutConstraint?
+  private var resultsHeight: NSLayoutConstraint?
+
+  private(set) var presentation: Presentation = .floating
+  private(set) var isActive = false
+
+  /// The key equivalent of the menu item that activates the palette, spelled for a person. A docked
+  /// palette names it in its placeholder while it is inactive.
+  private(set) var hotkeyHint: String?
 
   /// The entries on show, best first.
   private(set) var entries: [PaletteEntry] = []
@@ -40,6 +59,9 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
   /// Runs when the user asks to hide the palette with Escape.
   var onDismiss: (() -> Void)?
 
+  /// Runs when the user clicks an inactive docked palette.
+  var onActivate: (() -> Void)?
+
   var query: String { field.stringValue }
 
   override var isFlipped: Bool { true }
@@ -55,7 +77,6 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     layer?.cornerRadius = 10
     layer?.borderWidth = 1
 
-    field.placeholderString = "Search commands"
     field.font = .systemFont(ofSize: 15)
     field.isBordered = false
     field.drawsBackground = false
@@ -63,11 +84,8 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     field.delegate = self
     field.translatesAutoresizingMaskIntoConstraints = false
     field.setAccessibilityIdentifier("command-palette-field")
+    field.onInactiveClick = { [weak self] in self?.onActivate?() }
     addSubview(field)
-
-    divider.wantsLayer = true
-    divider.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(divider)
 
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("entry"))
     column.resizingMask = .autoresizingMask
@@ -84,37 +102,86 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     table.action = #selector(rowClicked(_:))
     table.setAccessibilityIdentifier("command-palette-list")
 
-    scroll.documentView = table
-    scroll.hasVerticalScroller = true
-    scroll.drawsBackground = false
-    scroll.borderType = .noBorder
-    scroll.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(scroll)
+    results.install(table)
+    results.translatesAutoresizingMaskIntoConstraints = false
 
-    let height = heightAnchor.constraint(equalToConstant: Self.fieldHeight)
-    heightConstraint = height
+    // The panel's height is a preference. The window bounds it to the content area.
+    let height = results.heightAnchor.constraint(equalToConstant: 0)
+    height.priority = .defaultHigh
+    height.isActive = true
+    resultsHeight = height
 
     NSLayoutConstraint.activate([
-      height,
-      field.topAnchor.constraint(equalTo: topAnchor),
+      field.centerYAnchor.constraint(equalTo: centerYAnchor),
       field.heightAnchor.constraint(equalToConstant: Self.fieldHeight),
       field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
       field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-      divider.topAnchor.constraint(equalTo: field.bottomAnchor),
-      divider.heightAnchor.constraint(equalToConstant: 1),
-      divider.leadingAnchor.constraint(equalTo: leadingAnchor),
-      divider.trailingAnchor.constraint(equalTo: trailingAnchor),
-      scroll.topAnchor.constraint(equalTo: divider.bottomAnchor),
-      scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
-      scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-      scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
     ])
 
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityIdentifier("command-palette")
-    isHidden = true
+    updatePresentation()
   }
+
+  // MARK: Presentation
+
+  /// Chooses floating or docked. The caller keeps the palette inactive across the change.
+  func present(as presentation: Presentation) {
+    self.presentation = presentation
+    updatePresentation()
+  }
+
+  /// Activates the palette, or deactivates it. An active palette takes the keyboard and shows its
+  /// results. An inactive floating palette is hidden, and an inactive docked one shows its
+  /// placeholder.
+  func setActive(_ active: Bool) {
+    isActive = active
+    updatePresentation()
+  }
+
+  func setHotkeyHint(_ hint: String?) {
+    guard hint != hotkeyHint else { return }
+
+    hotkeyHint = hint
+    updatePresentation()
+  }
+
+  private func updatePresentation() {
+    isHidden = presentation == .floating && !isActive
+    field.acceptsKeyboard = presentation == .floating || isActive
+    results.isHidden = !isActive || entries.isEmpty
+
+    field.placeholderString = Self.placeholder(
+      presentation: presentation, isActive: isActive, hint: hotkeyHint)
+  }
+
+  /// What the field says when it is empty. An inactive docked palette is the only place the user
+  /// is told how to reach it, so it names the key.
+  static func placeholder(presentation: Presentation, isActive: Bool, hint: String?) -> String {
+    guard presentation == .docked, !isActive else { return "Search commands" }
+
+    guard let hint else { return "Search tabs and commands" }
+
+    return "Search tabs and commands (\(hint))"
+  }
+
+  /// Whether a point, in window coordinates, is on the field or on the results.
+  func contains(windowPoint point: NSPoint) -> Bool {
+    if bounds.contains(convert(point, from: nil)) { return true }
+
+    return !results.isHidden && results.bounds.contains(results.convert(point, from: nil))
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    if isActive {
+      super.mouseDown(with: event)
+    } else {
+      onActivate?()
+    }
+  }
+
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) {
@@ -124,13 +191,13 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
   override func updateLayer() {
     layer?.backgroundColor = palette[.mantle].cgColor
     layer?.borderColor = palette[.surface1].cgColor
-    divider.layer?.backgroundColor = palette[.surface1].cgColor
   }
 
   func apply(_ palette: ThemePalette) {
     self.palette = palette
     field.textColor = palette[.text].nsColor
     needsDisplay = true
+    results.apply(palette)
     table.reloadData()
   }
 
@@ -151,10 +218,8 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     }
 
     let rows = min(entries.count, Self.maximumVisibleRows)
-    heightConstraint?.constant =
-      Self.fieldHeight + CGFloat(rows) * Self.rowHeight + (rows > 0 ? 1 : 0)
-    scroll.isHidden = entries.isEmpty
-    divider.isHidden = entries.isEmpty
+    resultsHeight?.constant = CGFloat(rows) * Self.rowHeight
+    results.isHidden = !isActive || entries.isEmpty
 
     table.reloadData()
     scrollToSelection()
@@ -175,6 +240,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     field.stringValue = ""
     selection = nil
     entries = []
+    results.isHidden = true
     table.reloadData()
   }
 
@@ -257,6 +323,85 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     let view = PaletteRowView()
     view.configure(entries[row], selected: entries[row].id == selection, palette: palette)
     return view
+  }
+}
+
+/// The search field. An inactive docked palette must not take the keyboard, not even from a click.
+/// The click asks the window to activate the palette instead.
+@MainActor
+final class PaletteField: NSTextField {
+  var acceptsKeyboard = true
+  var onInactiveClick: (() -> Void)?
+
+  override var acceptsFirstResponder: Bool { acceptsKeyboard && super.acceptsFirstResponder }
+
+  override func mouseDown(with event: NSEvent) {
+    if acceptsKeyboard {
+      super.mouseDown(with: event)
+    } else {
+      onInactiveClick?()
+    }
+  }
+
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// The results list. It is a card of its own, placed beside the field and over the panes.
+@MainActor
+final class PaletteResultsPanel: NSView {
+  private let scroll = NSScrollView()
+  private var palette: ThemePalette = .latte
+
+  override var isFlipped: Bool { true }
+
+  override var wantsUpdateLayer: Bool { true }
+
+  override var mouseDownCanMoveWindow: Bool { false }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+
+    wantsLayer = true
+    layer?.cornerRadius = 10
+    layer?.borderWidth = 1
+    layer?.masksToBounds = true
+
+    scroll.hasVerticalScroller = true
+    scroll.drawsBackground = false
+    scroll.borderType = .noBorder
+    scroll.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(scroll)
+
+    NSLayoutConstraint.activate([
+      scroll.topAnchor.constraint(equalTo: topAnchor),
+      scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+      scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+      scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ])
+
+    setAccessibilityElement(true)
+    setAccessibilityRole(.group)
+    setAccessibilityIdentifier("command-palette-results")
+    isHidden = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  func install(_ table: NSTableView) {
+    scroll.documentView = table
+  }
+
+  func apply(_ palette: ThemePalette) {
+    self.palette = palette
+    needsDisplay = true
+  }
+
+  override func updateLayer() {
+    layer?.backgroundColor = palette[.mantle].cgColor
+    layer?.borderColor = palette[.surface1].cgColor
   }
 }
 

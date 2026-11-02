@@ -31,6 +31,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   let paneArea: PaneAreaView
   private let appearance: AppearanceController
   private let placement: StatusBarPlacement
+  private let palettePlacement: PalettePlacement
   private let makeApplet: AppletFactory
   private let restoreApplet: AppletRestorer
   private var appearanceToken: UUID?
@@ -126,6 +127,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     self.commands = commands
     ledger = CloseUndoLedger(policy: undoPolicy)
     placement = StatusBarPlacement(store: settings, statusCenter: statusCenter)
+    palettePlacement = PalettePlacement(store: settings, statusCenter: statusCenter)
 
     let panes = try restored.map { try PaneRestoration.restore($0, restorer: restoreApplet) }
 
@@ -136,7 +138,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
 
     contentController = MainContentViewController(
-      paneView: paneArea, statusBarEdge: DockEdge(placement.position))
+      paneView: paneArea, statusBarEdge: DockEdge(placement.position),
+      palette: palettePlacement.value)
 
     let window = MainWindow(
       contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
@@ -177,6 +180,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     recordFocusedTab()
     placement.onChange = { [weak self] position in
       self?.contentController.move(.statusBar, to: DockEdge(position))
+    }
+    palettePlacement.onChange = { [weak self] value in
+      self?.paletteSettingsDidChange(to: value)
     }
     updateMinimumSize()
 

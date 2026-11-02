@@ -20,8 +20,8 @@ In progress.
 |-----------|------------|--------|
 | UTERM-002 M1 Floating palette with commands | DONE | "Add a command registry and a floating command palette" |
 | UTERM-002 M2 Tab search | DONE | "Let the command palette find every tab in the window" |
-| UTERM-002 M3 Docked mode | IN PROGRESS | |
-| UTERM-002 row review | QUEUED | |
+| UTERM-002 M3 Docked mode | DONE | "Let the command palette dock at the top or bottom of the window" |
+| UTERM-002 row review | IN PROGRESS | |
 | UTERM-013 M1 Applet-declared shortcuts | QUEUED | |
 | UTERM-013 M2 Reopen with Cmd-Shift-T | QUEUED | |
 | UTERM-013 row review | QUEUED | |
@@ -146,6 +146,48 @@ Review findings:
 
 ADR review: no conflicts. The two uncovered decisions it raised are one tab per applet and never-reused tab IDs. That
 candidate was declined on 2026-11-01, so it is not recorded again.
+
+### UTERM-002 M3: Docked mode
+
+Commit: "Let the command palette dock at the top or bottom of the window".
+
+Checks: `make fmt-check`, `make lint`, and `make check` pass. `make test-app` ran 69 UI tests, with 0 failures, in 526
+seconds. The review fix round changed only key-name text, so it re-ran `make test-package` but not the UI tests.
+`make test-package` ran 496 tests, with 4 skipped and 0 failures. `proposals.py freeze` reports nothing. `proposals.py
+check` reports only the row-finishing steps that follow the row review.
+
+Test cost: the 7 new UI tests in `DockedPaletteUITests` take 4.5 to 8.6 seconds each. The new unit test files are
+negligible.
+
+Best guesses by the implementer:
+
+- When the palette and the status bar dock at the same edge, the status bar is outermost and the palette sits inward.
+  The order is fixed by role, whatever the install order.
+- The deactivating click goes to the view under it, including a mouse-reporting terminal. A UI test turns on mouse
+  reporting in a shell and sees the press arrive.
+- A mode or edge change while the palette is active deactivates it and returns focus to the prior pane.
+- The floating palette's results are now a separate card 4 points below the field, so both modes share one results
+  view. M1 drew one card with a divider.
+- Clicking the inactive strip outside its field does nothing, so the press that deactivates the palette cannot
+  reactivate it.
+- The message history panel now starts at the pane area's edge, not at the status bar. A palette on the bar's edge is
+  then not covered by it.
+- UI tests set the palette settings through a `settings:` launch helper that writes the isolated defaults before
+  launch.
+- "Default mode and dock edge" and "What an inactive docked palette shows" were amended, with a Decision Log entry.
+
+Residuals: the placeholder does not refresh for a remap made while the window is already key, until the next
+activation or key event. The history panel beside a palette on the bar's edge is untested for overlap. A split pane
+under the overlay is not covered.
+
+Review findings:
+
+- The placeholder showed a private-use glyph for F-keys, Home, End, and similar keys: traced, confirmed by tests that
+  failed on the unfixed code, and fixed. An unknown private-use key now leaves the hint out.
+- Constants listed in the As built block: dismissed, since the plan asked for chosen constants to be recorded.
+
+ADR review: no conflicts. The region order and the click delivery are mechanism inside one component and easy to
+reverse, so neither passes the ADR bar.
 
 ## Status
 

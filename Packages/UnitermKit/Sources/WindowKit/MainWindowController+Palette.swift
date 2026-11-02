@@ -17,10 +17,16 @@ extension MainWindowController {
     palette.onQueryChange = { [weak self] _ in self?.refreshCommandPalette() }
     palette.onChoose = { [weak self] entry in self?.choose(entry) }
     palette.onDismiss = { [weak self] in self?.hideCommandPalette(restoringFocus: true) }
+    palette.onActivate = { [weak self] in self?.showCommandPalette() }
+    refreshPaletteHotkeyHint()
   }
 
-  /// Shows the palette and gives its field the keyboard. The pane that has focus now becomes the
-  /// target of every command the palette runs.
+  /// Activates the palette and gives its field the keyboard. A floating palette shows first. A
+  /// docked one is always on show and takes the keyboard only now. The pane that has focus now
+  /// becomes the target of every command the palette runs.
+  ///
+  /// The empty-query order is read here, after the focused tab is recorded, so it reflects
+  /// recency at this moment.
   func showCommandPalette() {
     guard !isPaletteVisible, paneActionsEnabled, let window else { return }
 
@@ -29,8 +35,8 @@ extension MainWindowController {
     paletteTarget = paneArea.focusedPane
     recordFocusedTab()
     palette.reset()
+    palette.setActive(true)
     refreshCommandPalette()
-    palette.isHidden = false
 
     window.makeFirstResponder(palette.field)
 
@@ -39,7 +45,8 @@ extension MainWindowController {
     (palette.field.currentEditor() as? NSTextView)?.allowsUndo = true
   }
 
-  /// Hides the palette. When `restoringFocus` is set, the keyboard returns to the pane that had it
+  /// Hides a floating palette, or deactivates a docked one. A docked palette stays on show with an
+  /// empty field. When `restoringFocus` is set, the keyboard returns to the pane that had it
   /// before the palette showed, or to the window's focused pane when that one is gone.
   ///
   /// The keyboard moves only when the palette still holds it. A sheet, the applet chooser, or a
@@ -51,13 +58,14 @@ extension MainWindowController {
     let holdsKeyboard = Self.holdsKeyboard(palette, in: window)
 
     paletteTarget = nil
-    palette.isHidden = true
 
     if holdsKeyboard {
       window.makeFirstResponder(nil)
     }
 
+    palette.setActive(false)
     palette.reset()
+    refreshPaletteHotkeyHint()
 
     guard restoringFocus, holdsKeyboard, window.attachedSheet == nil else { return }
 
@@ -201,7 +209,8 @@ extension MainWindowController {
       text: "\u{201C}\(title)\u{201D} has closed. The list is up to date now.")
   }
 
-  /// A mouse press outside the palette hides it, and the press then goes to what it hit. The
+  /// A mouse press outside the palette's field and results hides it, or deactivates a docked one.
+  /// The press then goes to what it hit, even a terminal that reports the mouse to its program. The
   /// window calls this before it handles the event.
   ///
   /// Returns whether the press hid the palette.
@@ -209,9 +218,8 @@ extension MainWindowController {
     guard isPaletteVisible, event.window === window else { return false }
 
     let palette = contentController.commandPalette
-    let point = palette.convert(event.locationInWindow, from: nil)
 
-    guard !palette.bounds.contains(point) else { return false }
+    guard !palette.contains(windowPoint: event.locationInWindow) else { return false }
 
     hideCommandPalette(restoringFocus: false)
     return true
@@ -225,5 +233,46 @@ extension MainWindowController {
     if window.firstResponder == nil || window.firstResponder === window {
       paneArea.focus(paneArea.focusedPane)
     }
+  }
+}
+
+// MARK: Docking
+
+extension MainWindowController {
+  /// Applies a changed mode or edge. An active palette deactivates first and returns the keyboard
+  /// to the pane that had it, so a switch never leaves the field holding a keyboard it was moved
+  /// out from under. The palette starts the new placement inactive.
+  func paletteSettingsDidChange(to value: PalettePlacement.Value) {
+    if isPaletteVisible {
+      hideCommandPalette(restoringFocus: true)
+    }
+
+    contentController.setPalette(value)
+    refreshPaletteHotkeyHint()
+  }
+
+  /// Reads the key of the "Show Command Palette" menu item as it is now, so a user's App Shortcuts
+  /// remap shows in the docked placeholder.
+  func refreshPaletteHotkeyHint() {
+    let item = Self.menuItem(for: #selector(toggleCommandPalette(_:)), in: NSApp.mainMenu)
+
+    contentController.commandPalette.setHotkeyHint(
+      item.flatMap {
+        KeyEquivalentText.spell(key: $0.keyEquivalent, modifiers: $0.keyEquivalentModifierMask)
+      })
+  }
+
+  private static func menuItem(for action: Selector, in menu: NSMenu?) -> NSMenuItem? {
+    for item in menu?.items ?? [] {
+      if item.action == action { return item }
+
+      if let found = menuItem(for: action, in: item.submenu) { return found }
+    }
+
+    return nil
+  }
+
+  public func windowDidBecomeKey(_ notification: Notification) {
+    refreshPaletteHotkeyHint()
   }
 }

@@ -223,12 +223,15 @@ some panes unreachable, against the Motivation.
 
 Original question: which mode is the default, and which edge a docked palette uses by default.
 
-Decision: floating by default. A docked palette defaults to the top edge. Mode and edge are two plain settings.
+Decision: floating by default. A docked palette defaults to the top edge. Mode and edge are two plain settings. When a
+docked palette and the status bar share an edge, the status bar is outermost, at the window edge, and the palette sits
+inward, next to the content. Amended 2026-11-02; see Decision Log.
 
 Rationale: floating costs no window space, and the write-up asks for as much space as possible. A top edge matches
 the palette and omnibox convention. Making the palette follow the status bar's edge would couple two settings and
-need a third "auto" value. M3's stacking order covers a palette and a status bar on the same edge, whatever the status
-bar's default is.
+need a third "auto" value. The stacking order covers a palette and a status bar on the same edge, whatever the status
+bar's default is. The palette sits inward so that its results open from the panes' edge and stay beside the panes they
+cover.
 
 ### What an inactive docked palette shows
 
@@ -237,7 +240,11 @@ A list that grows the region resizes the content area, which resizes every termi
 
 Decision: while inactive, a docked palette shows a one-line field whose placeholder names the hotkey. On activation,
 the results list appears as an overlay anchored to the field, drawn over the pane content. The content area keeps its
-size. A click outside the overlay deactivates the palette and focuses what was clicked.
+size. A click outside the field and the overlay deactivates the palette. The press is then delivered to the view under
+it, so a terminal that reports the mouse to its program receives it, and that view takes focus as it would for any
+click. A click on something that takes no focus returns focus to the pane that had it before activation. Switching the
+mode or the edge while the palette is active deactivates it and returns focus to that pane. Amended 2026-11-02; see
+Decision Log.
 
 Rationale: growing the region would resize every terminal on each activation and deactivation. vim redraws, shells
 reprint prompts, and scrollback reflows. It could also push panes below their minimum size. An overlay keeps search
@@ -421,7 +428,9 @@ combining marks.
 
 ### M3: Docked mode
 
-**Status:** NOT STARTED
+**Status:** DONE
+
+Amended 2026-11-02; see Decision Log.
 
 - The palette docks at the top or the bottom of the window
 - A docked palette does not take focus until the hotkey activates it
@@ -443,6 +452,61 @@ combining marks.
 - Switching mode while the palette is active leaves it in a defined state, with focus on the field or on the prior pane
 - The mode and dock position are settings in the Settings window, and an invalid value falls back to the default with
   a status bar warning
+
+**As built:**
+
+The field and the results are two views, and both modes use both. The field sits in the window: in a hidden card near
+the top of the pane area when floating, and in a strip against an edge when docked. The results are a card of their own,
+placed beside the field and above every other view in the window. They open away from the docked edge, and downward
+for a floating palette. A floating palette's results are now a separate card 4 points below the field. M1 drew them as
+one card with a divider. The search, the ranking, and the dispatch rules are the same objects in both modes, and a test
+pins that a docked and a floating palette list the same entries for the same text.
+
+A docked palette is a region of its own, with a new role, installed and moved through the same calls as the status bar.
+It leaves the window's region list when the mode is floating. Its strip is 48 points thick: the 40 point field with 6
+points on the window's side and 2 on the pane side. It counts toward the window's minimum size through the same sum as
+the status bar. The strip lies inside the safe area, below the title bar, so the traffic lights stay clear and a drag
+by the top edge still moves the window.
+
+On one edge the status bar is outermost and the palette sits inward, decided in the region stack and pinned for both
+edges and both install orders. The message history now starts at the pane area's edge rather than at the bar, so a
+palette on the bar's edge is not covered by it.
+
+An inactive docked field refuses the keyboard, even from a click, and a click on it or its card asks the window to
+activate. Activation reads the focused pane and its recency at that moment. Deactivation, by the hotkey, Escape, Cmd-W,
+or any other dismiss path, clears the text and returns the keyboard to the prior pane through the path M1 built for
+hiding. The strip outside the field takes no click while inactive. Making it a target would have reactivated the palette
+on the same press that deactivated it.
+
+The overlay is bounded by the pane area on its far side, so a short window shortens the list. It does not resize the
+pane area or any pane, which tests compare before and after activation.
+
+The deactivating click is delivered to the view under it. A UI test turns on mouse reporting in a shell and sees the
+press arrive. A unit test pins that the palette steps aside before the press is dispatched. A click on the status bar or
+another view that takes no keyboard returns the keyboard to the focused pane, by M1's path.
+
+A mode or edge change while the palette is active deactivates it and returns the keyboard to the prior pane. The change
+usually comes from the Settings window, so the field would otherwise hold a keyboard in a window that is not key. The
+new placement starts inactive.
+
+The placeholder of an inactive docked palette reads "Search tabs and commands" and then the menu item's key in
+parentheses, such as "(⇧⌘P)". It reads the live item in the main menu when the palette is placed, when it deactivates,
+and when its window becomes key. A remap that applies to the item shows from then on. An active palette reads "Search
+commands", as a floating one does. A menu item with no key leaves the parentheses out.
+
+Two settings, `paletteMode` and `paletteDockEdge`, take plain strings, so `defaults write` sets them. Each has a row in
+the Settings window. A value that is not one of the choices falls back to floating or to the top, and the window posts
+one warning for each. The stored text is not rewritten. A change from the Settings window or from outside the app moves
+every open window live.
+
+Constants: the field is 40 points tall and at most 560 wide, 16 points from each window side at the narrowest. A
+floating palette sits 12 points below the top of the pane area. The results sit 4 points from the field. The results
+keep M1's 8 rows of 28 points.
+
+Residuals: the placeholder is not refreshed when a remap changes while the window is already key, until the palette is
+next activated or the window is next key. A palette docked on the status bar's edge puts the history over the pane area
+and under the palette's results, which is untested for overlap. The UI tests cover the top and bottom edges, the live
+Settings switch, a remap, and a status bar click. A split pane under the overlay is not covered.
 
 ## Decision Log
 
@@ -527,6 +591,15 @@ combining marks.
   change re-list at once. The current tab is listed, and the empty-query first choice skips it. Tab recency is kept for
   the 64 most recent tabs. Titles and details are neutralized once, before matching, so what the user searches is what
   shows.
+- 2026-11-02: M3 best guesses (work-queue best guess). Amended "Default mode and dock edge" and "What an inactive docked
+  palette shows". The first said M3's stacking order covers a palette and a status bar on one edge, with no order. It now
+  puts the status bar outermost and the palette inward, next to the content, so the results open from the panes' edge.
+  The second said only that a click outside the overlay deactivates and focuses what was clicked. It now says the press
+  is delivered to the view under it, including a mouse-reporting terminal, that a click on something that takes no focus
+  returns focus to the prior pane, and that a mode or edge change while active deactivates the palette and returns focus
+  to the prior pane. The placeholder reads the menu item's live key. The results are a card of their own in both modes,
+  so a floating palette's results sit 4 points below the field instead of in one card with it. The palette's sizes and
+  insets are the implementation's and are recorded in M3's As built.
 
 ## References
 

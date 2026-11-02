@@ -15,19 +15,38 @@ final class MainContentViewController: NSViewController {
     var edge: DockEdge
   }
 
-  /// The palette's distance from the top of the pane area, and its smallest side margin.
+  /// A floating palette's distance from the top of the pane area, and the smallest side margin of
+  /// either kind.
   static let paletteTopInset: CGFloat = 12
   static let paletteMargin: CGFloat = 16
+
+  /// The gap between the palette's field and its results.
+  static let paletteResultsGap: CGFloat = 4
+
+  /// A docked palette's strip holds the field, with 6 points between the field and the window's
+  /// side of the strip and 2 on the pane side. The results open from the pane side.
+  static let dockedPaletteOuterInset: CGFloat = 6
+  static let dockedPaletteInnerInset: CGFloat = 2
+
+  static var dockedPaletteThickness: CGFloat {
+    dockedPaletteOuterInset + CommandPaletteView.fieldHeight + dockedPaletteInnerInset
+  }
 
   private let chrome = ChromeView()
   private let paneView: NSView
   private var docked: [Docked] = []
   private var regionConstraints: [NSLayoutConstraint] = []
   private let initialStatusBarEdge: DockEdge
+  private let initialPalette: PalettePlacement.Value
+  private var paletteConstraints: [NSLayoutConstraint] = []
 
   let statusBar = StatusBarView()
   let history = HistoryPanelView()
   let commandPalette = CommandPaletteView()
+  let paletteStrip = PaletteDockStrip()
+
+  /// Where the palette is now.
+  private(set) var palettePlacement: PalettePlacement.Value
 
   /// Runs after every layout pass, since the safe area that sets the window's minimum size can
   /// change with it.
@@ -39,9 +58,11 @@ final class MainContentViewController: NSViewController {
     chrome.safeAreaInsets.top + docked.reduce(0) { $0 + $1.thickness }
   }
 
-  init(paneView: NSView, statusBarEdge: DockEdge) {
+  init(paneView: NSView, statusBarEdge: DockEdge, palette: PalettePlacement.Value) {
     self.paneView = paneView
     initialStatusBarEdge = statusBarEdge
+    initialPalette = palette
+    palettePlacement = palette
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -65,28 +86,131 @@ final class MainContentViewController: NSViewController {
 
     install(statusBar, role: .statusBar, thickness: StatusBarView.height, at: initialStatusBarEdge)
 
-    // The palette is added last, so it draws above the panes and the status bar.
     commandPalette.translatesAutoresizingMaskIntoConstraints = false
-    chrome.addSubview(commandPalette)
-    NSLayoutConstraint.activate(paletteConstraints())
+    paletteStrip.translatesAutoresizingMaskIntoConstraints = false
+    chrome.addSubview(commandPalette.results)
+    setPalette(initialPalette)
   }
 
-  /// The palette floats near the top of the pane area, centered. It is never wider than its fixed
-  /// width, and it fills the window's width less a margin on each side when the window is narrower.
-  /// The fill is weak, so the palette never sets how small the window can get.
-  private func paletteConstraints() -> [NSLayoutConstraint] {
-    let guide = chrome.safeAreaLayoutGuide
-    let fill = commandPalette.widthAnchor.constraint(
-      equalTo: guide.widthAnchor, constant: -2 * Self.paletteMargin)
+  /// Puts the palette where `placement` says. A floating palette sits near the top of the pane
+  /// area. A docked one sits in a strip against an edge, and the strip counts toward the window's
+  /// minimum size like any docked region.
+  ///
+  /// The field and the results are the same views either way. Only where they sit changes.
+  func setPalette(_ placement: PalettePlacement.Value) {
+    NSLayoutConstraint.deactivate(paletteConstraints)
+    paletteConstraints = []
+    palettePlacement = placement
+
+    commandPalette.removeFromSuperview()
+
+    switch placement.mode {
+    case .floating:
+      uninstall(.commandPalette)
+      chrome.addSubview(commandPalette)
+
+    case .docked:
+      paletteStrip.addSubview(commandPalette)
+
+      if edge(of: .commandPalette) == nil {
+        install(
+          paletteStrip, role: .commandPalette, thickness: Self.dockedPaletteThickness,
+          at: placement.edge)
+      } else {
+        move(.commandPalette, to: placement.edge)
+      }
+    }
+
+    commandPalette.present(as: placement.mode == .floating ? .floating : .docked)
+
+    // The results draw above every region, and so above a strip that was installed after them.
+    chrome.addSubview(commandPalette.results, positioned: .above, relativeTo: nil)
+
+    paletteConstraints = fieldConstraints(for: placement) + resultsConstraints(for: placement)
+    NSLayoutConstraint.activate(paletteConstraints)
+    chrome.needsLayout = true
+  }
+
+  /// The field is never wider than its fixed width. It fills the window's width less a margin on
+  /// each side when the window is narrower. The fill is weak, so the palette never sets how small
+  /// the window can get.
+  private func fieldConstraints(for placement: PalettePlacement.Value) -> [NSLayoutConstraint] {
+    let palette = commandPalette
+    let height = palette.heightAnchor.constraint(equalToConstant: CommandPaletteView.fieldHeight)
+    let limit = palette.widthAnchor.constraint(lessThanOrEqualToConstant: CommandPaletteView.width)
+
+    let host: NSView
+    let fill: NSLayoutConstraint
+
+    switch placement.mode {
+    case .floating:
+      host = chrome
+      fill = palette.widthAnchor.constraint(
+        equalTo: chrome.safeAreaLayoutGuide.widthAnchor, constant: -2 * Self.paletteMargin)
+
+    case .docked:
+      host = paletteStrip
+      fill = palette.widthAnchor.constraint(
+        equalTo: paletteStrip.widthAnchor, constant: -2 * Self.paletteMargin)
+    }
+
     fill.priority = NSLayoutConstraint.Priority(10)
 
-    return [
-      commandPalette.widthAnchor.constraint(lessThanOrEqualToConstant: CommandPaletteView.width),
-      fill,
-      commandPalette.centerXAnchor.constraint(equalTo: guide.centerXAnchor),
-      commandPalette.topAnchor.constraint(
-        equalTo: paneView.topAnchor, constant: Self.paletteTopInset),
+    var constraints = [limit, fill, height]
+
+    switch placement.mode {
+    case .floating:
+      constraints += [
+        palette.centerXAnchor.constraint(equalTo: chrome.safeAreaLayoutGuide.centerXAnchor),
+        palette.topAnchor.constraint(equalTo: paneView.topAnchor, constant: Self.paletteTopInset),
+      ]
+
+    case .docked:
+      constraints.append(palette.centerXAnchor.constraint(equalTo: host.centerXAnchor))
+
+      switch placement.edge {
+      case .top:
+        constraints.append(
+          palette.topAnchor.constraint(
+            equalTo: host.topAnchor, constant: Self.dockedPaletteOuterInset))
+
+      case .bottom:
+        constraints.append(
+          palette.bottomAnchor.constraint(
+            equalTo: host.bottomAnchor, constant: -Self.dockedPaletteOuterInset))
+      }
+    }
+
+    return constraints
+  }
+
+  /// The results line up with the field and open away from the docked edge, down for a floating
+  /// palette. They never leave the pane area, so a short window shortens the list. Their height is
+  /// a preference that yields to that bound.
+  private func resultsConstraints(for placement: PalettePlacement.Value) -> [NSLayoutConstraint] {
+    let results = commandPalette.results
+    let palette = commandPalette
+
+    var constraints = [
+      results.leadingAnchor.constraint(equalTo: palette.leadingAnchor),
+      results.trailingAnchor.constraint(equalTo: palette.trailingAnchor),
     ]
+
+    if placement.mode == .docked, placement.edge == .bottom {
+      constraints += [
+        results.bottomAnchor.constraint(
+          equalTo: palette.topAnchor, constant: -Self.paletteResultsGap),
+        results.topAnchor.constraint(greaterThanOrEqualTo: paneView.topAnchor),
+      ]
+    } else {
+      constraints += [
+        results.topAnchor.constraint(
+          equalTo: palette.bottomAnchor, constant: Self.paletteResultsGap),
+        results.bottomAnchor.constraint(lessThanOrEqualTo: paneView.bottomAnchor),
+      ]
+    }
+
+    return constraints
   }
 
   override func viewDidLayout() {
@@ -122,6 +246,14 @@ final class MainContentViewController: NSViewController {
     guard let index = docked.firstIndex(where: { $0.role == role }) else { return }
 
     docked[index].edge = edge
+    layoutRegions()
+  }
+
+  /// Takes an installed region out of the window. Its view is kept for a later install.
+  func uninstall(_ role: RegionRole) {
+    guard let index = docked.firstIndex(where: { $0.role == role }) else { return }
+
+    docked.remove(at: index).view.removeFromSuperview()
     layoutRegions()
   }
 
@@ -164,14 +296,15 @@ final class MainContentViewController: NSViewController {
       history.heightAnchor.constraint(equalToConstant: HistoryPanelView.height),
     ]
 
-    // The history grows away from the status bar, over the pane area.
+    // The history grows away from the status bar, over the pane area. It starts at the pane area's
+    // edge, so a docked palette on the same edge is not covered by it.
     if let bar = docked.first(where: { $0.role == .statusBar }) {
       switch bar.edge {
       case .top:
-        regionConstraints.append(history.topAnchor.constraint(equalTo: bar.view.bottomAnchor))
+        regionConstraints.append(history.topAnchor.constraint(equalTo: paneView.topAnchor))
 
       case .bottom:
-        regionConstraints.append(history.bottomAnchor.constraint(equalTo: bar.view.topAnchor))
+        regionConstraints.append(history.bottomAnchor.constraint(equalTo: paneView.bottomAnchor))
       }
     }
 

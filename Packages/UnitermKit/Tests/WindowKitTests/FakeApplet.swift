@@ -117,7 +117,9 @@ final class FakeApplet: TabbedApplet, TextActionApplet {
   func close() { closed = true }
   func detach() { detachCount += 1 }
   func reattach() { reattachCount += 1 }
-  func focus() {}
+  var focusCount = 0
+
+  func focus() { focusCount += 1 }
 
   /// The palettes the host handed over, oldest first.
   var palettes: [ThemePalette] = []

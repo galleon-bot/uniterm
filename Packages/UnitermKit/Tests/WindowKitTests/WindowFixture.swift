@@ -74,10 +74,14 @@ final class WindowFixture {
   let log: AppletLog
   let controller: MainWindowController
 
-  init(storedPosition: String? = nil) throws {
+  init(storedPosition: String? = nil, stored: [String: String] = [:]) throws {
     let defaults = UserDefaults(suiteName: suite)!
     if let storedPosition {
       defaults.set(storedPosition, forKey: "statusBarPosition")
+    }
+
+    for (key, value) in stored {
+      defaults.set(value, forKey: key)
     }
 
     let store = SettingsStore(defaults: defaults)
