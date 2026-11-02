@@ -21,8 +21,8 @@ In progress.
 | UTERM-002 M1 Floating palette with commands | DONE | "Add a command registry and a floating command palette" |
 | UTERM-002 M2 Tab search | DONE | "Let the command palette find every tab in the window" |
 | UTERM-002 M3 Docked mode | DONE | "Let the command palette dock at the top or bottom of the window" |
-| UTERM-002 row review | IN PROGRESS | |
-| UTERM-013 M1 Applet-declared shortcuts | QUEUED | |
+| UTERM-002 row review | DONE | "Ask the applet before hiding the palette, and tidy the row" |
+| UTERM-013 M1 Applet-declared shortcuts | IN PROGRESS | |
 | UTERM-013 M2 Reopen with Cmd-Shift-T | QUEUED | |
 | UTERM-013 row review | QUEUED | |
 | Final review | QUEUED | |
@@ -218,6 +218,9 @@ Shape notes for UTERM-013 M1, passed to its implementer:
 Fix commit: "Ask the applet before hiding the palette, and tidy the row". Checks: `make lint`, which includes
 `fmt-check`, and `make check` pass. `make test-package` ran 497 tests, with 4 skipped and 0 failures. `make test-app`
 ran 69 UI tests, with 0 failures.
+
+Row finish commit: "Finish the command palette". UTERM-002 is `implemented`, the index says so, and its row
+moved to `history.md`. `proposals.py check` reports nothing.
 
 ADR review over the row: no conflicts. Its three candidates were already settled. The registry and the one-tab rule
 were declined on 2026-11-01. The key route is mechanism that UTERM-013 keeps out of ADR-04.

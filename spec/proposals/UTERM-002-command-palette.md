@@ -1,6 +1,6 @@
 # UTERM-002: Command Palette
 
-**Status:** accepted
+**Status:** implemented
 **Created:** 2026-10-31
 **Updated:** 2026-11-02
 
@@ -600,6 +600,7 @@ Settings switch, a remap, and a status bar click. A split pane under the overlay
   to the prior pane. The placeholder reads the menu item's live key. The results are a card of their own in both modes,
   so a floating palette's results sit 4 points below the field instead of in one card with it. The palette's sizes and
   insets are the implementation's and are recorded in M3's As built.
+- 2026-11-02: Implemented. M1 to M3 are done, and the row review's fixes landed.
 
 ## References
 
