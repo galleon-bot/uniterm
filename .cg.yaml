@@ -1,5 +1,6 @@
 version: 1
 allow:
+  - prefix: [./scripts/run-ui-tests.sh]
   - prefix: [codesign, -d]
   - prefix: [defaults, read]
   - prefix: [file]
