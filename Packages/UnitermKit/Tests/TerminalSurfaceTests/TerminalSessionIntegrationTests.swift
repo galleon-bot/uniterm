@@ -590,9 +590,12 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     try press(session, keyCode: 0x24, characters: "\r")
     try await waitUntil("the pasted command's output") { self.screen(session).contains("V:45:") }
 
+    // On a 1x display one step can round to the same cell width, so the font grows by two.
     let columns = session.gridSize.columns
-    XCTAssertTrue(
-      view.tryToPerform(#selector(TerminalMenuActions.increaseTerminalFontSize(_:)), with: nil))
+    for _ in 0..<2 {
+      XCTAssertTrue(
+        view.tryToPerform(#selector(TerminalMenuActions.increaseTerminalFontSize(_:)), with: nil))
+    }
     XCTAssertLessThan(session.gridSize.columns, columns)
     XCTAssertTrue(
       view.tryToPerform(#selector(TerminalMenuActions.resetTerminalFontSize(_:)), with: nil))
