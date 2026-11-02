@@ -8,6 +8,7 @@ import XCTest
 final class CloseUndoLedgerTests: XCTestCase {
   private func closed(_ number: Int) -> ClosedPane {
     ClosedPane(
+      stamp: UInt64(number),
       placement: PanePlacement(
         neighbor: NodeID(rawValue: 100), axis: .row, side: .after, weight: 1),
       description: AppletDescription(type: "fake", version: 1, payload: .string("\(number)")),
@@ -27,20 +28,20 @@ final class CloseUndoLedgerTests: XCTestCase {
     XCTAssertEqual(ledger.newest?.title, "Close 3")
   }
 
-  /// Catches a pop that takes the wrong end. Removing the newest exposes the one before it, and
-  /// removing from an empty stack changes nothing.
-  func testRemovingTheNewestExposesTheOneBefore() {
+  /// Catches a removal that takes the newest entry when an older one was named. Removing by stamp
+  /// takes only that entry, and an unknown stamp changes nothing.
+  func testRemovingByStampTakesOnlyThatEntry() {
     var ledger = CloseUndoLedger(policy: .standard)
 
     ledger.push(closed(1))
     ledger.push(closed(2))
-    ledger.removeNewest()
+    ledger.push(closed(3))
+    ledger.remove(stamp: 2)
 
-    XCTAssertEqual(ledger.newest?.title, "Close 1")
+    XCTAssertEqual(ledger.entries.map(\.title), ["Close 1", "Close 3"])
 
-    ledger.removeNewest()
-    ledger.removeNewest()
+    ledger.remove(stamp: 99)
 
-    XCTAssertNil(ledger.newest)
+    XCTAssertEqual(ledger.entries.count, 2)
   }
 }

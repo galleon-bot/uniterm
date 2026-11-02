@@ -43,9 +43,43 @@ public struct TerminalDescription: Codable, Equatable, Sendable {
   /// The version of the payload this build reads and writes.
   public static let currentVersion = 1
 
-  public func appletDescription() throws -> AppletDescription {
+  /// The description, with the closed tabs in its undo-only part when there are any. The payload
+  /// is the same either way.
+  public func appletDescription(closedTabs: [ClosedTab] = []) throws -> AppletDescription {
     AppletDescription(
-      type: Self.typeID, version: Self.currentVersion, payload: try JSONValue(encoding: self))
+      type: Self.typeID, version: Self.currentVersion, payload: try JSONValue(encoding: self),
+      undoState: closedTabs.isEmpty
+        ? nil : try JSONValue(encoding: UndoState(closedTabs: closedTabs)))
+  }
+
+  /// A tab the user closed, as undo needs it. The stamp orders it against every other close in the
+  /// window. The index is where the tab sat after the close dialog returned.
+  public struct ClosedTab: Codable, Equatable, Sendable {
+    public var stamp: UInt64
+    public var index: Int
+    public var title: String
+    public var tab: Tab
+
+    public init(stamp: UInt64, index: Int, title: String, tab: Tab) {
+      self.stamp = stamp
+      self.index = index
+      self.title = title
+      self.tab = tab
+    }
+  }
+
+  struct UndoState: Codable, Equatable, Sendable {
+    var closedTabs: [ClosedTab]
+  }
+
+  /// The closed tabs a description carries, newest first. A description with no undo-only part, or
+  /// one this build cannot read, carries none. That part is never saved, so nothing older exists.
+  public static func closedTabs(in description: AppletDescription) -> [ClosedTab] {
+    guard description.type == typeID,
+      let state = try? description.undoState?.decoded(as: UndoState.self)
+    else { return [] }
+
+    return state.closedTabs
   }
 
   /// Reads a description. A description of another type, a newer version, or a shape that does not

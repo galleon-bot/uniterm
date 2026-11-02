@@ -77,6 +77,14 @@ public final class TerminalApplet: Applet {
   private var started = false
   private var closingTab = false
 
+  /// The most closed tabs the applet remembers. A policy value with no setting, equal to the
+  /// window's pane undo depth.
+  static let closedTabDepth = 20
+
+  /// The tabs the user closed, newest first. They live in memory with the window's undo state and
+  /// ride in the description's undo-only part, so a reopened pane brings them back.
+  private var closedTabs: [TerminalDescription.ClosedTab] = []
+
   /// The newest notification that arrived while the applet was detached.
   private var heldNotification: String?
   private var detached = false
@@ -137,6 +145,7 @@ public final class TerminalApplet: Applet {
     home: String = NSHomeDirectory()
   ) throws {
     let decoded = try TerminalDescription.decode(description)
+    let carried = TerminalDescription.closedTabs(in: description)
 
     let directories = decoded.tabs.map {
       RestoreDirectory.resolve(
@@ -171,6 +180,8 @@ public final class TerminalApplet: Applet {
       for tab in tabs { tab.awaitingRun = true }
       refreshTabs()
     }
+
+    closedTabs = Array(carried.prefix(Self.closedTabDepth))
   }
 
   private init(
@@ -372,7 +383,7 @@ public final class TerminalApplet: Applet {
       selectedTab: selectedIndex)
 
     do {
-      return try description.appletDescription()
+      return try description.appletDescription(closedTabs: closedTabs)
     } catch {
       preconditionFailure("a terminal description always encodes: \(error)")
     }
@@ -484,8 +495,68 @@ public final class TerminalApplet: Applet {
 
     guard tabs.count > 1 else { return .nothingToClose }
 
+    recordClosed(tab, at: current)
     removeTab(at: current)
     return .closed
+  }
+
+  /// Keeps a closed tab for reopening. The stamp and the index are taken now, after any close
+  /// question was answered, so both describe the tab as it left.
+  private func recordClosed(_ tab: Tab, at index: Int) {
+    guard let host else { return }
+
+    closedTabs.insert(
+      TerminalDescription.ClosedTab(
+        stamp: host.issueCloseStamp(), index: index, title: tab.title,
+        tab: TerminalDescription.Tab(
+          workingDirectory: tab.workingDirectory, startDirectory: tab.launch.workingDirectory)),
+      at: 0)
+
+    if closedTabs.count > Self.closedTabDepth {
+      closedTabs.removeLast(closedTabs.count - Self.closedTabDepth)
+    }
+  }
+
+  public var closedTabStamps: [UInt64] {
+    closedTabs.map(\.stamp)
+  }
+
+  /// Starts a fresh shell from the closed tab's description, in the directory it last reported
+  /// when that is absolute and still exists, else its start directory, else home. The tab goes
+  /// back to its former index, clamped to the tab count, and is selected.
+  ///
+  /// The session starts before anything changes. A session that fails to start leaves no tab, the
+  /// entry stays, and the selection is as it was.
+  public func reopenTab(stamp: UInt64) -> TabReopenResult {
+    guard let entry = closedTabs.first(where: { $0.stamp == stamp }) else { return .missing }
+
+    let directory = RestoreDirectory.resolve(
+      reported: entry.tab.workingDirectory, starting: entry.tab.startDirectory, home: home,
+      exists: directoryExists)
+
+    let tab = Tab(
+      launch: .loginShell(workingDirectory: directory, environment: shellEnvironment),
+      title: Self.defaultTitle)
+
+    if started {
+      do {
+        try startSession(for: tab)
+      } catch {
+        return .failed(title: entry.title, reason: error.localizedDescription)
+      }
+    }
+
+    closedTabs.removeAll { $0.stamp == stamp }
+
+    let position = min(max(entry.index, 0), tabs.count)
+    tabs.insert(tab, at: position)
+    selectedIndex = position
+
+    refreshTabs()
+    updateSegments()
+    host?.appletDidChange(self)
+    host?.appletTabsDidChange(self)
+    return .reopened(title: entry.title)
   }
 
   /// A tab shows its title. In program mode the one tab shows the command.

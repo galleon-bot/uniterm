@@ -59,14 +59,23 @@ Chosen by the user on 2026-11-01.
 
 An applet with tabs keeps its own list of closed tabs, as descriptions. uniterm keeps no copy. Each applet reports the
 stamps of its closed tabs, newest first. uniterm asks the owning applet to reopen a tab by its stamp, and the applet
-reports whether it succeeded. Amended 2026-11-01; see Decision Log.
+reports whether it succeeded. A failure carries the tab's title and the reason, so the window's message can name them.
+Amended 2026-11-01 and 2026-11-02; see Decision Log.
 
 Chosen by the user on 2026-11-01.
 
 ### Cmd-Shift-T reopens, and Cmd-Z undoes text edits only
 
-Cmd-Shift-T reopens the newest close in the window, whether a tab or a pane. Amended 2026-11-01; see Decision Log.
-Cmd-Z undoes edits in a focused text field and nothing else.
+Cmd-Shift-T reopens the newest close in the window, whether a tab or a pane. Amended 2026-11-01 and 2026-11-02; see
+Decision Log. Cmd-Z undoes edits in a focused text field and nothing else.
+
+- The command is uniterm's `uniterm.reopen-closed`. Its item is in File, beside Close, under the fixed title "Reopen
+  Closed Tab or Pane". The title does not change with what the next reopen would be, so an App Shortcuts remap keeps
+  matching it.
+- Edit > Undo keeps the title "Undo" and is off unless a text field is being edited. The key route consumes Cmd-Z while
+  the item is off, as it does for any reserved key.
+- With nothing to reopen, the item is off and the key is consumed. A direct request, such as from a test, posts "There
+  is no closed tab or pane to reopen."
 
 - Each applet stamps every closed tab with a counter value the host issues. Pane closes take their stamp from the same
   counter.
@@ -167,7 +176,8 @@ Decision: the list rides in an undo-only part of the applet description, bounded
 - The layout file never writes the undo-only part, the same way it never writes the description's verbatim bytes.
 - Pane undo carries it, so a reopened pane brings back its closed tabs.
 - It is dropped at quit, like the pane undo stack. The terminal payload's saved format does not change.
-- The depth is a policy value with no setting, like the pane undo stack's depth.
+- The depth is a policy value with no setting, like the pane undo stack's depth. The terminal's is 20, the same as the
+  pane undo depth. Amended 2026-11-02; see Decision Log.
 
 Rationale: closing tab B and then its pane, then reopening the pane, should let a second Cmd-Shift-T bring back B. ADR-05
 says an applet saves in its description what undo should restore. Saving the list with the layout would bring closed
@@ -387,7 +397,7 @@ hand, since AppKit adds it at run time.
 
 ### M2: Reopen with Cmd-Shift-T
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 - Closing a terminal tab keeps its description in the terminal's closed-tab list
 - Cmd-Shift-T reopens the newest close in the window, tab or pane. A tab reopens in its pane, in the same working
@@ -413,6 +423,43 @@ hand, since AppKit adds it at run time.
 - A tab whose shell exited on its own adds no closed-tab entry, as a pane whose applet exited adds no undo entry
 - The UI tests that pressed Cmd-Z to reopen a pane press Cmd-Shift-T instead, and a Cmd-Z test shows panes are untouched
 - Cmd-Z undoes a text edit in a focused text field, and does nothing to panes
+
+**As built:**
+
+One counter per window issues every close stamp. Pane closes and the applets' tab closes draw from it, and it counts
+closes and never reads the clock. A pane takes its stamp after the close dialog returns. A terminal takes a tab's stamp
+and index at the same point, in the close path after the answer, so a tab that moved while the question was open records
+its new index. The window holds no copy of any tab list. Each time Reopen Closed runs or validates, it asks every pane's
+applet for its stamps and merges them with the ledger's pane closes.
+
+The undo-only part of a description is a field that the layout codec never writes and the window strips before it
+compares a description to the saved one or hands it to the layout. A closed tab alone is therefore not a layout change.
+The terminal's list holds each tab's two directories, its title for the message, its index, and its stamp. A terminal
+restored from a description takes the list back with the old stamps, so a reopened pane sorts correctly against closes
+made since. The terminal payload's saved format did not change.
+
+A reopen starts the session before it changes anything. A session that fails leaves no tab, keeps the entry, and leaves
+the selection as it was. The window checks a pane's fit before it builds the applet. A pane that fits is removed from
+the ledger by its stamp, so an older pane reopened past a failed newer close takes only its own entry. The tab's pane
+takes focus after a tab reopens. A tab whose shell exited on its own adds no entry, and neither does the last tab,
+which is a pane close.
+
+The walk stops at the first close that comes back. A failed close adds one sentence to the message, and the message ends
+with what reopened instead or "Nothing was reopened." No message posts when the first close reopens. When every close
+is missing or the lists are empty, the item is off, so the key is consumed and nothing posts. A failed tab and a pane
+that does not fit each name the title and what to do.
+
+Edit > Undo is "Undo" and off outside a text edit. The UI tests that checked the empty-undo message used it as a way to
+get a status message. The history test now uses the debug error post, and the terminal key test checks Cmd-Shift-T
+by closing and reopening a tab.
+
+Constants: the terminal's closed-tab depth is 20, a policy value with no setting. The menu title is "Reopen Closed Tab or
+Pane".
+
+Residuals: the UI tests that drive Cmd-Shift-T through the real key route and a real shell need the app and a GUI
+session. The unit tests cover the walk, the ordering, and the failure paths over fake applets and a fake engine. A tab
+reopened in a pane that is not yet started gets its session when the pane starts, and a failure there posts through the
+pane's usual start error.
 
 ## Decision Log
 
@@ -517,6 +564,16 @@ hand, since AppKit adds it at run time.
   warning per applet type per session. ADR-04 says the applet loses the key and "the user is told", so a key dropped
   after the first warning must not be silent. A check now posts at most one warning per applet type, naming the keys not
   announced before, and a repeated drop is silent. The two M1 checks that said one warning per applet type follow.
+- 2026-11-02: M2 best guesses (work-queue best guess). Amended "Applets own their tabs, and reopening them". It said the
+  applet reports whether a reopen succeeded. A failure now carries the tab's title and the reason, because the window's
+  one message must name what failed and why, and the window holds no copy of the list to read a title from.
+- 2026-11-02: M2 best guesses (work-queue best guess). Amended "Cmd-Shift-T reopens, and Cmd-Z undoes text edits only".
+  It named no command, title, or menu home. The command is `uniterm.reopen-closed`, in File beside Close, titled
+  "Reopen Closed Tab or Pane". The title is fixed so an App Shortcuts remap keeps matching. Edit > Undo is titled "Undo"
+  and is off unless a text field is being edited. With nothing to reopen the item is off and the key is consumed.
+- 2026-11-02: M2 best guesses (work-queue best guess). Amended "How long an applet's closed-tab list is". It said the
+  depth is a fixed policy value and gave no number. The terminal's is 20, the same as the pane undo depth, with no
+  setting.
 
 ## References
 

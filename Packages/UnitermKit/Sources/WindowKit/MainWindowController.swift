@@ -21,9 +21,7 @@ public typealias AppletRestorer = @MainActor (AppletDescription) throws -> any A
 /// standard traffic lights stay. The content area holds a tree of panes, and each pane runs one
 /// applet.
 @MainActor
-public final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation,
-  AppletHost
-{
+public final class MainWindowController: NSWindowController, NSWindowDelegate, AppletHost {
   /// The window's message queue. Anything in the window may post to it.
   public let statusCenter: StatusCenter
 
@@ -73,6 +71,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   /// The window's closed panes, as descriptions. No closed applet is kept alive.
   private(set) var ledger: CloseUndoLedger
+
+  /// The last stamp issued. One counter orders the closes of panes and of every applet's tabs. It
+  /// counts closes and never reads the clock.
+  private var lastCloseStamp: UInt64 = 0
 
   /// Asks the user before something is ended that undo cannot bring back. Tests replace it.
   var confirmer: CloseConfirmer = CloseDialog.present
@@ -420,18 +422,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     window?.attachedSheet == nil
   }
 
-  /// Validates Edit > Undo Close Pane. The commands' items validate through the menu.
-  public func validateMenuItem(_ item: NSMenuItem) -> Bool {
-    switch item.action {
-    case #selector(MainWindow.undoCloseOrEdit(_:)):
-      item.title = "Undo Close Pane"
-      return paneActionsEnabled
-
-    default:
-      return true
-    }
-  }
-
   /// Splits `pane`, or says there is no room. The new pane holds a launcher.
   func requestSplit(_ axis: Axis, from pane: NodeID?) {
     guard paneActionsEnabled, let pane else { return }
@@ -474,7 +464,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     let request = CloseConfirmation(
       title: "Close this pane?",
       detail:
-        "Closing this pane ends what is running in it. Undo reopens the pane in the same place, but not the running session.",
+        "Closing this pane ends what is running in it. Reopening the pane puts it back in the same place, but not the running session.",
       labels: applet.runningLabels, confirmTitle: "Close Pane", cancelTitle: "Cancel")
 
     ask(request) { [weak self] in
@@ -494,7 +484,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     else { return }
 
     let closed = ClosedPane(
-      placement: removed.placement, description: applet.describe(), title: applet.title)
+      stamp: issueCloseStamp(), placement: removed.placement, description: applet.describe(),
+      title: applet.title)
 
     started.remove(ObjectIdentifier(applet))
     applet.close()
@@ -573,9 +564,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   /// Opens a pane from a closed pane's description, in the same place with the same kind of applet.
   /// The pane gets a new ID, and the applet starts fresh. A description this build cannot restore
-  /// opens as a placeholder, which keeps its bytes. The entry stays on the stack when the pane does
-  /// not fit.
-  private func reopen(_ closed: ClosedPane) {
+  /// opens as a placeholder, which keeps its bytes.
+  ///
+  /// The fit is checked before the applet is built. A pane that does not fit keeps its entry and
+  /// builds nothing. Only the reopened pane's own entry leaves the ledger.
+  private func reopenPane(_ closed: ClosedPane) -> Bool {
+    guard paneArea.canInsert(at: closed.placement) else { return false }
+
     let restored = PaneRestoration.applet(for: closed.description, restorer: restoreApplet)
     let applet = restored.applet
 
@@ -586,11 +581,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       id = try paneArea.insert(applet, at: closed.placement)
     } catch {
       applet.close()
-      postNoRoom(to: "reopen the pane")
-      return
+      return false
     }
 
-    ledger.removeNewest()
+    ledger.remove(stamp: closed.stamp)
     startPendingApplets()
     paneArea.focus(id)
 
@@ -600,28 +594,99 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         text:
           "The pane \u{201C}\(closed.title)\u{201D} could not be restored. It is kept as it was.")
     }
+
+    return true
   }
 
-  private func postNoRoom(to action: String) {
-    statusCenter.post(
-      level: .warning, source: .uniterm, text: "There is not enough room to \(action).")
+  // MARK: Reopening
+
+  /// One close the window can undo: a pane in the ledger, or a tab an applet holds.
+  private enum Close {
+    case pane(ClosedPane)
+    case tab(pane: NodeID, applet: any Applet, stamp: UInt64)
+
+    var stamp: UInt64 {
+      switch self {
+      case .pane(let closed): return closed.stamp
+      case .tab(_, _, let stamp): return stamp
+      }
+    }
   }
 
-  // MARK: Menu actions
+  /// Every close in the window, newest first. The applets keep their own tab lists, so the window
+  /// asks them each time and holds no copy.
+  private func closes() -> [Close] {
+    var all = ledger.entries.map(Close.pane)
 
-  /// Reopens the pane that closed last from its description, in its former place, with a new ID.
-  ///
-  /// The window calls this for the standard undo action, except while a text control is being
-  /// edited. Then Cmd-Z undoes the edit and never a pane close.
-  @objc public func undoClosePane(_ sender: Any?) {
-    guard paneActionsEnabled else { return }
+    for pane in paneArea.tree.paneIDs {
+      guard let applet = paneArea.applet(for: pane) else { continue }
 
-    guard let closed = ledger.newest else {
-      statusCenter.post(level: .info, source: .uniterm, text: "There is no closed pane to undo.")
-      return
+      all += applet.closedTabStamps.map { Close.tab(pane: pane, applet: applet, stamp: $0) }
     }
 
-    reopen(closed)
+    return all.sorted { $0.stamp > $1.stamp }
+  }
+
+  /// True when Reopen Closed has something to try.
+  var hasReopenableClose: Bool {
+    !ledger.entries.isEmpty
+      || paneArea.applets.contains { !$0.closedTabStamps.isEmpty }
+  }
+
+  /// Reopens the newest close in the window, a tab or a pane. It walks the closes newest first and
+  /// stops at the first that comes back. A close that fails keeps its entry and its place, and the
+  /// walk goes on to the next older one. One message says what failed, why, what to do, and what
+  /// reopened instead.
+  func reopenClosed() {
+    guard paneActionsEnabled else { return }
+
+    var failures: [String] = []
+
+    for close in closes() {
+      switch close {
+      case .tab(let pane, let applet, let stamp):
+        switch applet.reopenTab(stamp: stamp) {
+        case .reopened(let title):
+          paneArea.focus(pane)
+          postReopenFailures(failures, reopened: "tab \u{201C}\(title)\u{201D}")
+          return
+
+        case .missing:
+          continue
+
+        case .failed(let title, let reason):
+          failures.append(
+            "The tab \u{201C}\(title)\u{201D} could not be reopened: \(reason). "
+              + "Check that the shell can start, then try again.")
+        }
+
+      case .pane(let closed):
+        if reopenPane(closed) {
+          postReopenFailures(failures, reopened: "pane \u{201C}\(closed.title)\u{201D}")
+          return
+        }
+
+        failures.append(
+          "The pane \u{201C}\(closed.title)\u{201D} does not fit in the window. "
+            + "Make the window larger, then try again.")
+      }
+    }
+
+    if failures.isEmpty {
+      statusCenter.post(
+        level: .info, source: .uniterm, text: "There is no closed tab or pane to reopen.")
+    } else {
+      postReopenFailures(failures, reopened: nil)
+    }
+  }
+
+  private func postReopenFailures(_ failures: [String], reopened: String?) {
+    guard !failures.isEmpty else { return }
+
+    let outcome = reopened.map { "Reopened the \($0) instead." } ?? "Nothing was reopened."
+
+    statusCenter.post(
+      level: .warning, source: .uniterm, text: (failures + [outcome]).joined(separator: " "))
   }
 
   // MARK: Saved layout
@@ -650,7 +715,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     case .pane(let pane):
       guard let applet = paneArea.applet(for: pane.id) else { return nil }
 
-      let description = applet.describe()
+      let description = applet.describe().withoutUndoState
       described[pane.id] = description
       return .pane(id: pane.id, applet: description)
 
@@ -673,9 +738,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   /// A title or segment change that leaves the saved description the same, such as a spinner in a
   /// title, is not a layout change. Only a description that differs from the last saved one is.
+  /// The undo-only part never counts, since a layout file does not hold it.
   private func notifyLayoutIfDescriptionChanged(_ applet: any Applet) {
     guard let pane = paneArea.paneID(for: applet),
-      let saved = savedDescriptions[pane], saved == applet.describe()
+      let saved = savedDescriptions[pane], saved == applet.describe().withoutUndoState
     else {
       onLayoutChange?()
       return
@@ -720,6 +786,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   }
 
   // MARK: Applet host
+
+  public func issueCloseStamp() -> UInt64 {
+    lastCloseStamp += 1
+    return lastCloseStamp
+  }
 
   public func applet(_ applet: any Applet, post level: StatusLevel, text: String) {
     // An applet may keep bounded, visible work after close and still post. ID 0 never matches a

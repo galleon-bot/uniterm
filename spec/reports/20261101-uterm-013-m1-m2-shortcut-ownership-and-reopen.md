@@ -77,6 +77,60 @@ ADR review: one plausible ADR-04 conflict, fixed as above. Its candidates are al
 ID candidate waits on UTERM-003, per the Decision Log. The key route is mechanism the proposal keeps out of ADR-04. The
 title-as-remap-contract rule is a UTERM-002 risk that shapes only the menu.
 
+### UTERM-013 M2: Reopen with Cmd-Shift-T
+
+Commit: "Reopen the newest closed tab or pane with Cmd-Shift-T".
+
+Checks: `make fmt-check`, `make lint`, and `make check` pass. `make test-package` passes with 0 failures. `make
+test-app` ran three full times outside the sandbox. The first run had 5 failures out of 77. The next two passed 77 of
+77, confirmed from their result bundles with `xcrun xcresulttool get test-results summary`. `proposals.py freeze`
+reports nothing. `proposals.py check` reports only the row-finishing steps.
+
+Unowned failure, diagnosis unresolved: the first full run failed these 5 tests:
+
+- `CommandPaletteUITests.testChoosingABackgroundTabSelectsItAndTheKeyboardFollows`
+- `TabsUITests.testNewTabsShowTheBarAndEachRunsItsOwnShell`
+- `TabsUITests.testProgramModeHasNoNewTab`
+- `TerminalUITests.testClearScreenClearsTheTerminal`
+- `TerminalUITests.testCommandKeysReachUnitermWhileTheTerminalIsFocused`
+
+Three of them timed out after about 40 seconds waiting for a shell prompt or terminal text. That run took 676 seconds,
+against 568 for the clean runs. The class reruns and two full reruns in the original order all passed. The tests were
+not run on the previous commit. One hypothesis: the implementer's first `make test-app` attempt through cg timed out
+enabling automation, and it may have overlapped the failing run, so two UI suites fought over the GUI session. A
+passing rerun does not prove a fix, so this stays open.
+
+Test cost: `ReopenClosedTests` runs 9 tests in 0.26 seconds. `TerminalReopenTests` runs 9 tests in about 0.01 seconds.
+
+Best guesses by the implementer:
+
+- The window command is `uniterm.reopen-closed`, titled "Reopen Closed Tab or Pane" in File beside Close, on
+  Cmd-Shift-T. The title is fixed so App Shortcuts remaps keep matching. It is disabled when nothing is reopenable, and
+  the reserved key route consumes the key.
+- A failed tab reopen reports a title and a reason, since the window keeps no copy of the applet's list.
+- The closed-tab list depth is 20, matching the pane undo depth.
+- The undo-only part of a description is stripped before the layout is saved and before the layout-change compare.
+- The Edit menu's Undo item is disabled outside a text edit. The empty-undo status message is gone, so two UI tests
+  that read it now post through a debug hook instead.
+- No hidden inheritance was found. A reopened tab's directory flows through its closed-tab description.
+
+Amendments, each with a Decision Log entry giving the prior meaning: "Applets own their tabs, and reopening them",
+"Cmd-Shift-T reopens, and Cmd-Z undoes text edits only", and the closed-tab depth.
+
+Residual: no controller test covers an older pane reopened past a newer pane that does not fit, since no layout makes
+only the newer pane fail. A tab failure covers the same removal path, and a ledger unit test pins remove-by-stamp.
+
+Review findings: none.
+
+ADR review: no conflicts. Advisories on naming only. ADR-03's rationale and ADR-04's context still say Cmd-Z gets a
+closed pane back, and ADR-05 calls the action "undo". Their decisions still hold. An accepted ADR takes only minor
+edits, so these are left for the user. Of the candidates, in-memory-only undo state was declined on 2026-11-01, and
+host-stamped closes across applets waits on UTERM-005 to UTERM-010, per the Decision Log. The Cmd-Z-for-text-only
+policy is a key binding choice inside UTERM-013 and does not pass the ADR bar.
+
+UTERM-001's text says Cmd-Z reopens a closed pane, and UTERM-002 refers to it. UTERM-013 supersedes that part. The row
+finish adds a "Superseded in part by UTERM-013" marker to UTERM-001, which the freeze allows.
+
 ## Status
 
 In progress.

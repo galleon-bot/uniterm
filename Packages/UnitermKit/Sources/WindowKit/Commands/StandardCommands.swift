@@ -56,6 +56,16 @@ enum StandardCommands {
           context.controller?.closeTabOrPane(context.pane)
         }
       ),
+      Command(
+        .reopenClosed, "Reopen Closed Tab or Pane", scope: .window,
+        key: KeyChord("t", commandShift), menu: MenuPlacement(.file, section: 2),
+        isAvailable: { context in
+          context.actionsEnabled && context.controller?.hasReopenableClose == true
+        },
+        run: { context in
+          context.controller?.reopenClosed()
+        }
+      ),
       focus(.focusNextPane, "Focus Next Pane", KeyChord("]"), .next, 2),
       focus(.focusPreviousPane, "Focus Previous Pane", KeyChord("["), .previous, 2),
       focus(.focusPaneLeft, "Focus Pane Left", arrow(NSLeftArrowFunctionKey), .toward(.left), 3),

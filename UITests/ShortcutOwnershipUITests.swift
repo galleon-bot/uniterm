@@ -90,6 +90,27 @@ final class ShortcutOwnershipUITests: UnitermUITestCase {
     XCTAssertTrue(waitUntilGone(window.groups["pane-2"], timeout: 15))
   }
 
+  /// Catches Cmd-Shift-T that does not reach uniterm while the terminal is focused, or a closed tab
+  /// that does not return. A second tab opens and closes with Cmd-W. Cmd-Shift-T brings it back
+  /// with a fresh shell, and the tab bar shows again.
+  func testCommandShiftTReopensAClosedTab() {
+    let app = launchApp()
+    let window = mainWindow(in: app)
+    _ = waitForTerminal(in: app)
+
+    app.typeKey("t", modifierFlags: .command)
+    XCTAssertTrue(tab(1, in: app).waitForExistence(timeout: 10))
+    XCTAssertTrue(waitFor(window.textViews["terminal"], timeout: 40) { $0.contains("% ") })
+
+    app.typeKey("w", modifierFlags: .command)
+    XCTAssertTrue(waitUntilGone(tab(1, in: app), timeout: 15))
+
+    app.typeKey("t", modifierFlags: [.command, .shift])
+
+    XCTAssertTrue(tab(1, in: app).waitForExistence(timeout: 10), "the closed tab never came back")
+    XCTAssertTrue(waitFor(window.textViews["terminal"], timeout: 40) { $0.contains("% ") })
+  }
+
   /// Catches a remap that does not take its reservation. Cmd-K is Clear Screen until the user puts
   /// the palette on it. Then Cmd-K opens the palette with the terminal focused, the old palette key
   /// no longer does, and the one warning names the applet, the command, and the key.

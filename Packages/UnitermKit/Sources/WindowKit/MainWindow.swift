@@ -7,7 +7,7 @@ import AppletKit
 /// text control being edited undoes its edit. That answer comes before the window controller in the
 /// responder chain, so a controller method named for undo would never be reached. This window
 /// answers the action itself. While a text control is being edited, it undoes the edit. Otherwise
-/// the action undoes the last pane close.
+/// it does nothing, and the item is off.
 ///
 /// The window is also uniterm's one key route. A key that matches a key equivalent in the live
 /// menu goes to that menu item before any view in the window sees it. The menu is read live, so a
@@ -33,14 +33,13 @@ public final class MainWindow: NSWindow {
     (firstResponder as? NSTextView)?.undoManager ?? undoManager
   }
 
-  /// The target of Edit > Undo Close Pane. The selector is the standard `undo:`, so the menu item
-  /// keeps its place in the Edit menu and a text control gets the key when it has focus.
-  @objc(undo:) public func undoCloseOrEdit(_ sender: Any?) {
-    if isEditingText {
-      editingUndoManager?.undo()
-    } else {
-      (windowController as? MainWindowController)?.undoClosePane(sender)
-    }
+  /// The target of Edit > Undo. The selector is the standard `undo:`, so the menu item keeps its
+  /// place in the Edit menu and a text control gets the key when it has focus. It undoes a text
+  /// edit and nothing else. Reopening a closed tab or pane is a window command.
+  @objc(undo:) public func undoEdit(_ sender: Any?) {
+    guard isEditingText else { return }
+
+    editingUndoManager?.undo()
   }
 
   /// The target of Edit > Redo. Redo repeats an undone text edit. Pane closes have no redo.
@@ -58,13 +57,14 @@ public final class MainWindow: NSWindow {
       item.title = editingUndoManager?.redoMenuItemTitle ?? "Redo"
       return editingUndoManager?.canRedo ?? false
 
-    case #selector(undoCloseOrEdit(_:)):
-      if isEditingText {
-        item.title = editingUndoManager?.undoMenuItemTitle ?? "Undo"
-        return editingUndoManager?.canUndo ?? false
+    case #selector(undoEdit(_:)):
+      guard isEditingText else {
+        item.title = "Undo"
+        return false
       }
 
-      return (windowController as? MainWindowController)?.validateMenuItem(item) ?? false
+      item.title = editingUndoManager?.undoMenuItemTitle ?? "Undo"
+      return editingUndoManager?.canUndo ?? false
 
     default:
       return super.validateMenuItem(item)

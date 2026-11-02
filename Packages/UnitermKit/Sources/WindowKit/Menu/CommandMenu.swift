@@ -191,8 +191,7 @@ public final class CommandMenu: NSObject, NSMenuItemValidation {
     let edit = NSMenu(title: "Edit")
 
     edit.addItem(
-      withTitle: "Undo Close Pane", action: #selector(MainWindow.undoCloseOrEdit(_:)),
-      keyEquivalent: "z")
+      withTitle: "Undo", action: #selector(MainWindow.undoEdit(_:)), keyEquivalent: "z")
 
     let redo = NSMenuItem(
       title: "Redo", action: #selector(MainWindow.redoEdit(_:)), keyEquivalent: "z")

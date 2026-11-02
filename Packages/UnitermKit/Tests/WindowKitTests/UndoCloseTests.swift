@@ -42,6 +42,7 @@ final class UndoFixture {
 
         let applet = FakeApplet()
         applet.title = title
+        applet.restoreClosedTabs(from: description)
         recorder.restored.append(applet)
         return applet
       },
@@ -135,7 +136,7 @@ final class UndoCloseTests: XCTestCase {
     fixture.openPanes(2)
     fixture.controller.dispatch(.close)
 
-    fixture.controller.undoClosePane(nil)
+    fixture.controller.reopenClosed()
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(4)])
     XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1"])
@@ -161,7 +162,7 @@ final class UndoCloseTests: XCTestCase {
       type: "fake", version: 9, payload: .null, verbatim: bytes)
     fixture.controller.dispatch(.close)
 
-    fixture.controller.undoClosePane(nil)
+    fixture.controller.reopenClosed()
 
     XCTAssertEqual(fixture.controller.paneIDs.count, 2)
 
@@ -185,10 +186,10 @@ final class UndoCloseTests: XCTestCase {
     fixture.controller.dispatch(.close)
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
 
-    fixture.controller.undoClosePane(nil)
+    fixture.controller.reopenClosed()
     XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1"])
 
-    fixture.controller.undoClosePane(nil)
+    fixture.controller.reopenClosed()
     XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1", "Fake 2"])
     XCTAssertEqual(fixture.controller.paneIDs.count, 3)
   }
@@ -203,7 +204,7 @@ final class UndoCloseTests: XCTestCase {
     fixture.controller.dispatch(.focusPaneLeft)
     XCTAssertNotNil(fixture.controller.openPane(.terminalShell, axis: .column))
 
-    fixture.controller.undoClosePane(nil)
+    fixture.controller.reopenClosed()
 
     guard case .split(let column) = fixture.controller.paneArea.tree.root else {
       return XCTFail("the root is a pane")
@@ -230,7 +231,7 @@ final class UndoCloseTests: XCTestCase {
     fixture.controller.appletDidExit(fixture.made[0])
     XCTAssertEqual(fixture.controller.paneIDs, [id(4)])
 
-    fixture.controller.undoClosePane(nil)
+    fixture.controller.reopenClosed()
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(4), id(5)])
     XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1"])
@@ -256,10 +257,11 @@ final class UndoCloseTests: XCTestCase {
   func testUndoWithNothingClosedSaysSo() throws {
     let fixture = try makeFixture()
 
-    fixture.controller.undoClosePane(nil)
+    fixture.controller.reopenClosed()
 
     XCTAssertEqual(
-      fixture.controller.statusCenter.history.last?.text, "There is no closed pane to undo.")
+      fixture.controller.statusCenter.history.last?.text,
+      "There is no closed tab or pane to reopen.")
   }
 
   /// Catches a refused reopen that eats the description. With the window too narrow for another
@@ -272,13 +274,15 @@ final class UndoCloseTests: XCTestCase {
     window.setContentSize(NSSize(width: 300, height: 640))
     window.contentView?.layoutSubtreeIfNeeded()
 
-    fixture.controller.undoClosePane(nil)
+    fixture.controller.reopenClosed()
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
     XCTAssertEqual(fixture.controller.ledger.entries.count, 1)
     XCTAssertEqual(
       fixture.controller.statusCenter.history.last?.text,
-      "There is not enough room to reopen the pane.")
+      "The pane \u{201C}Fake 1\u{201D} does not fit in the window. "
+        + "Make the window larger, then try again. Nothing was reopened.")
+    XCTAssertTrue(fixture.recorder.restored.isEmpty, "the applet was built before the fit check")
   }
 
   // MARK: Pane close guard
@@ -591,18 +595,18 @@ final class UndoCloseTests: XCTestCase {
   /// Catches Cmd-Z bound to a private selector. The menu item must send the standard undo selector,
   /// so the text controls of other windows keep their Cmd-Z.
   func testTheUndoItemSendsTheStandardUndoSelector() {
-    XCTAssertEqual(#selector(MainWindow.undoCloseOrEdit(_:)), NSSelectorFromString("undo:"))
+    XCTAssertEqual(#selector(MainWindow.undoEdit(_:)), NSSelectorFromString("undo:"))
   }
 
   private final class PlainView: NSView {
     override var acceptsFirstResponder: Bool { true }
   }
 
-  /// Catches a Cmd-Z that undoes a pane close while a text control is being edited. A pane is
-  /// closed. With a text field being edited, the standard undo action leaves the pane closed and
-  /// the menu item follows the edit's undo state. With a plain view focused, as a terminal is, the
-  /// same action brings the pane back and the item reads Undo Close Pane.
-  func testCommandZUndoesAnEditInATextControlAndAPaneCloseElsewhere() throws {
+  /// Catches a Cmd-Z that touches panes. A pane is closed. With a text field being edited, the
+  /// standard undo action leaves the pane closed and the menu item follows the edit's undo state.
+  /// With a plain view focused, as a terminal is, the action does nothing, the item is off, and the
+  /// pane stays closed.
+  func testCommandZUndoesTextEditsOnlyAndNeverReopensAPane() throws {
     let fixture = try makeFixture()
     let window = try XCTUnwrap(fixture.controller.window as? MainWindow)
     window.orderFrontRegardless()
@@ -622,17 +626,18 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertTrue(window.firstResponder is NSText)
     XCTAssertFalse(window.validateMenuItem(item), "nothing typed, so the edit has no undo")
 
-    window.undoCloseOrEdit(nil)
+    window.undoEdit(nil)
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)], "Cmd-Z in a text field undid a close")
     XCTAssertEqual(fixture.controller.ledger.entries.count, 1)
 
     XCTAssertTrue(window.makeFirstResponder(plain))
-    XCTAssertTrue(window.validateMenuItem(item))
-    XCTAssertEqual(item.title, "Undo Close Pane")
+    XCTAssertFalse(window.validateMenuItem(item))
+    XCTAssertEqual(item.title, "Undo")
 
-    window.undoCloseOrEdit(nil)
+    window.undoEdit(nil)
 
-    XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(4)])
+    XCTAssertEqual(fixture.controller.paneIDs, [id(1)], "Cmd-Z reopened a pane")
+    XCTAssertEqual(fixture.controller.ledger.entries.count, 1)
   }
 }

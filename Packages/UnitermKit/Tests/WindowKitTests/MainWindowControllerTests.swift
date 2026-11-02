@@ -87,20 +87,19 @@ final class MainWindowControllerTests: XCTestCase {
     XCTAssertTrue(made[0].started)
   }
 
-  /// Catches an undo with nothing to undo that does nothing silently. The item stays on, so Cmd-Z
-  /// reaches the window and the action says there is nothing to undo.
-  func testUndoWithNothingClosedStaysOnAndSaysSo() throws {
+  /// Catches a reopen with nothing closed that does nothing silently. The command is off, so the
+  /// reserved key is consumed, and a direct request says there is nothing to reopen.
+  func testReopenWithNothingClosedIsOffAndSaysSo() throws {
     let controller = try makeController()
-    let item = NSMenuItem(
-      title: "Undo", action: #selector(MainWindow.undoCloseOrEdit(_:)), keyEquivalent: "z")
 
-    XCTAssertTrue(controller.validateMenuItem(item))
-    XCTAssertEqual(item.title, "Undo Close Pane")
+    XCTAssertFalse(controller.hasReopenableClose)
+    XCTAssertFalse(controller.commands.isAvailable(.reopenClosed, in: controller.commandContext()))
 
-    controller.undoClosePane(nil)
+    controller.reopenClosed()
 
     XCTAssertEqual(controller.statusCenter.history.count, 1)
-    XCTAssertEqual(controller.statusCenter.history.last?.text, "There is no closed pane to undo.")
+    XCTAssertEqual(
+      controller.statusCenter.history.last?.text, "There is no closed tab or pane to reopen.")
     XCTAssertTrue(controller.statusCenter.history.allSatisfy { $0.source == .uniterm })
   }
 

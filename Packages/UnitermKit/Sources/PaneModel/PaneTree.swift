@@ -230,6 +230,12 @@ public struct PaneTree: Sendable, Equatable {
     throw PaneTreeError.belowMinimumSize(placement.neighbor)
   }
 
+  /// True when `insert(at:in:)` would succeed. It changes nothing and uses no ID.
+  public func canInsert(at placement: PanePlacement, in size: CGSize) -> Bool {
+    var copy = self
+    return (try? copy.insert(at: placement, in: size)) != nil
+  }
+
   /// True when every pane of `candidate` keeps its minimum at `size`, and the whole tree fits.
   private func fits(_ candidate: Node, in size: CGSize) -> Bool {
     let ideal = layout(in: size, clamped: false, of: candidate)

@@ -52,7 +52,12 @@ final class FakeEngine: TerminalEngine {
   var sessions: [FakeSession] = []
   var anySessionRunningSomething = false
 
+  /// When set, the next sessions fail to start with this error.
+  var failure: (any Error)?
+
   func makeSession(launch: TerminalLaunch) throws -> any TerminalSession {
+    if let failure { throw failure }
+
     let session = FakeSession(launch: launch)
     sessions.append(session)
     return session
@@ -84,6 +89,13 @@ private final class RecordingHost: AppletHost {
   func appletDidExit(_ applet: any Applet) { exited = true }
   func appletDidChange(_ applet: any Applet) { changed += 1 }
   func appletTabsDidChange(_ applet: any Applet) { tabsChanged += 1 }
+
+  var lastStamp: UInt64 = 0
+
+  func issueCloseStamp() -> UInt64 {
+    lastStamp += 1
+    return lastStamp
+  }
 
   func applet(_ applet: any Applet, confirm request: AppletConfirmation) async -> Bool {
     confirmations.append(request)

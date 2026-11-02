@@ -27,6 +27,7 @@ extension CommandID {
   public static let splitRight: CommandID = "uniterm.split-right"
   public static let splitDown: CommandID = "uniterm.split-down"
   public static let close: CommandID = "uniterm.close"
+  public static let reopenClosed: CommandID = "uniterm.reopen-closed"
   public static let focusNextPane: CommandID = "uniterm.focus-next-pane"
   public static let focusPreviousPane: CommandID = "uniterm.focus-previous-pane"
   public static let focusPaneLeft: CommandID = "uniterm.focus-pane-left"
