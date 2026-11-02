@@ -125,8 +125,29 @@ final class ShellWordsTests: XCTestCase {
 
   /// Catches a fallback that replaces the caller's environment instead of adding to it.
   func testSshFallbackKeepsTheCallersEnvironment() {
-    let launch = TerminalLaunch.program(["ssh", "host"], environment: ["LANG": "C"])
+    let launch = TerminalLaunch.program(
+      ["ssh", "host"], environment: ["LANG": "C"], version: "9.9")
 
-    XCTAssertEqual(launch.environment, ["LANG": "C", "TERM": "xterm-256color"])
+    XCTAssertEqual(
+      launch.environment,
+      [
+        "LANG": "C", "TERM": "xterm-256color", "TERM_PROGRAM": "uniterm",
+        "TERM_PROGRAM_VERSION": "9.9",
+      ])
+  }
+
+  /// Catches a launch that leaves libghostty's `TERM_PROGRAM=ghostty` in place. Both factories add
+  /// uniterm's name and the given version, and a variable from the caller still replaces them.
+  func testLaunchesReportUnitermAndItsVersion() {
+    let shell = TerminalLaunch.loginShell(version: "1.2.3")
+    let program = TerminalLaunch.program(["vim"], version: "1.2.3")
+    let expected = ["TERM_PROGRAM": "uniterm", "TERM_PROGRAM_VERSION": "1.2.3"]
+
+    XCTAssertEqual(shell.environment, expected)
+    XCTAssertEqual(program.environment, expected)
+
+    let overridden = TerminalLaunch.loginShell(
+      environment: ["TERM_PROGRAM": "other"], version: "1.2.3")
+    XCTAssertEqual(overridden.environment["TERM_PROGRAM"], "other")
   }
 }

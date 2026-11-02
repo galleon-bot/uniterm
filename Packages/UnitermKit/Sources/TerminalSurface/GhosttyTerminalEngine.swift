@@ -41,17 +41,15 @@ public final class GhosttyTerminalEngine: TerminalEngine {
 
   /// - Parameters:
   ///   - resourcesDirectory: The `ghostty` directory that holds the shell-integration scripts, next
-  ///     to the `terminfo` directory. Pass nil inside the app bundle, where libghostty finds
-  ///     `Contents/Resources` by itself.
+  ///     to the `terminfo` directory. The engine always exports it as `GHOSTTY_RESOURCES_DIR`, so a
+  ///     value inherited from another Ghostty never decides which resources the shells use.
   public init(
-    configStore: TerminalConfigStore, resourcesDirectory: URL?, palette: ThemePalette
+    configStore: TerminalConfigStore, resourcesDirectory: URL, palette: ThemePalette
   ) throws {
     self.store = configStore
     self.palette = palette
 
-    if let resourcesDirectory {
-      setenv("GHOSTTY_RESOURCES_DIR", resourcesDirectory.path, 1)
-    }
+    setenv("GHOSTTY_RESOURCES_DIR", resourcesDirectory.path, 1)
 
     let initResult = GhosttyGlobal.initResult
     guard initResult == 0 else {

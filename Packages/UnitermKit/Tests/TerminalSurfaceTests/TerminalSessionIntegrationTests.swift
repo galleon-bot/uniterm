@@ -12,6 +12,7 @@ import XCTest
 @MainActor
 final class TerminalSessionIntegrationTests: XCTestCase {
   private var sandbox: URL!
+  private var resources: URL!
   private var engine: GhosttyTerminalEngine!
   private var window: NSWindow!
   private var sessions: [any TerminalSession] = []
@@ -30,7 +31,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
       at: sandbox.appending(path: "work"), withIntermediateDirectories: true)
     try Data().write(to: sandbox.appending(path: "home/.zshrc"))
 
-    let resources = URL(fileURLWithPath: #filePath)
+    resources = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
       .appending(path: "Frameworks/GhosttyResources/ghostty")
     XCTAssertTrue(
@@ -41,7 +42,9 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     // ZDOTDIR goes in the process environment, since Ghostty's zsh integration reads it there and
     // restores it for the user's startup files. A ZDOTDIR passed as a launch variable would
     // override the integration's own.
-    for name in ["SHELL", "ZDOTDIR", "SSH_AUTH_SOCK", "SSH_ASKPASS"] {
+    for name in [
+      "SHELL", "ZDOTDIR", "SSH_AUTH_SOCK", "SSH_ASKPASS", "MAKEFLAGS", "GHOSTTY_RESOURCES_DIR",
+    ] {
       savedEnvironment[name] = getenv(name).map { String(cString: $0) }
     }
 
@@ -699,6 +702,55 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         self.screen(session).contains("PT:xterm-256color:")
       }
       XCTAssertFalse(screen(session).contains("PT:xterm-ghostty:"), ssh)
+    }
+  }
+
+  /// Catches a shell that inherits noise or another Ghostty's resources, and one that reports
+  /// libghostty's name. The test process starts with `MAKEFLAGS` set, runs the startup scrub, and
+  /// then inherits a `GHOSTTY_RESOURCES_DIR` that points nowhere. The shell sees no `MAKEFLAGS`,
+  /// the engine's own resources directory, and `TERM_PROGRAM=uniterm` with uniterm's version. The
+  /// harness cannot run the app's `main`, so it calls the same scrub function that `main` calls.
+  func testShellSeesTheScrubbedEnvironmentAndUnitermsIdentity() async throws {
+    setenv("MAKEFLAGS", "-j8", 1)
+    _ = InheritedEnvironment.scrubProcess()
+    setenv("GHOSTTY_RESOURCES_DIR", "/nonexistent/other-ghostty", 1)
+
+    engine = try GhosttyTerminalEngine(
+      configStore: TerminalConfigStore(directory: sandbox.appending(path: "config-env")),
+      resourcesDirectory: resources, palette: .latte)
+
+    let session = try startShell()
+    try await waitUntil("an idle prompt") { !session.isRunningSomething }
+
+    let version = TerminalIdentity.bundleVersion
+    try run(
+      #"echo "TP:$TERM_PROGRAM:$TERM_PROGRAM_VERSION:"; echo "MF:${MAKEFLAGS-unset}:"; "#
+        + #"[ "$GHOSTTY_RESOURCES_DIR" = '\#(resources.path)' ] && echo "RD:$((6*7)):""#,
+      in: session)
+
+    try await waitUntil("the environment report") {
+      let text = self.screen(session)
+      return text.contains("TP:uniterm:\(version):") && text.contains("MF:unset:")
+        && text.contains("RD:42:")
+    }
+  }
+
+  /// Catches a wrong claim about program launches. libghostty picks shell integration from the
+  /// first word of the command. uniterm single-quotes every word, so the word never reads as
+  /// `zsh` and integration stays off, whether the program is given by name or by path. A swapped
+  /// `ZDOTDIR` would show that integration reached a program the user typed.
+  func testAProgramLaunchOfZshGetsNoShellIntegration() async throws {
+    for command in [["/bin/zsh", "-f"], ["zsh", "-f"]] {
+      let session = try startProgram(command)
+
+      try run(
+        #"case "$ZDOTDIR" in *shell-integration*) echo "ZI:$((6*7)):yes";; *) echo "ZI:$((6*7)):no";; esac"#,
+        in: session)
+
+      try await waitUntil("the ZDOTDIR report of \(command[0])") {
+        self.screen(session).contains("ZI:42:")
+      }
+      XCTAssertTrue(screen(session).contains("ZI:42:no"), "\(command): integration applied")
     }
   }
 }

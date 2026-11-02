@@ -97,6 +97,48 @@ final class TerminalAppletTests: XCTestCase {
     return (applet, engine, host, engine.sessions[0])
   }
 
+  /// What every launch carries and nothing else, when the caller added no variables.
+  private var identity: [String: String] {
+    TerminalIdentity.environment(version: TerminalIdentity.bundleVersion)
+  }
+
+  // MARK: Identity
+
+  /// Catches a launch path that reports libghostty's `TERM_PROGRAM=ghostty`. Every way a terminal
+  /// starts must name uniterm: the first shell, a program, a new tab, a restored shell, and a
+  /// restored program once the user runs it. Undo restores through the same description, so it is
+  /// the restored cases.
+  func testEveryLaunchKindReportsUnitermAsTheTerminalProgram() throws {
+    let (applet, engine, _, _) = makeApplet()
+    applet.openTab()
+
+    let restoredShell = try TerminalApplet(
+      engine: engine, restoring: applet.describe(), directoryExists: { _ in true })
+    retained.append(restoredShell)
+    restoredShell.start()
+
+    let program = try TerminalApplet(engine: engine, program: "vim")
+    retained.append(program)
+    program.start()
+
+    let host = RecordingHost()
+    let restoredProgram = try restoreProgram(
+      try programDescription(), engine: engine, host: host)
+    let prompt = try XCTUnwrap(
+      restoredProgram.view.subviews.compactMap { $0 as? TerminalRunPrompt }.first)
+    prompt.run()
+
+    XCTAssertEqual(engine.sessions.count, 6)
+
+    for session in engine.sessions {
+      XCTAssertEqual(session.launch.environment["TERM_PROGRAM"], "uniterm")
+      XCTAssertEqual(
+        session.launch.environment["TERM_PROGRAM_VERSION"], TerminalIdentity.bundleVersion)
+    }
+
+    withExtendedLifetime(host) {}
+  }
+
   // MARK: Directories
 
   /// Catches an applet that reports a path it cannot start a terminal in, such as one from another
@@ -585,7 +627,7 @@ final class TerminalAppletTests: XCTestCase {
     XCTAssertEqual(engine.sessions.count, 1)
     XCTAssertEqual(applet.tabCount, 1)
     XCTAssertEqual(engine.sessions[0].launch.program, ["vim", "-u", "NONE", "-N", "my file"])
-    XCTAssertTrue(engine.sessions[0].launch.environment.isEmpty)
+    XCTAssertEqual(engine.sessions[0].launch.environment, identity)
     XCTAssertEqual(applet.title, "vim")
   }
 

@@ -8,14 +8,22 @@ public struct TerminalLaunch: Sendable, Equatable {
 
   /// The program and its arguments, or nil for the user's login shell. libghostty starts a program
   /// through `/bin/sh -c` with every word single-quoted, so no shell interprets the user's text.
-  /// Shell integration never wraps it.
+  ///
+  /// libghostty picks shell integration from the first word of the command. The quotes keep that
+  /// word from reading as `zsh` or `fish`, so a program launch gets no integration scripts. It
+  /// still inherits `GHOSTTY_SHELL_FEATURES`, which libghostty sets for every child.
   public var program: [String]?
 
-  /// Starts the user's default login shell, from `$SHELL` or the passwd entry.
+  /// Starts the user's default login shell, from `$SHELL` or the passwd entry. The launch reports
+  /// uniterm as the terminal program. A variable in `environment` replaces that.
   public static func loginShell(
-    workingDirectory: String? = nil, environment: [String: String] = [:]
+    workingDirectory: String? = nil, environment: [String: String] = [:],
+    version: String = TerminalIdentity.bundleVersion
   ) -> TerminalLaunch {
-    TerminalLaunch(workingDirectory: workingDirectory, environment: environment, program: nil)
+    TerminalLaunch(
+      workingDirectory: workingDirectory,
+      environment: TerminalIdentity.environment(version: version).merging(environment) { $1 },
+      program: nil)
   }
 
   /// Starts one program. The words are the program and its arguments, exactly as given.
@@ -25,9 +33,10 @@ public struct TerminalLaunch: Sendable, Equatable {
   /// `xterm-ghostty` terminfo entry would otherwise break the remote session. Other routes to a
   /// remote host, such as `mosh` or a wrapper script, are not covered.
   public static func program(
-    _ words: [String], workingDirectory: String? = nil, environment: [String: String] = [:]
+    _ words: [String], workingDirectory: String? = nil, environment: [String: String] = [:],
+    version: String = TerminalIdentity.bundleVersion
   ) -> TerminalLaunch {
-    var environment = environment
+    var environment = TerminalIdentity.environment(version: version).merging(environment) { $1 }
 
     if let name = words.first.map({ ($0 as NSString).lastPathComponent }), name == "ssh" {
       environment["TERM"] = "xterm-256color"

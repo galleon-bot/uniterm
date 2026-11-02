@@ -11,7 +11,7 @@ import WindowKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private let logger = Logger(subsystem: "dev.uniterm.app", category: "app")
-  private let settings = SettingsStore(defaults: AppDelegate.makeDefaults())
+  private let settings: SettingsStore
   private var appearance: AppearanceController?
   private var appearanceToken: UUID?
   private var paletteSync: TerminalPaletteSync?
@@ -21,12 +21,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var settingsWindowController: SettingsWindowController?
   private var askingToQuit = false
 
+  /// The `UNITERM_` variables the process started with. The scrub of the inherited environment
+  /// removes them from the process, so they are read from here. Only debug builds honor them.
+  private let debugEnvironment: [String: String]
+
+  init(debugEnvironment: [String: String]) {
+    self.debugEnvironment = debugEnvironment
+    self.settings = SettingsStore(defaults: Self.makeDefaults(debugEnvironment))
+    super.init()
+  }
+
   /// UI tests set `UNITERM_DEFAULTS_PATH` to a plist path inside the test runner's container, so
   /// they never touch the developer's real preferences. A write to that file from the sandboxed
   /// runner reaches the running app the way `defaults write` would. Only debug builds honor it.
-  private static func makeDefaults() -> UserDefaults {
+  private static func makeDefaults(_ environment: [String: String]) -> UserDefaults {
     #if DEBUG
-      if let path = ProcessInfo.processInfo.environment["UNITERM_DEFAULTS_PATH"],
+      if let path = environment["UNITERM_DEFAULTS_PATH"],
         let defaults = UserDefaults(suiteName: path)
       {
         return defaults
@@ -39,9 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// UI tests set `UNITERM_TERMINAL_DIR` so the generated terminal config stays out of the
   /// developer's Application Support folder. Only debug builds honor it, since a release build has
   /// no test to serve.
-  private static func terminalConfigDirectory() throws -> URL {
+  private func terminalConfigDirectory() throws -> URL {
     #if DEBUG
-      if let path = ProcessInfo.processInfo.environment["UNITERM_TERMINAL_DIR"] {
+      if let path = debugEnvironment["UNITERM_TERMINAL_DIR"] {
         return URL(fileURLWithPath: path, isDirectory: true)
       }
     #endif
@@ -51,9 +61,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   /// UI tests set `UNITERM_LAYOUT_DIR` so the saved layout stays out of the developer's Application
   /// Support folder. Only debug builds honor it, for the same reason as the terminal folder.
-  private static func layoutDirectory() throws -> URL {
+  private func layoutDirectory() throws -> URL {
     #if DEBUG
-      if let path = ProcessInfo.processInfo.environment["UNITERM_LAYOUT_DIR"] {
+      if let path = debugEnvironment["UNITERM_LAYOUT_DIR"] {
         return URL(fileURLWithPath: path, isDirectory: true)
       }
     #endif
@@ -63,9 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   /// UI tests set `UNITERM_LAYOUT_DEBOUNCE` to a long delay in seconds, so only the save on quit can
   /// write the layout. Only debug builds honor it.
-  private static func layoutDebounce() -> TimeInterval {
+  private func layoutDebounce() -> TimeInterval {
     #if DEBUG
-      if let text = ProcessInfo.processInfo.environment["UNITERM_LAYOUT_DEBOUNCE"],
+      if let text = debugEnvironment["UNITERM_LAYOUT_DEBOUNCE"],
         let seconds = TimeInterval(text), seconds > 0
       {
         return seconds
@@ -73,6 +83,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
 
     return 1
+  }
+
+  /// The `ghostty` folder that the build copies into the bundle's resources. It holds the
+  /// shell-integration scripts. The `terminfo` folder sits next to it.
+  private static func ghosttyResourcesDirectory() -> URL {
+    let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
+    return resources.appending(path: "ghostty", directoryHint: .isDirectory)
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -84,8 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let engine: GhosttyTerminalEngine
     do {
       engine = try GhosttyTerminalEngine(
-        configStore: TerminalConfigStore(directory: try Self.terminalConfigDirectory()),
-        resourcesDirectory: nil, palette: appearance.palette)
+        configStore: TerminalConfigStore(directory: try terminalConfigDirectory()),
+        resourcesDirectory: Self.ghosttyResourcesDirectory(), palette: appearance.palette)
     } catch {
       logger.error("the terminal engine did not start: \(String(describing: error))")
 
@@ -134,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let persistence: LayoutPersistence?
     do {
       persistence = LayoutPersistence(
-        directory: try Self.layoutDirectory(), windows: windows, debounce: Self.layoutDebounce())
+        directory: try layoutDirectory(), windows: windows, debounce: layoutDebounce())
     } catch {
       logger.error("the layout folder is not available: \(String(describing: error))")
       persistence = nil
@@ -192,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// a feature that may change. Only debug builds honor it.
   private func postDebugError(to controller: MainWindowController) {
     #if DEBUG
-      if let text = ProcessInfo.processInfo.environment["UNITERM_DEBUG_POST_ERROR"] {
+      if let text = debugEnvironment["UNITERM_DEBUG_POST_ERROR"] {
         controller.statusCenter.post(level: .error, source: .uniterm, text: text)
       }
     #endif
