@@ -2,7 +2,7 @@
 
 **Status:** accepted
 **Created:** 2026-10-31
-**Updated:** 2026-11-01
+**Updated:** 2026-11-02
 
 ## Dependencies
 
@@ -67,7 +67,8 @@ Decision: a live query from the pane tree.
 - An entry targets a pane by its stable pane ID, per ADR-02, and a tab by its tab ID. Never by a row, tree path, or tab
   index.
 - Choosing an entry whose pane or tab is gone changes nothing else. It refreshes the list and posts a status message.
-- Hidden grace-tier panes are not in the tree, so their tabs do not appear.
+- Every pane in the tree is on screen. A closed pane is out of the tree, so its tabs do not appear. Amended 2026-11-02;
+  see Decision Log.
 
 Rationale: the applet's own state is the only source, so nothing can go stale and nothing needs unregistering. A query
 on open breaks "when a tab closes, its entry disappears" in docked mode, where the palette may stay active for a long
@@ -345,7 +346,9 @@ fixed title, while the menu item still retitles itself.
 
 ### M2: Tab search
 
-**Status:** NOT STARTED
+**Status:** DONE
+
+Amended 2026-11-02; see Decision Log.
 
 - Every terminal tab in the window appears in the palette
 - Choosing a tab focuses its pane and switches to that tab
@@ -354,7 +357,7 @@ fixed title, while the menu item still retitles itself.
 - Enter acts on the highlighted entry's pane and tab IDs, even when the list re-sorts between the arrow key and Enter
 - A burst of tab title changes does not move the selection or stall typing
 - Choosing an entry whose tab is gone refreshes the list and posts a status message
-- Tabs of hidden grace-tier panes do not appear
+- The tabs of a closed pane do not appear, including those of a pane that closes while the palette shows
 - Tab IDs never repeat across launches without persisted state. A restored tab gets a new ID, and an old ID resolves
   to gone
 - On an empty query, the highlighted entry is the most recent tab other than the current one
@@ -365,6 +368,56 @@ fixed title, while the menu item still retitles itself.
 - Choosing a tab leaves focus on that tab, not on the pane that had focus before activation
 - An entry for an applet's single implicit tab reads in a defined way, such as by the applet's title
 - Tabs restored from the layout file, and commands never run, follow recent entries in a defined order
+
+**As built:**
+
+The applet contract gains a tab list and a change signal. A list holds a first tab and any others, so an empty list
+cannot be built. It names the selected tab, and each tab carries an ID, a title, and detail strings. The terminal
+publishes every tab, background ones too, with the directory its shell last reported. The launcher and the placeholder
+publish one tab each for their whole life, titled by the applet's own title. The host learns of a change through a new
+signal that fires for any tab, which the old change signal never did for a background tab. An applet selects a tab by
+ID, and answers false when the tab is gone.
+
+A tab ID pairs an epoch picked at random once per launch with a counter. IDs are not saved, and a restored tab is a
+new tab with a new ID. Two launches can count to the same number, so only the epoch tells their IDs apart. An old ID
+resolves to gone.
+
+The palette walks the pane tree in order for its tab entries each time it lists. It re-lists at once when the text
+changes or the tree changes shape. It re-lists on the tab signal and on the layout-change signal after a 100 millisecond
+hold, and changes that arrive during the hold join the pending list. The window's own description comparison is not
+used, since it ignores a title change that the saved description does not carry. Entries target a pane ID and a tab ID.
+The highlighted entry is kept by ID across a re-list, so Return acts on the tab that was highlighted.
+
+Choosing a tab whose pane or tab is gone leaves the palette up, lists again, and posts a warning. Choosing a live tab
+hides the palette without taking the keyboard back, selects the tab, and focuses its pane, so the tab ends with the
+keyboard. A pane that is gone and a tab that is gone take the same path.
+
+Ranking reuses M1's matcher and constants. A tab's recency counts as a boost on the same scale as a command's, 24 for
+the newest and 6 less for each older one, so a recent scattered match stays below a prefix or contiguous title match,
+which the matcher lifts by 80. Tab recency lives in memory, holds the 64 most recent tabs, and is pruned of closed tabs
+each time the palette lists. A tab is recent when it is the selected tab of the focused pane at the moment it takes
+focus or becomes selected. A change in a background tab never counts. With no query, the order is tabs focused before,
+then commands run before, then tabs never focused in tree order, then the other commands by title. The current tab, the
+one showing in the pane that had focus before the palette, is listed and marked. With no query, the first choice is the
+first tab other than the current one, in that order. A query of only spaces counts as no query. Typing, or clearing the
+text, picks the first choice again. A re-list from a tab or layout change keeps the highlight by ID. With no other tab,
+it is the first other entry that can run.
+
+Rows show a kind word at the right, "Tab" or "Command". A tab row also shows its details after the title in a dimmer
+style. Titles and details pass through one neutralizer before they are matched or shown. It turns control characters and
+line breaks into spaces, collapses runs of spaces of any width, drops the bidirectional controls and the other
+invisible format characters, and caps the text at 120 unicode scalars. A title with nothing left reads "Untitled". It
+keeps the zero width joiner inside an emoji sequence, so those stay whole. Details are joined with a space and searched
+as one string.
+
+Narrowed: the hidden-pane check was stale and is now stated for closed panes, per the Decision Log. The UI tests cover a
+background tab, the keyboard following the choice, a neutralized title, and a tab that closes while the palette shows.
+A real split or undo while the palette shows is covered by unit tests only.
+
+Residuals: a program-mode tab waiting to run is listed by its program name. The 100 millisecond hold is a guess, and
+no measurement backs it. The current tab sits at the top of the empty-query list, and the first choice skips it by rule,
+not by position. The terminal's own title cap counts characters, not scalars, so only the palette bounds a title of many
+combining marks.
 
 ### M3: Docked mode
 
@@ -463,6 +516,17 @@ fixed title, while the menu item still retitles itself.
   and its command run the same action. The key route alone would have left a menu item chosen with the mouse outside
   the palette rules. Also recorded in M1's As built: the registry lives in WindowKit, and the palette sizes and ranking
   constants are the implementation's.
+- 2026-11-02: Amended "How applets publish tabs" and M2 (work-queue best guess), a correction of fact. Both said the
+  tabs of hidden grace-tier panes do not appear. UTERM-001 M10 removed hidden panes, so every pane in the tree is on
+  screen and a closed pane is gone. The bullet now says that. The M2 check is restated for a closed pane, including one
+  that closes while the palette shows. UTERM-013 rejected a similar check for the same reason.
+- 2026-11-02: M2 best guesses (work-queue best guess). The contract signal is a new host call that fires for any tab,
+  not a change to the existing change signal, which feeds the status bar and layout saving for the selected tab only.
+  The list type cannot be empty, per "Applets without tabs". Tab IDs are a random per-launch epoch plus a counter. The
+  palette holds back tab-signal and layout re-lists for 100 milliseconds and joins a burst into one. Typing and a tree
+  change re-list at once. The current tab is listed, and the empty-query first choice skips it. Tab recency is kept for
+  the 64 most recent tabs. Titles and details are neutralized once, before matching, so what the user searches is what
+  shows.
 
 ## References
 

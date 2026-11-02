@@ -19,8 +19,8 @@ In progress.
 | Milestone | Run status | Commit |
 |-----------|------------|--------|
 | UTERM-002 M1 Floating palette with commands | DONE | "Add a command registry and a floating command palette" |
-| UTERM-002 M2 Tab search | IN PROGRESS | |
-| UTERM-002 M3 Docked mode | QUEUED | |
+| UTERM-002 M2 Tab search | DONE | "Let the command palette find every tab in the window" |
+| UTERM-002 M3 Docked mode | IN PROGRESS | |
 | UTERM-002 row review | QUEUED | |
 | UTERM-013 M1 Applet-declared shortcuts | QUEUED | |
 | UTERM-013 M2 Reopen with Cmd-Shift-T | QUEUED | |
@@ -100,6 +100,52 @@ Review findings:
 
 ADR review: no conflicts. Two uncovered decisions were raised, and neither is recorded as a candidate. The window key
 route is mechanism that UTERM-013 keeps out of ADR-04 on purpose. A registry ADR was already declined on 2026-11-01.
+
+### UTERM-002 M2: Tab search
+
+Commit: "Let the command palette find every tab in the window".
+
+Checks, final round: `make fmt-check`, `make lint`, and `make check` pass. `make test-package` ran 467 tests, with 4
+skipped and 0 failures. `make test-app` ran 62 UI tests, with 0 failures, in 472 seconds. `proposals.py check` and
+`proposals.py freeze` report nothing.
+
+Test cost: `TabSearchTests` runs 18 tests in about 0.4 seconds. `AppletTabTests` takes about 0.001 seconds. The three new
+UI tests take 8 to 14 seconds each.
+
+Best guesses by the implementer:
+
+- The applet contract publishes a tab list built as a first tab plus the rest, so an empty list cannot be built. A new
+  host signal reports any tab change, background tabs included. The old change signal is kept for titles and segments.
+- Launcher and placeholder panes publish one tab, titled by the applet's title.
+- The palette re-lists at once on typing and on tree-shape change. Tab and layout changes are held for 100 ms, so a
+  burst becomes one pass. The interval is unmeasured.
+- Tab recency uses the same bounded boost as commands, and keeps the 64 most recent tabs.
+- The current tab is listed and marked. On an empty or blank query, the first choice is the most recent other tab.
+- Titles and details are neutralized:
+  - Control characters, line breaks, and wide spaces become one space.
+  - Bidi and format controls are dropped, except a ZWJ inside an emoji sequence.
+  - The text is capped at 120 Unicode scalars.
+  - Text with nothing left reads as "Untitled".
+- Typing re-highlights the top result on each keystroke, even after an arrow key. A re-sort from a tab or layout change
+  keeps the highlight by ID.
+- The stale grace-tier lines in "How applets publish tabs" and in the M2 checks were amended as a correction of fact.
+  UTERM-001 M10 removed hidden panes. The check now says a closed pane's tabs do not appear.
+
+Residuals: a real split or undo while the palette shows is covered by unit tests only. The terminal's own 80-character
+title cap counts grapheme clusters, so it does not bound combining marks. The palette's own cap does. A program-mode
+tab waiting to run is listed by its program name.
+
+Review findings:
+
+- The neutralizer's cap counted grapheme clusters, and invisible-only titles showed blank rows: traced, confirmed by
+  tests that failed on the unfixed code, and fixed.
+- A blank query highlighted the current tab, and clearing the query kept a stale highlight: traced, confirmed by a
+  test that failed on the unfixed code, and fixed.
+- A test that proved only the fake applet's behavior: retired. A terminal restore test already covers the contract.
+- An overlong proposal line and a stale `**Updated:**` date: fixed.
+
+ADR review: no conflicts. The two uncovered decisions it raised are one tab per applet and never-reused tab IDs. That
+candidate was declined on 2026-11-01, so it is not recorded again.
 
 ## Status
 

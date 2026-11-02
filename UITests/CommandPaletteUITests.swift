@@ -158,4 +158,96 @@ final class CommandPaletteUITests: UnitermUITestCase {
 
     XCTAssertTrue(palette(in: app).waitForExistence(timeout: 5), "the terminal took the key")
   }
+
+  // MARK: Tab search
+
+  private func row(_ title: String, kind: String = "Tab", in app: XCUIApplication) -> XCUIElement {
+    app.descendants(matching: .any).matching(identifier: "command-palette-row")
+      .element(
+        matching: NSPredicate(format: "label == %@ AND value BEGINSWITH %@", title, kind))
+  }
+
+  /// Opens a tab and waits for its shell to show a prompt.
+  private func openTab(in app: XCUIApplication) {
+    app.typeKey("t", modifierFlags: .command)
+
+    let terminal = mainWindow(in: app).textViews["terminal"]
+    XCTAssertTrue(terminal.waitForExistence(timeout: 15))
+    XCTAssertTrue(
+      waitFor(terminal, timeout: 40) { $0.contains("% ") }, "the new tab never showed a prompt")
+  }
+
+  /// Catches a tab list that misses a background tab, a choice that switches the tab but leaves
+  /// the keyboard elsewhere, and a row that does not say it is a tab. The first tab sets its title
+  /// and then waits, so its prompt cannot reset the title. After the choice, Control-C ends the
+  /// wait and the next line must reach that tab's shell.
+  func testChoosingABackgroundTabSelectsItAndTheKeyboardFollows() {
+    let app = launchApp()
+    _ = waitForTerminal(in: app)
+
+    app.typeText("printf \"\\033]0;zzq-title\\007\"; sleep 600\n")
+    openTab(in: app)
+    XCTAssertTrue(tab(1, in: app).waitForExistence(timeout: 10))
+
+    showPalette(in: app)
+    app.typeText("zzq")
+
+    let entry = row("zzq-title", in: app)
+    XCTAssertTrue(entry.waitForExistence(timeout: 10), "the background tab was not listed")
+    XCTAssertEqual(entry.value as? String, "Tab, enabled")
+
+    app.typeKey(.return, modifierFlags: [])
+
+    XCTAssertTrue(waitUntilGone(palette(in: app)))
+    XCTAssertTrue(
+      waitFor(tab(0, in: app), timeout: 10) { $0 == "selected" }, "the tab was not selected")
+
+    app.typeKey("c", modifierFlags: .control)
+    app.typeText("echo reached-first-tab\n")
+    XCTAssertTrue(
+      waitFor(mainWindow(in: app).textViews["terminal"], timeout: 20) {
+        $0.contains("reached-first-tab")
+      }, "the keyboard did not follow the chosen tab")
+  }
+
+  /// Catches a title that reaches a row with its control and bidi characters, so a program could
+  /// pose as a command or reorder the text. The title carries an override and an escape.
+  func testAProgramTitleShowsNeutralizedAsATab() {
+    let app = launchApp()
+    _ = waitForTerminal(in: app)
+
+    app.typeText("printf \"\\033]0;New\\342\\200\\256 Window\\007\"; sleep 600\n")
+    openTab(in: app)
+
+    showPalette(in: app)
+    app.typeText("new w")
+
+    let entry = row("New Window", in: app)
+    XCTAssertTrue(entry.waitForExistence(timeout: 10), "the title was not neutralized")
+    XCTAssertEqual(entry.value as? String, "Tab, enabled")
+    XCTAssertTrue(
+      row("New Window", kind: "Command", in: app).exists,
+      "the command and the tab of the same name are not told apart")
+  }
+
+  /// Catches a list that stays stale in the open palette. The second tab titles itself and exits
+  /// after a few seconds. The row shows while the palette is up and must go once the tab closes.
+  func testATabThatClosesWhileThePaletteShowsDisappearsFromTheList() {
+    let app = launchApp()
+    _ = waitForTerminal(in: app)
+
+    openTab(in: app)
+    app.typeText("printf \"\\033]0;yyq-title\\007\"; sleep 8; exit\n")
+    app.typeKey("1", modifierFlags: .command)
+    XCTAssertTrue(waitFor(tab(0, in: app), timeout: 10) { $0 == "selected" })
+
+    showPalette(in: app)
+    app.typeText("yyq")
+    XCTAssertTrue(row("yyq-title", in: app).waitForExistence(timeout: 10))
+
+    XCTAssertTrue(
+      waitUntilGone(row("yyq-title", in: app), timeout: 30),
+      "the closed tab stayed in the open palette")
+    XCTAssertTrue(palette(in: app).exists)
+  }
 }

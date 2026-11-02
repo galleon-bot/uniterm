@@ -90,3 +90,28 @@ final class PaletteRankingTests: XCTestCase {
     XCTAssertEqual(PaletteDispatch.rule(for: .quit, paletteShown: true), .dismissThenRun)
   }
 }
+
+/// The text rules for what a palette row shows.
+final class PaletteTextTests: XCTestCase {
+  /// Catches a bidi override or a line break that survives into a row. A title could otherwise
+  /// reorder the text after it or forge a second row.
+  func testControlAndBidiCharactersAreNeutralized() {
+    XCTAssertEqual(PaletteText.neutralized("a\u{202E}b\u{2067}c\u{200F}d\u{061C}"), "abcd")
+    XCTAssertEqual(
+      PaletteText.neutralized("one\r\ntwo\u{2028}three\tfour\u{7}"), "one two three four")
+    XCTAssertEqual(PaletteText.neutralized("  spaced   out  "), "spaced out")
+    XCTAssertEqual(PaletteText.neutralized("\u{202E}\u{1B}"), "")
+  }
+
+  /// Catches a title long enough to push the kind label off the row.
+  func testTextIsCapped() {
+    XCTAssertEqual(
+      PaletteText.neutralized(String(repeating: "x", count: 500)).count,
+      PaletteText.maximumLength)
+  }
+
+  /// Catches emoji sequences that lose their joiner, since only bidi controls are dropped.
+  func testEmojiJoinersSurvive() {
+    XCTAssertEqual(PaletteText.neutralized("👩\u{200D}💻"), "👩\u{200D}💻")
+  }
+}

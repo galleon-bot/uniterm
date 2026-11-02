@@ -22,6 +22,9 @@ final class LauncherApplet: Applet {
   let isRunningSomething = false
   weak var host: (any AppletHost)?
 
+  /// The launcher's one tab, for its whole life.
+  let publishedTabs: AppletTabList
+
   let launcher = LauncherView()
 
   /// Where whatever the user picks starts. Nil when the pane it was opened from had no directory.
@@ -38,6 +41,7 @@ final class LauncherApplet: Applet {
 
   init(directory: String? = nil) {
     currentDirectory = directory
+    publishedTabs = AppletTabList(first: AppletTab(id: .make(), title: "New pane"))
 
     launcher.onExit = { [weak self] in
       guard let self else { return }

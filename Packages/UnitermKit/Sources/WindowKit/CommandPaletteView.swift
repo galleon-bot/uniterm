@@ -138,13 +138,16 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
 
   /// Shows a fresh list. The selection stays on its entry when the entry is still there and can
   /// run. Otherwise it moves to the first entry that can run.
+  ///
+  /// With no query, the first choice is the most recent tab other than the current one, so Return
+  /// goes back to where the user was. With no other tab it is the first other entry that can run.
   func setEntries(_ entries: [PaletteEntry]) {
     self.entries = entries
 
     if let selection, entries.contains(where: { $0.id == selection && $0.isEnabled }) {
       // The same entry stays highlighted, wherever it sorted to.
     } else {
-      selection = entries.first { $0.isEnabled }?.id
+      selection = Self.firstChoice(in: entries, emptyQuery: PaletteRanking.isEmpty(query))
     }
 
     let rows = min(entries.count, Self.maximumVisibleRows)
@@ -155,6 +158,16 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
 
     table.reloadData()
     scrollToSelection()
+  }
+
+  private static func firstChoice(in entries: [PaletteEntry], emptyQuery: Bool) -> PaletteEntryID? {
+    let enabled = entries.filter(\.isEnabled)
+
+    guard emptyQuery else { return enabled.first?.id }
+
+    let others = enabled.filter { !$0.isCurrent }
+
+    return (others.first { $0.kind == .tab } ?? others.first ?? enabled.first)?.id
   }
 
   /// Clears the text and the selection for the next time the palette shows.
@@ -206,6 +219,8 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
   // MARK: Field delegate
 
   func controlTextDidChange(_ notification: Notification) {
+    // New text picks the first choice again. Only a re-list from the tabs keeps the highlight.
+    selection = nil
     onQueryChange?(field.stringValue)
   }
 
@@ -293,24 +308,50 @@ private final class PaletteRowView: NSView {
   }
 
   func configure(_ entry: PaletteEntry, selected: Bool, palette: ThemePalette) {
-    title.stringValue = entry.title
     kind.stringValue = entry.kind.label
 
     let onAccent = palette.flavor == .latte ? palette[.base] : palette[.crust]
 
+    let titleColor: NSColor
+    let detailColor: NSColor
+
     if selected {
       layer?.backgroundColor = palette[.blue].cgColor
-      title.textColor = onAccent.nsColor
+      titleColor = onAccent.nsColor
+      detailColor = onAccent.nsColor
       kind.textColor = onAccent.nsColor
     } else {
       layer?.backgroundColor = NSColor.clear.cgColor
-      title.textColor = entry.isEnabled ? palette[.text].nsColor : palette[.overlay0].nsColor
+      titleColor = entry.isEnabled ? palette[.text].nsColor : palette[.overlay0].nsColor
+      detailColor = palette[.overlay1].nsColor
       kind.textColor = palette[.overlay1].nsColor
     }
 
+    let truncating = NSMutableParagraphStyle()
+    truncating.lineBreakMode = .byTruncatingTail
+
+    let text = NSMutableAttributedString(
+      string: entry.title,
+      attributes: [
+        .foregroundColor: titleColor, .font: NSFont.systemFont(ofSize: 13),
+        .paragraphStyle: truncating,
+      ])
+
+    if let detail = entry.detail, !detail.isEmpty {
+      text.append(
+        NSAttributedString(
+          string: "  " + detail,
+          attributes: [
+            .foregroundColor: detailColor, .font: NSFont.systemFont(ofSize: 11),
+            .paragraphStyle: truncating,
+          ]))
+    }
+
+    title.attributedStringValue = text
+
     setAccessibilityLabel(entry.title)
-    setAccessibilityValue(entry.isEnabled ? "enabled" : "disabled")
-    setAccessibilityHelp(entry.kind.label)
+    setAccessibilityValue("\(entry.kind.label), \(entry.isEnabled ? "enabled" : "disabled")")
+    setAccessibilityHelp(entry.detail)
     setAccessibilitySelected(selected)
   }
 }

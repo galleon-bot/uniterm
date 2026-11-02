@@ -1,20 +1,25 @@
+import AppletKit
 import Foundation
+import PaneModel
 
 /// What a palette entry stands for. Choosing it acts on this, never on a row or an index, so a
 /// list that re-sorts under the keyboard still acts on the entry that was highlighted.
 enum PaletteEntryID: Hashable, Sendable {
   case command(CommandID)
+  case tab(pane: NodeID, tab: AppletTabID)
 }
 
 /// One row of the palette.
 struct PaletteEntry: Equatable, Sendable {
   enum Kind: Sendable, Equatable {
     case command
+    case tab
 
     /// The word the row shows, so a program-set title can never pass for a command.
     var label: String {
       switch self {
       case .command: "Command"
+      case .tab: "Tab"
       }
     }
   }
@@ -29,6 +34,10 @@ struct PaletteEntry: Equatable, Sendable {
 
   /// A row for something that cannot run now still shows, dimmed, and Enter ignores it.
   var isEnabled: Bool
+
+  /// True for the tab that was showing in the pane that had focus before the palette. With no
+  /// query, Return skips it, since the user came to leave it.
+  var isCurrent = false
 }
 
 /// An entry together with what ranking needs to know about it.
@@ -57,10 +66,15 @@ enum PaletteRanking {
   static let recencyBoost = 24
   static let recencyStep = 6
 
+  /// A query of only spaces ranks and highlights as no query.
+  static func isEmpty(_ query: String) -> Bool {
+    query.trimmingCharacters(in: .whitespaces).isEmpty
+  }
+
   static func rank(_ candidates: [PaletteCandidate], query: String) -> [PaletteEntry] {
     let trimmed = query.trimmingCharacters(in: .whitespaces)
 
-    guard !trimmed.isEmpty else {
+    guard !isEmpty(query) else {
       return emptyQueryOrder(candidates)
     }
 
@@ -89,8 +103,26 @@ enum PaletteRanking {
     return max(0, recencyBoost - rank * recencyStep)
   }
 
+  /// Tabs focused before, newest first. Then commands run before, newest first. Then the tabs never
+  /// focused in tree order, and the commands never run by title.
   private static func emptyQueryOrder(_ candidates: [PaletteCandidate]) -> [PaletteEntry] {
-    candidates.sorted(by: naturalOrder).map(\.entry)
+    candidates.sorted { lhs, rhs in
+      let left = emptyQueryGroup(lhs)
+      let right = emptyQueryGroup(rhs)
+
+      if left != right { return left < right }
+
+      return naturalOrder(lhs, rhs)
+    }.map(\.entry)
+  }
+
+  private static func emptyQueryGroup(_ candidate: PaletteCandidate) -> Int {
+    switch (candidate.entry.kind, candidate.recencyRank != nil) {
+    case (.tab, true): 0
+    case (.command, true): 1
+    case (.tab, false): 2
+    case (.command, false): 3
+    }
   }
 
   /// Recent entries first, newest first. Then the rest in their natural order, with titles

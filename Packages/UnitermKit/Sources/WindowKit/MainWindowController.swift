@@ -49,6 +49,27 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   var isPaletteVisible: Bool { paletteTarget != nil }
 
+  /// The tabs that took focus, newest first. It lives in memory only. A tab ID is never reused,
+  /// so an entry for a tab that closed is harmless and the palette prunes it when it lists.
+  var tabRecency: [PaletteTabKey] = []
+
+  static let maximumRecentTabs = 64
+
+  /// How long a burst of tab changes waits before the palette lists again. Typing refreshes the
+  /// list at once, so only changes from the applets are held back.
+  static let paletteRefreshInterval: TimeInterval = 0.1
+
+  /// True while a held-back refresh is waiting. A change that arrives meanwhile joins it.
+  var paletteRefreshPending = false
+
+  /// Starts a wake after a delay. Tests replace it with one they fire by hand.
+  var paletteWake: (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, action in
+    Task { @MainActor in
+      try? await Task.sleep(for: .seconds(delay))
+      action()
+    }
+  }
+
   /// The window's closed panes, as descriptions. No closed applet is kept alive.
   private(set) var ledger: CloseUndoLedger
 
@@ -141,12 +162,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       self?.updateMinimumSize()
       self?.refreshCommandPalette()
     }
-    paneArea.onLayoutChange = { [weak self] in self?.onLayoutChange?() }
-    paneArea.onFocusChange = { [weak self] in self?.refreshStatusBar() }
+    paneArea.onLayoutChange = { [weak self] in
+      self?.onLayoutChange?()
+      self?.schedulePaletteRefresh()
+    }
+    paneArea.onFocusChange = { [weak self] in
+      self?.refreshStatusBar()
+      self?.recordFocusedTab()
+    }
     contentController.onLayout = { [weak self] in self?.updateMinimumSize() }
     contentController.statusBar.onActivate = { [weak self] in self?.toggleMessageHistory(nil) }
     contentController.statusBar.onDismiss = { [weak self] in self?.dismissMessage(nil) }
     wireCommandPalette()
+    recordFocusedTab()
     placement.onChange = { [weak self] position in
       self?.contentController.move(.statusBar, to: DockEdge(position))
     }
@@ -796,6 +824,16 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     guard applet === paneArea.applet(for: paneArea.focusedPane) else { return }
 
     refreshStatusBar()
+  }
+
+  /// Records the tab as recent when it is the focused pane's. A tab that changes in the
+  /// background never counts as recent. Then the palette lists again, a moment later.
+  public func appletTabsDidChange(_ applet: any Applet) {
+    if applet === paneArea.applet(for: paneArea.focusedPane) {
+      recordFocusedTab()
+    }
+
+    schedulePaletteRefresh()
   }
 
   public func applet(_ applet: any Applet, confirm request: AppletConfirmation) async -> Bool {

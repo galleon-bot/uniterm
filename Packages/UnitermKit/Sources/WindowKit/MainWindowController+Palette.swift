@@ -1,5 +1,12 @@
 import AppKit
+import AppletKit
 import PaneModel
+
+/// A tab in a pane of this window.
+struct PaletteTabKey: Hashable {
+  var pane: NodeID
+  var tab: AppletTabID
+}
 
 // MARK: Command palette
 
@@ -20,6 +27,7 @@ extension MainWindowController {
     let palette = contentController.commandPalette
 
     paletteTarget = paneArea.focusedPane
+    recordFocusedTab()
     palette.reset()
     refreshCommandPalette()
     palette.isHidden = false
@@ -73,7 +81,7 @@ extension MainWindowController {
 
     let palette = contentController.commandPalette
     let context = CommandContext(controller: self, pane: target)
-    var candidates: [PaletteCandidate] = []
+    var candidates = tabCandidates(target: target)
 
     for command in commands.commands where command.listedInPalette {
       let entry = PaletteEntry(
@@ -89,19 +97,108 @@ extension MainWindowController {
     palette.setEntries(PaletteRanking.rank(candidates, query: palette.query))
   }
 
+  /// Moves the focused pane's selected tab to the front of the recent tabs.
+  func recordFocusedTab() {
+    let pane = paneArea.focusedPane
+
+    guard let applet = paneArea.applet(for: pane) else { return }
+
+    let key = PaletteTabKey(pane: pane, tab: applet.publishedTabs.selected)
+
+    guard tabRecency.first != key else { return }
+
+    tabRecency.removeAll { $0 == key }
+    tabRecency.insert(key, at: 0)
+
+    if tabRecency.count > Self.maximumRecentTabs {
+      tabRecency.removeLast(tabRecency.count - Self.maximumRecentTabs)
+    }
+  }
+
+  /// One entry for each tab of each pane, in tree order. The tree is the only source, so a pane
+  /// that closed takes its tabs with it.
+  private func tabCandidates(target: NodeID) -> [PaletteCandidate] {
+    var entries: [(key: PaletteTabKey, entry: PaletteEntry)] = []
+
+    for pane in paneArea.tree.paneIDs {
+      guard let applet = paneArea.applet(for: pane) else { continue }
+
+      let list = applet.publishedTabs
+
+      for tab in list.all {
+        let title = PaletteText.neutralized(tab.title)
+        let detail = PaletteText.neutralized(tab.details.joined(separator: " "))
+
+        let entry = PaletteEntry(
+          id: .tab(pane: pane, tab: tab.id), kind: .tab,
+          title: title.isEmpty ? "Untitled" : title, detail: detail.isEmpty ? nil : detail,
+          isEnabled: true, isCurrent: pane == target && tab.id == list.selected)
+
+        entries.append((PaletteTabKey(pane: pane, tab: tab.id), entry))
+      }
+    }
+
+    let live = Set(entries.map(\.key))
+    tabRecency.removeAll { !live.contains($0) }
+
+    return entries.enumerated().map { order, item in
+      PaletteCandidate(
+        entry: item.entry, recencyRank: tabRecency.firstIndex(of: item.key), order: order)
+    }
+  }
+
+  /// Lists again after a short wait, so a burst of title changes costs one pass.
+  func schedulePaletteRefresh() {
+    guard isPaletteVisible, !paletteRefreshPending else { return }
+
+    paletteRefreshPending = true
+
+    paletteWake(Self.paletteRefreshInterval) { [weak self] in
+      guard let self else { return }
+
+      paletteRefreshPending = false
+      refreshCommandPalette()
+    }
+  }
+
   /// Runs the entry the user chose. The palette hides and gives the keyboard back first, so a
   /// launcher, a sheet, or a window that the command opens ends up holding it.
   private func choose(_ entry: PaletteEntry) {
     guard let target = paletteTarget else { return }
 
-    let context = CommandContext(controller: self, pane: target)
-
-    hideCommandPalette(restoringFocus: true)
-
     switch entry.id {
     case .command(let id):
+      let context = CommandContext(controller: self, pane: target)
+
+      hideCommandPalette(restoringFocus: true)
       commands.run(id, in: context)
+
+    case .tab(let pane, let tab):
+      chooseTab(pane: pane, tab: tab, title: entry.title)
     }
+  }
+
+  /// Focuses the pane and selects the tab, both by ID. A tab that is gone leaves the palette up,
+  /// lists again, and says so. The palette hides without taking the keyboard back, so the chosen
+  /// tab ends up holding it.
+  private func chooseTab(pane: NodeID, tab: AppletTabID, title: String) {
+    guard let applet = paneArea.applet(for: pane), applet.publishedTabs.contains(tab) else {
+      refreshCommandPalette()
+      postTabGone(for: title)
+      return
+    }
+
+    hideCommandPalette(restoringFocus: false)
+
+    guard applet.selectTab(id: tab) else { return }
+
+    paneArea.focus(pane)
+  }
+
+  private func postTabGone(for title: String) {
+    statusCenter.post(
+      level: .warning, source: .uniterm,
+      text: "\u{201C}\(title)\u{201D} has closed. The list is up to date now.")
   }
 
   /// A mouse press outside the palette hides it, and the press then goes to what it hit. The

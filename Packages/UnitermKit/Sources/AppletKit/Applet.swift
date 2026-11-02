@@ -49,6 +49,11 @@ public protocol AppletHost: AnyObject {
   /// The title or the segments changed.
   func appletDidChange(_ applet: any Applet)
 
+  /// The applet's tab list changed: a tab opened, closed, or was selected, or a tab's title or
+  /// details changed. It fires for tabs in the background too, which `appletDidChange` does not
+  /// report.
+  func appletTabsDidChange(_ applet: any Applet)
+
   /// Asks the user. Nothing happens until the user answers.
   func applet(_ applet: any Applet, confirm request: AppletConfirmation) async -> Bool
 }
@@ -71,6 +76,11 @@ public protocol Applet: AnyObject {
 
   var title: String { get }
   var segments: [AppletSegment] { get }
+
+  /// The tabs the palette finds. It is never empty. An applet with nothing to switch between
+  /// publishes one tab for its whole session. The applet tells the host when it changes, with
+  /// `appletTabsDidChange`.
+  var publishedTabs: AppletTabList { get }
 
   /// True when closing the applet would kill work that undo cannot bring back.
   var isRunningSomething: Bool { get }
@@ -104,6 +114,10 @@ public protocol Applet: AnyObject {
   /// The applet is back on screen. It undoes what `detach` did.
   func reattach()
 
+  /// Selects the tab with this ID. Returns false when the applet has no such tab, as when it
+  /// closed. An applet with one tab selects nothing and returns true when the ID is that tab's.
+  func selectTab(id: AppletTabID) -> Bool
+
   /// Gives the applet keyboard focus.
   func focus()
 
@@ -116,6 +130,10 @@ public protocol Applet: AnyObject {
 
 extension Applet {
   public func apply(_ palette: ThemePalette) {}
+
+  public func selectTab(id: AppletTabID) -> Bool {
+    publishedTabs.contains(id)
+  }
 
   public var currentDirectory: String? { nil }
 

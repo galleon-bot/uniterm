@@ -14,6 +14,7 @@ private final class DirectoryApplet: Applet {
   let view = NSView()
   let title = "Directory"
   let segments: [AppletSegment] = []
+  let publishedTabs = AppletTabList(first: AppletTab(id: .make(), title: "Directory"))
   let isRunningSomething = false
   weak var host: (any AppletHost)?
   let currentDirectory: String?
