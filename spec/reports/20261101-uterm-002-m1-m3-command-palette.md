@@ -24,8 +24,8 @@ In progress.
 | UTERM-002 row review | DONE | "Ask the applet before hiding the palette, and tidy the row" |
 | UTERM-013 M1 Applet-declared shortcuts | DONE | "Let applets declare their own shortcuts and reserve uniterm's window keys" |
 | UTERM-013 M2 Reopen with Cmd-Shift-T | DONE | "Reopen the newest closed tab or pane with Cmd-Shift-T" |
-| UTERM-013 row review | IN PROGRESS | |
-| Final review | QUEUED | |
+| UTERM-013 row review | DONE | "Tidy shortcut ownership after review" |
+| Final review | IN PROGRESS | |
 
 Held or blocked rows: none. UTERM-013's row depends on UTERM-002 M1, which this run builds first.
 

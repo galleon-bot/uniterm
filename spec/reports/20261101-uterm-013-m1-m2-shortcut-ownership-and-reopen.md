@@ -157,6 +157,10 @@ Cmd-9, and the uncanonical key match, describes what UTERM-002 shipped. It is no
 
 ADR review over the row: no conflicts and nothing new. Its candidates are settled or deferred in the Decision Log.
 
+Row finish commit: "Finish shortcut ownership and reopen". UTERM-013 is `implemented`, the index says so, and its row
+moved to `history.md`. UTERM-001's M7 and M10 carry "Superseded in part by UTERM-013", with a Decision Log entry, since
+they bound pane reopen to Cmd-Z. `proposals.py check` and `proposals.py freeze` report nothing.
+
 ## Status
 
 In progress.

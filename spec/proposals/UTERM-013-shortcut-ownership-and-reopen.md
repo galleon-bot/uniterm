@@ -1,8 +1,8 @@
 # UTERM-013: Shortcut Ownership and Reopening Closed Tabs
 
-**Status:** accepted
+**Status:** implemented
 **Created:** 2026-11-01
-**Updated:** 2026-11-01
+**Updated:** 2026-11-02
 
 ## Dependencies
 
@@ -581,6 +581,7 @@ pane's usual start error.
   Typing", while a field is edited. That is standard AppKit behavior. The item is built as "Undo" and returns to it
   outside an edit. A remap of "Undo" under App Shortcuts matches that base title. It may not match while the item shows
   the retitled form. This was not verified against macOS.
+- 2026-11-02: Implemented. M1 and M2 are done, and the row review's fixes landed.
 
 ## References
 
