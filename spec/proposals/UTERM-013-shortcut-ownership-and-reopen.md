@@ -431,6 +431,8 @@ Builds on UTERM-002's command registry milestone.
   the applet contract.
 - 2026-11-01: Accepted.
 - 2026-11-01: Scheduled as UTERM-013 M1-M2 in queue.md.
+- 2026-11-01: UTERM-002's "Command source" and M1 were amended to keep the standard edit actions on the responder
+  chain and to defer menus to this proposal. The risk that the two disagree is now resolved in the text.
 
 ## References
 
