@@ -118,7 +118,7 @@ final class UndoCloseTests: XCTestCase {
     let fixture = try makeFixture()
     fixture.openPanes(2)
 
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
     XCTAssertTrue(fixture.made[1].closed)
@@ -133,7 +133,7 @@ final class UndoCloseTests: XCTestCase {
   func testUndoReopensFromTheDescriptionWithANewID() throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
 
     fixture.controller.undoClosePane(nil)
 
@@ -159,7 +159,7 @@ final class UndoCloseTests: XCTestCase {
     let bytes = Data(#"{"type":"fake","version":9,"payload":{"new":true}}"#.utf8)
     fixture.made[1].fixedDescription = AppletDescription(
       type: "fake", version: 9, payload: .null, verbatim: bytes)
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
 
     fixture.controller.undoClosePane(nil)
 
@@ -181,8 +181,8 @@ final class UndoCloseTests: XCTestCase {
     fixture.openPanes(3)
     XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2), id(4)])
 
-    fixture.controller.closePane(nil)
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
+    fixture.controller.dispatch(.close)
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
 
     fixture.controller.undoClosePane(nil)
@@ -199,8 +199,8 @@ final class UndoCloseTests: XCTestCase {
   func testUndoPlacesThePaneBesideItsNeighborAfterTheNeighborMoved() throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
-    fixture.controller.closePane(nil)
-    fixture.controller.focusPaneLeft(nil)
+    fixture.controller.dispatch(.close)
+    fixture.controller.dispatch(.focusPaneLeft)
     XCTAssertNotNil(fixture.controller.openPane(.terminalShell, axis: .column))
 
     fixture.controller.undoClosePane(nil)
@@ -225,8 +225,8 @@ final class UndoCloseTests: XCTestCase {
     let fixture = try makeFixture()
     fixture.openPanes(3)
     XCTAssertEqual(fixture.controller.paneIDs, [id(1), id(2), id(4)])
-    fixture.controller.focusPaneLeft(nil)
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.focusPaneLeft)
+    fixture.controller.dispatch(.close)
     fixture.controller.appletDidExit(fixture.made[0])
     XCTAssertEqual(fixture.controller.paneIDs, [id(4)])
 
@@ -246,7 +246,7 @@ final class UndoCloseTests: XCTestCase {
     for _ in 0..<3 {
       let focused = fixture.controller.focusedPane
       closed.append(try XCTUnwrap(fixture.controller.paneArea.applet(for: focused)).title)
-      fixture.controller.closePane(nil)
+      fixture.controller.dispatch(.close)
     }
 
     XCTAssertEqual(fixture.controller.ledger.entries.map(\.title), Array(closed.suffix(2)))
@@ -267,7 +267,7 @@ final class UndoCloseTests: XCTestCase {
   func testAnUndoThatDoesNotFitKeepsTheEntry() throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     let window = try XCTUnwrap(fixture.controller.window)
     window.setContentSize(NSSize(width: 300, height: 640))
     window.contentView?.layoutSubtreeIfNeeded()
@@ -293,7 +293,7 @@ final class UndoCloseTests: XCTestCase {
     fixture.made[1].labels = ["vim notes.txt", "make test"]
 
     fixture.recorder.answers = [false]
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     await fixture.settle()
 
     XCTAssertEqual(fixture.recorder.asked.count, 1)
@@ -304,7 +304,7 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
 
     fixture.recorder.answers = [true]
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     await fixture.settle()
 
     XCTAssertEqual(fixture.recorder.asked.count, 2)
@@ -322,7 +322,7 @@ final class UndoCloseTests: XCTestCase {
     fixture.made[1].isRunningSomething = true
     fixture.recorder.answers = [true]
 
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     XCTAssertNotNil(fixture.controller.pendingGuard)
 
     fixture.made[1].isRunningSomething = false
@@ -344,7 +344,7 @@ final class UndoCloseTests: XCTestCase {
     fixture.made[1].isRunningSomething = true
     fixture.recorder.answers = [true]
 
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     fixture.controller.appletDidExit(fixture.made[0])
     await fixture.settle()
 
@@ -420,7 +420,7 @@ final class UndoCloseTests: XCTestCase {
     fixture.openPanes(2)
     fixture.made[1].isRunningSomething = true
     fixture.recorder.answers = [true]
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     await fixture.settle()
     XCTAssertEqual(fixture.recorder.asked.count, 1)
 
@@ -454,7 +454,7 @@ final class UndoCloseTests: XCTestCase {
     let window = try XCTUnwrap(fixture.controller.window)
     window.orderFrontRegardless()
 
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
 
     XCTAssertFalse(window.isVisible)
     XCTAssertTrue(fixture.recorder.asked.isEmpty)
@@ -471,7 +471,7 @@ final class UndoCloseTests: XCTestCase {
     fixture.made[0].labels = ["vim"]
 
     fixture.recorder.answers = [false]
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     await fixture.settle()
 
     XCTAssertEqual(fixture.recorder.asked.map(\.labels), [["vim"]])
@@ -480,7 +480,7 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertFalse(fixture.made[0].closed)
 
     fixture.recorder.answers = [true]
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     await fixture.settle()
 
     XCTAssertFalse(window.isVisible)
@@ -496,7 +496,7 @@ final class UndoCloseTests: XCTestCase {
     window.orderFrontRegardless()
     fixture.made[0].isRunningSomething = true
 
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     XCTAssertNotNil(fixture.controller.pendingGuard)
 
     fixture.made[0].isRunningSomething = false
@@ -507,7 +507,7 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertTrue(window.isVisible)
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
 
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
 
     XCTAssertEqual(fixture.recorder.asked.count, 1)
     XCTAssertFalse(window.isVisible)
@@ -522,7 +522,7 @@ final class UndoCloseTests: XCTestCase {
     window.orderFrontRegardless()
     fixture.made[0].isRunningSomething = true
 
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
     fixture.made[0].isRunningSomething = false
     fixture.controller.appletDidExit(fixture.made[0])
     await fixture.settle()
@@ -530,7 +530,7 @@ final class UndoCloseTests: XCTestCase {
 
     XCTAssertNotNil(fixture.controller.openPane(.terminalShell, axis: .row))
     fixture.controller.paneArea.focus(id(1))
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(2)])
     XCTAssertTrue(fixture.made[0].closed)
@@ -542,7 +542,7 @@ final class UndoCloseTests: XCTestCase {
   func testAMessageFromAClosedAppletNamesNoLivePane() throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
 
     fixture.controller.applet(fixture.made[1], post: .info, text: "late")
 
@@ -557,8 +557,8 @@ final class UndoCloseTests: XCTestCase {
   func testClosingTheWindowClearsTheUndoStack() throws {
     let fixture = try makeFixture()
     fixture.openPanes(3)
-    fixture.controller.closePane(nil)
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
+    fixture.controller.dispatch(.close)
     XCTAssertEqual(fixture.controller.ledger.entries.count, 2)
 
     fixture.controller.window?.close()
@@ -575,8 +575,8 @@ final class UndoCloseTests: XCTestCase {
     do {
       let fixture = try UndoFixture()
       fixture.openPanes(3)
-      fixture.controller.closePane(nil)
-      fixture.controller.closePane(nil)
+      fixture.controller.dispatch(.close)
+      fixture.controller.dispatch(.close)
       released = fixture.controller
 
       fixture.cleanUp()
@@ -607,7 +607,7 @@ final class UndoCloseTests: XCTestCase {
     let window = try XCTUnwrap(fixture.controller.window as? MainWindow)
     window.orderFrontRegardless()
     fixture.openPanes(2)
-    fixture.controller.closePane(nil)
+    fixture.controller.dispatch(.close)
 
     let field = NSTextField(string: "abc")
     field.frame = NSRect(x: 0, y: 0, width: 100, height: 20)

@@ -23,7 +23,7 @@ private final class TerminalContainerView: NSView {
 /// each has its own tty. Program mode runs one program in one tab and opens no others. The tab bar
 /// shows only while there is more than one tab.
 @MainActor
-public final class TerminalApplet: TabbedApplet, TextActionApplet {
+public final class TerminalApplet: Applet {
   /// The longest notification text that reaches the status bar.
   static let maximumMessageLength = 200
 
@@ -380,19 +380,13 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
 
   // MARK: Text actions
 
-  public func canPerform(_ action: TextAction) -> Bool {
+  /// False when the selected tab has no content to act on, such as a program that has not run.
+  var hasSession: Bool {
     selectedTab?.session != nil
   }
 
-  public func perform(_ action: TextAction) {
-    guard let session = selectedTab?.session else { return }
-
-    switch action {
-    case .increaseSize: session.perform(.increaseFontSize)
-    case .decreaseSize: session.perform(.decreaseFontSize)
-    case .resetSize: session.perform(.resetFontSize)
-    case .clear: session.perform(.clearScreen)
-    }
+  func perform(_ action: TerminalAction) {
+    selectedTab?.session?.perform(action)
   }
 
   // MARK: Tabs
@@ -455,19 +449,25 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
     return true
   }
 
-  public func closeSelectedTab() async -> Bool {
+  public func closeCurrentTab() async -> TabCloseResult {
     await closeTab(at: selectedIndex)
   }
 
   /// Closes a tab. It asks first when the tab is running something. A tab at an idle prompt closes
   /// at once. The last tab never closes here, since that is a pane close.
-  func closeTab(at index: Int) async -> Bool {
-    guard tabs.count > 1, tabs.indices.contains(index), !closingTab else { return false }
+  ///
+  /// A close that waits for an answer holds the applet's one question. A second request meanwhile
+  /// is declined and does nothing. When the user agrees and the tab has since become the only one,
+  /// there is no tab left to close, and the host's pane close asks again.
+  func closeTab(at index: Int) async -> TabCloseResult {
+    guard tabs.count > 1 else { return .nothingToClose }
+
+    guard tabs.indices.contains(index), !closingTab else { return .declined }
 
     let tab = tabs[index]
 
     if tab.isRunningSomething {
-      guard let host else { return false }
+      guard let host else { return .declined }
 
       closingTab = true
       defer { closingTab = false }
@@ -477,15 +477,15 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
         detail: "\u{201C}\(label(of: tab))\u{201D} is running something. Closing the tab ends it.",
         confirmTitle: "Close Tab", cancelTitle: "Cancel")
 
-      guard await host.applet(self, confirm: confirmation) else { return false }
+      guard await host.applet(self, confirm: confirmation) else { return .declined }
     }
 
-    guard let current = tabs.firstIndex(where: { $0 === tab }) else { return true }
+    guard let current = tabs.firstIndex(where: { $0 === tab }) else { return .closed }
 
-    guard tabs.count > 1 else { return false }
+    guard tabs.count > 1 else { return .nothingToClose }
 
     removeTab(at: current)
-    return true
+    return .closed
   }
 
   /// A tab shows its title. In program mode the one tab shows the command.

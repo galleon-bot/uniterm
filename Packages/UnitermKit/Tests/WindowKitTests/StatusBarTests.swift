@@ -230,14 +230,14 @@ final class StatusBarTests: XCTestCase {
     controller.appletDidChange(one)
     XCTAssertEqual(appletTexts(fixture), ["two"], "an unfocused applet changed the bar")
 
-    controller.focusPaneLeft(nil)
+    controller.dispatch(.focusPaneLeft)
     XCTAssertEqual(appletTexts(fixture), ["one!"])
 
     two.segments = [AppletSegment(symbolName: nil, text: "two!")]
     controller.appletDidChange(two)
     XCTAssertEqual(appletTexts(fixture), ["one!"])
 
-    controller.focusPaneRight(nil)
+    controller.dispatch(.focusPaneRight)
     XCTAssertEqual(appletTexts(fixture), ["two!"])
   }
 
@@ -306,7 +306,7 @@ final class StatusBarTests: XCTestCase {
     controller.applet(one, post: .info, text: "from one")
     XCTAssertEqual(fixture.center.queue.pendingCount, 2)
 
-    controller.closePane(nil)
+    controller.dispatch(.close)
     XCTAssertEqual(controller.paneIDs, [NodeID(rawValue: 1)])
     XCTAssertEqual(fixture.center.queue.pendingCount, 1)
 
@@ -330,7 +330,7 @@ final class StatusBarTests: XCTestCase {
     XCTAssertTrue(fixture.bar.segments.contains { $0.id == .unseenError })
     XCTAssertTrue(fixture.controller.contentController.history.isHidden)
 
-    controller.toggleMessageHistory(nil)
+    controller.dispatch(.toggleMessageHistory)
 
     XCTAssertFalse(fixture.controller.contentController.history.isHidden)
     XCTAssertEqual(
@@ -339,14 +339,14 @@ final class StatusBarTests: XCTestCase {
     XCTAssertFalse(fixture.center.hasUnseenError)
     XCTAssertFalse(fixture.bar.segments.contains { $0.id == .unseenError })
 
-    controller.toggleMessageHistory(nil)
+    controller.dispatch(.toggleMessageHistory)
     XCTAssertTrue(fixture.controller.contentController.history.isHidden)
   }
 
   /// Catches an error that raises the indicator while the history is already open.
   func testAnErrorPostedWhileTheHistoryIsOpenLeavesNoUnseenIndicator() throws {
     let fixture = try makeFixture()
-    fixture.controller.toggleMessageHistory(nil)
+    fixture.controller.dispatch(.toggleMessageHistory)
 
     fixture.center.post(level: .error, source: .uniterm, text: "late")
 
@@ -364,7 +364,7 @@ final class StatusBarTests: XCTestCase {
       fixture.center.post(level: .info, source: .uniterm, text: "m\(index)")
     }
 
-    fixture.controller.toggleMessageHistory(nil)
+    fixture.controller.dispatch(.toggleMessageHistory)
     let lines = fixture.controller.contentController.history.lines
 
     XCTAssertEqual(lines.count, 500)
@@ -377,7 +377,7 @@ final class StatusBarTests: XCTestCase {
     let fixture = try makeFixture()
     let before = fixture.paneArea.frame
 
-    fixture.controller.toggleMessageHistory(nil)
+    fixture.controller.dispatch(.toggleMessageHistory)
     fixture.layout()
 
     XCTAssertEqual(fixture.paneArea.frame, before)
@@ -401,15 +401,14 @@ final class StatusBarTests: XCTestCase {
   /// Catches a menu item whose title does not follow the history state.
   func testTheMenuItemTitleFollowsTheHistoryState() throws {
     let fixture = try makeFixture()
-    let item = NSMenuItem(
-      title: "x", action: #selector(MainWindowController.toggleMessageHistory(_:)),
-      keyEquivalent: "")
+    let harness = MenuHarness(fixture.controller)
+    let item = try XCTUnwrap(harness.item(.toggleMessageHistory))
 
-    XCTAssertTrue(fixture.controller.validateMenuItem(item))
+    XCTAssertTrue(harness.validate(.toggleMessageHistory))
     XCTAssertEqual(item.title, "Show Message History")
 
-    fixture.controller.toggleMessageHistory(nil)
-    XCTAssertTrue(fixture.controller.validateMenuItem(item))
+    fixture.controller.dispatch(.toggleMessageHistory)
+    XCTAssertTrue(harness.validate(.toggleMessageHistory))
     XCTAssertEqual(item.title, "Hide Message History")
   }
 
@@ -421,7 +420,7 @@ final class StatusBarTests: XCTestCase {
     fixture.center.post(level: .error, source: .uniterm, text: "boom")
     XCTAssertEqual(fixture.messageText, "uniterm: boom")
 
-    fixture.controller.dismissMessage(nil)
+    fixture.controller.dispatch(.dismissMessage)
 
     XCTAssertEqual(fixture.messageText, "")
     XCTAssertEqual(fixture.center.history.map(\.text), ["boom"])
@@ -433,19 +432,18 @@ final class StatusBarTests: XCTestCase {
   /// Info and warning messages clear themselves, so only an error can be dismissed.
   func testDismissMenuItemIsLiveOnlyWhileAnErrorIsShowing() throws {
     let fixture = try makeFixture()
-    let item = NSMenuItem(
-      title: "x", action: #selector(MainWindowController.dismissMessage(_:)), keyEquivalent: "")
-    XCTAssertFalse(fixture.controller.validateMenuItem(item), "idle bar")
+    let harness = MenuHarness(fixture.controller)
+    XCTAssertFalse(harness.validate(.dismissMessage), "idle bar")
 
     fixture.center.post(level: .info, source: .uniterm, text: "fyi")
-    XCTAssertFalse(fixture.controller.validateMenuItem(item), "info")
+    XCTAssertFalse(harness.validate(.dismissMessage), "info")
 
     fixture.clock.now = 2
     fixture.center.post(level: .error, source: .uniterm, text: "boom")
-    XCTAssertTrue(fixture.controller.validateMenuItem(item), "error")
+    XCTAssertTrue(harness.validate(.dismissMessage), "error")
 
-    fixture.controller.dismissMessage(nil)
-    XCTAssertFalse(fixture.controller.validateMenuItem(item), "after dismissing")
+    fixture.controller.dispatch(.dismissMessage)
+    XCTAssertFalse(harness.validate(.dismissMessage), "after dismissing")
   }
 
   /// Catches a dismiss control that does not dismiss, or that opens the history instead.

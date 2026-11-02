@@ -1,3 +1,5 @@
+import AppKit
+import AppletKit
 import PaneModel
 
 /// A command's stable name. It is namespaced by its owner, such as `uniterm.split-right`, and it
@@ -22,29 +24,49 @@ extension CommandID {
   public static let hideApp: CommandID = "uniterm.hide"
   public static let quit: CommandID = "uniterm.quit"
   public static let minimizeWindow: CommandID = "uniterm.minimize"
-  public static let newTab: CommandID = "uniterm.new-tab"
   public static let splitRight: CommandID = "uniterm.split-right"
   public static let splitDown: CommandID = "uniterm.split-down"
   public static let close: CommandID = "uniterm.close"
-  public static let selectNextTab: CommandID = "uniterm.select-next-tab"
-  public static let selectPreviousTab: CommandID = "uniterm.select-previous-tab"
   public static let focusNextPane: CommandID = "uniterm.focus-next-pane"
   public static let focusPreviousPane: CommandID = "uniterm.focus-previous-pane"
   public static let focusPaneLeft: CommandID = "uniterm.focus-pane-left"
   public static let focusPaneRight: CommandID = "uniterm.focus-pane-right"
   public static let focusPaneUp: CommandID = "uniterm.focus-pane-up"
   public static let focusPaneDown: CommandID = "uniterm.focus-pane-down"
-  public static let biggerText: CommandID = "uniterm.bigger-text"
-  public static let smallerText: CommandID = "uniterm.smaller-text"
-  public static let actualSize: CommandID = "uniterm.actual-size"
-  public static let clearScreen: CommandID = "uniterm.clear-screen"
   public static let toggleMessageHistory: CommandID = "uniterm.toggle-message-history"
   public static let dismissMessage: CommandID = "uniterm.dismiss-message"
   public static let showCommandPalette: CommandID = "uniterm.show-command-palette"
+}
 
-  /// Cmd-1 to Cmd-8 select a tab by its number. Cmd-9 selects the last tab, as Terminal does.
-  public static func selectTab(number: Int) -> CommandID {
-    CommandID(number == 9 ? "uniterm.select-last-tab" : "uniterm.select-tab-\(number)")
+/// Who owns a command. uniterm owns the window commands, and an applet type owns its own.
+enum CommandOwner: Equatable {
+  case uniterm
+  case applet(typeID: String)
+}
+
+/// The menu a command's item lives in.
+enum MenuHome {
+  case app
+  case file
+  case view
+  case window
+
+  /// The menu named for the owning applet type.
+  case applet
+}
+
+/// Where a command's menu item goes. Items of one menu with different sections are set apart by a
+/// separator. The title overrides the command's own, for an item whose menu title differs from the
+/// palette's.
+struct MenuPlacement {
+  let home: MenuHome
+  let section: Int
+  let title: String?
+
+  init(_ home: MenuHome, section: Int = 0, title: String? = nil) {
+    self.home = home
+    self.section = section
+    self.title = title
   }
 }
 
@@ -67,6 +89,15 @@ enum CommandScope: Sendable {
 struct CommandContext {
   weak var controller: MainWindowController?
   var pane: NodeID?
+
+  /// The applet of this type in the target pane, nil when the pane holds another kind.
+  func applet(ofType typeID: String) -> (any Applet)? {
+    guard let controller, let pane, let applet = controller.paneArea.applet(for: pane),
+      applet.typeID == typeID
+    else { return nil }
+
+    return applet
+  }
 }
 
 /// One thing the user can ask uniterm to do. A key binding, a menu item, and the palette run the
@@ -79,6 +110,14 @@ struct Command {
   let id: CommandID
   let title: String
   let scope: CommandScope
+  let owner: CommandOwner
+
+  /// The key the command asks for. It is a default. A user's remap replaces it, and a reserved key
+  /// drops it for an applet's command.
+  let key: KeyChord?
+
+  /// Nil for a command with no menu item.
+  let menu: MenuPlacement?
 
   /// False for a command that the palette must not list, such as the palette's own toggle or a
   /// binding that the palette's other entries already cover.
@@ -88,15 +127,30 @@ struct Command {
   let run: @MainActor (CommandContext) -> Void
 
   init(
-    _ id: CommandID, _ title: String, scope: CommandScope, listedInPalette: Bool = true,
+    _ id: CommandID, _ title: String, scope: CommandScope, owner: CommandOwner = .uniterm,
+    key: KeyChord? = nil, menu: MenuPlacement? = nil, listedInPalette: Bool = true,
     isAvailable: @escaping @MainActor (CommandContext) -> Bool = { _ in true },
     run: @escaping @MainActor (CommandContext) -> Void
   ) {
     self.id = id
     self.title = title
     self.scope = scope
+    self.owner = owner
+    self.key = key
+    self.menu = menu
     self.listedInPalette = listedInPalette
     self.isAvailable = isAvailable
     self.run = run
+  }
+}
+
+extension AppletMenuHome {
+  var menuHome: MenuHome {
+    switch self {
+    case .file: return .file
+    case .view: return .view
+    case .window: return .window
+    case .applet: return .applet
+    }
   }
 }

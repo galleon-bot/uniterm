@@ -1,4 +1,5 @@
 import AppKit
+import AppletKit
 
 /// The window of one main window controller.
 ///
@@ -42,17 +43,32 @@ public final class MainWindow: NSWindow {
     }
   }
 
+  /// The target of Edit > Redo. Redo repeats an undone text edit. Pane closes have no redo.
+  @objc(redo:) public func redoEdit(_ sender: Any?) {
+    guard isEditingText else { return }
+
+    editingUndoManager?.redo()
+  }
+
   public override func validateMenuItem(_ item: NSMenuItem) -> Bool {
-    guard item.action == #selector(undoCloseOrEdit(_:)) else {
+    switch item.action {
+    case #selector(redoEdit(_:)):
+      guard isEditingText else { return false }
+
+      item.title = editingUndoManager?.redoMenuItemTitle ?? "Redo"
+      return editingUndoManager?.canRedo ?? false
+
+    case #selector(undoCloseOrEdit(_:)):
+      if isEditingText {
+        item.title = editingUndoManager?.undoMenuItemTitle ?? "Undo"
+        return editingUndoManager?.canUndo ?? false
+      }
+
+      return (windowController as? MainWindowController)?.validateMenuItem(item) ?? false
+
+    default:
       return super.validateMenuItem(item)
     }
-
-    if isEditingText {
-      item.title = editingUndoManager?.undoMenuItemTitle ?? "Undo"
-      return editingUndoManager?.canUndo ?? false
-    }
-
-    return (windowController as? MainWindowController)?.validateMenuItem(item) ?? false
   }
 
   // MARK: Key route
@@ -65,38 +81,35 @@ public final class MainWindow: NSWindow {
     return super.performKeyEquivalent(with: event)
   }
 
-  /// Offers the key to the launcher that holds the keyboard first, since Cmd-1 to Cmd-9 pick its
-  /// entries. Then it looks for a live menu item with that key. A disabled item does not take the
-  /// key, so the views and the menu see it as they always did.
+  /// Looks for a live menu item with the key, before any view in the window sees it. The menu is
+  /// read live, so a user's remap applies, and a window command's key reaches the menu in every
+  /// applet.
+  ///
+  /// The candidates go in order: a remapped item, then uniterm's own items, then an applet's. The
+  /// first enabled one runs. A disabled item that is a remap or uniterm's own consumes the key, so
+  /// the view never gets a key that is reserved. A disabled item of an applet lets the key go on,
+  /// since an applet's key is not reserved.
   private func routeToMenu(_ event: NSEvent) -> Bool {
     guard event.type == .keyDown, let menu = NSApp.mainMenu else { return false }
 
-    if let launcher = launcherHoldingKeyboard, launcher.performKeyEquivalent(with: event) {
-      return true
+    (windowController as? MainWindowController)?.commands.menu?.sync()
+
+    for item in MenuKeyMatch.items(for: event, in: menu) {
+      guard let parent = item.menu else { continue }
+
+      parent.update()
+
+      if item.isEnabled {
+        parent.performActionForItem(at: parent.index(of: item))
+        return true
+      }
+
+      if MenuKeyMatch.consumesWhenDisabled(item) {
+        return true
+      }
     }
 
-    guard let item = MenuKeyMatch.item(for: event, in: menu), let parent = item.menu else {
-      return false
-    }
-
-    parent.update()
-
-    guard item.isEnabled else { return false }
-
-    parent.performActionForItem(at: parent.index(of: item))
-    return true
-  }
-
-  private var launcherHoldingKeyboard: LauncherView? {
-    var view = firstResponder as? NSView
-
-    while let current = view {
-      if let launcher = current as? LauncherView { return launcher }
-
-      view = current.superview
-    }
-
-    return nil
+    return false
   }
 
   // MARK: Mouse
@@ -120,18 +133,44 @@ public final class MainWindow: NSWindow {
   }
 }
 
-/// Finds the live menu item that a key event triggers.
+/// Finds the live menu items that a key event triggers.
 enum MenuKeyMatch {
-  private static let chordFlags: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
-
-  /// The item whose key equivalent matches the event. When a user's remap and a default share the
-  /// key, the remapped item wins, instead of whichever sits first in the menu.
+  /// The items whose key equivalent matches the event, best first. A user's remap goes before a
+  /// default, so it wins whatever the menu order. Two remaps on one key resolve by one rule: a
+  /// uniterm item before an applet's, then the one that comes first in the menu bar.
   @MainActor
-  static func item(for event: NSEvent, in menu: NSMenu) -> NSMenuItem? {
+  static func items(for event: NSEvent, in menu: NSMenu) -> [NSMenuItem] {
     var matches: [NSMenuItem] = []
     collect(event, in: menu, into: &matches)
 
-    return matches.first { !$0.userKeyEquivalent.isEmpty } ?? matches.first
+    return matches.enumerated().sorted { lhs, rhs in
+      let (left, right) = (rank(lhs.element), rank(rhs.element))
+
+      return left == right ? lhs.offset < rhs.offset : left < right
+    }.map(\.element)
+  }
+
+  /// Whether a user's App Shortcuts remap put the item's key there. AppKit owns the flag, so a test
+  /// replaces this to stand in for a remap.
+  @MainActor
+  static var isRemapped: @MainActor (NSMenuItem) -> Bool = hasUserKeyEquivalent
+
+  @MainActor
+  static func hasUserKeyEquivalent(_ item: NSMenuItem) -> Bool {
+    !item.userKeyEquivalent.isEmpty
+  }
+
+  @MainActor
+  private static func rank(_ item: NSMenuItem) -> Int {
+    (isRemapped(item) ? 0 : 2)
+      + ((item as? CommandMenuItem)?.isAppletItem == true ? 1 : 0)
+  }
+
+  /// Whether the key stops at a disabled item. A remap always wins, and a key that is not an
+  /// applet's default is reserved.
+  @MainActor
+  static func consumesWhenDisabled(_ item: NSMenuItem) -> Bool {
+    isRemapped(item) || (item as? CommandMenuItem)?.isAppletItem != true
   }
 
   @MainActor
@@ -147,35 +186,14 @@ enum MenuKeyMatch {
     }
   }
 
-  /// A key equivalent is compared by the character it produces, so Cmd-Shift-= matches an item
-  /// whose key is "+". Shift is part of that character for any key that is not a letter or a
-  /// digit, so it is left out of the modifier comparison there. The Delete key sends 0x7F, and
-  /// menus spell it 0x08.
+  /// A key equivalent is compared by the key it types, in the canonical form of `KeyChord`. So
+  /// Cmd-Shift-= matches an item whose key is "+", and Cmd-} matches Cmd-Shift-]. The Delete key
+  /// sends 0x7F, and menus spell it 0x08.
   @MainActor
   static func triggers(_ item: NSMenuItem, _ event: NSEvent) -> Bool {
     guard !item.isHidden, !item.keyEquivalent.isEmpty, !item.isSeparatorItem else { return false }
 
-    let key = canonical(item.keyEquivalent)
-
-    guard key == canonical(event.charactersIgnoringModifiers ?? "") else { return false }
-
-    var wanted = item.keyEquivalentModifierMask.intersection(chordFlags)
-    var pressed = event.modifierFlags.intersection(chordFlags)
-
-    if !isLetterOrDigit(key) {
-      wanted.remove(.shift)
-      pressed.remove(.shift)
-    }
-
-    return wanted == pressed
-  }
-
-  private static func canonical(_ key: String) -> String {
-    key == "\u{7F}" ? "\u{8}" : key.lowercased()
-  }
-
-  private static func isLetterOrDigit(_ key: String) -> Bool {
-    key.unicodeScalars.count == 1
-      && key.unicodeScalars.allSatisfy { $0.properties.isAlphabetic || ("0"..."9").contains($0) }
+    return KeyChord(item.keyEquivalent, item.keyEquivalentModifierMask)
+      == KeyChord(event.charactersIgnoringModifiers ?? "", event.modifierFlags)
   }
 }

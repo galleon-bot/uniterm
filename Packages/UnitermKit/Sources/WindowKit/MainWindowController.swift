@@ -164,6 +164,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     paneArea.onTreeChange = { [weak self] in
       self?.updateMinimumSize()
       self?.refreshCommandPalette()
+      self?.commands.menu?.sync()
     }
     paneArea.onLayoutChange = { [weak self] in
       self?.onLayoutChange?()
@@ -172,10 +173,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     paneArea.onFocusChange = { [weak self] in
       self?.refreshStatusBar()
       self?.recordFocusedTab()
+      self?.commands.menu?.sync()
     }
     contentController.onLayout = { [weak self] in self?.updateMinimumSize() }
-    contentController.statusBar.onActivate = { [weak self] in self?.toggleMessageHistory(nil) }
-    contentController.statusBar.onDismiss = { [weak self] in self?.dismissMessage(nil) }
+    contentController.statusBar.onActivate = { [weak self] in self?.dispatch(.toggleMessageHistory)
+    }
+    contentController.statusBar.onDismiss = { [weak self] in self?.dispatch(.dismissMessage) }
     wireCommandPalette()
     recordFocusedTab()
     placement.onChange = { [weak self] position in
@@ -417,22 +420,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     window?.attachedSheet == nil
   }
 
+  /// Validates Edit > Undo Close Pane. The commands' items validate through the menu.
   public func validateMenuItem(_ item: NSMenuItem) -> Bool {
-    if let id = commandID(for: item) {
-      let context = commandContext()
-
-      if id == .close {
-        let tabs = commandTabbedApplet(context)?.tabCount ?? 1
-        item.title = tabs > 1 ? "Close Tab" : "Close Pane"
-      }
-
-      if id == .toggleMessageHistory {
-        item.title = historyVisible ? "Hide Message History" : "Show Message History"
-      }
-
-      return commands.isAvailable(id, in: context)
-    }
-
     switch item.action {
     case #selector(MainWindow.undoCloseOrEdit(_:)):
       item.title = "Undo Close Pane"
@@ -620,62 +609,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   // MARK: Menu actions
 
-  // Each action below is a thin adapter. It names a registry command and dispatches it, so a key,
-  // a menu item, and the palette run the same action.
-
-  @objc public func newTab(_ sender: Any?) { dispatch(.newTab) }
-
-  @objc public func selectNextTab(_ sender: Any?) { dispatch(.selectNextTab) }
-
-  @objc public func selectPreviousTab(_ sender: Any?) { dispatch(.selectPreviousTab) }
-
-  /// Selects the tab numbered by the sender's tag, counting from 1. Tag 9 selects the last tab,
-  /// as Terminal and Ghostty do.
-  @objc public func selectTabByNumber(_ sender: Any?) {
-    guard let number = (sender as? NSMenuItem)?.tag, (1...9).contains(number) else { return }
-
-    dispatch(.selectTab(number: number))
-  }
-
-  @objc public func splitRight(_ sender: Any?) { dispatch(.splitRight) }
-
-  @objc public func splitDown(_ sender: Any?) { dispatch(.splitDown) }
-
-  @objc public func focusNextPane(_ sender: Any?) { dispatch(.focusNextPane) }
-
-  @objc public func focusPreviousPane(_ sender: Any?) { dispatch(.focusPreviousPane) }
-
-  @objc public func focusPaneLeft(_ sender: Any?) { dispatch(.focusPaneLeft) }
-
-  @objc public func focusPaneRight(_ sender: Any?) { dispatch(.focusPaneRight) }
-
-  @objc public func focusPaneUp(_ sender: Any?) { dispatch(.focusPaneUp) }
-
-  @objc public func focusPaneDown(_ sender: Any?) { dispatch(.focusPaneDown) }
-
-  /// The terminal's text actions use names the terminal view does not answer. A nil-target item
-  /// with the view's own selector would reach the view first and skip the registry.
-  @objc public func biggerText(_ sender: Any?) { dispatch(.biggerText) }
-
-  @objc public func smallerText(_ sender: Any?) { dispatch(.smallerText) }
-
-  @objc public func actualSize(_ sender: Any?) { dispatch(.actualSize) }
-
-  @objc public func clearScreen(_ sender: Any?) { dispatch(.clearScreen) }
-
-  @objc public func minimizeWindow(_ sender: Any?) { dispatch(.minimizeWindow) }
-
-  /// Opens the message history over the pane area, or closes it. The status bar's click does the
-  /// same.
-  @objc public func toggleMessageHistory(_ sender: Any?) { dispatch(.toggleMessageHistory) }
-
-  /// Clears the error on the bar. An error stays until a newer message replaces it or the user
-  /// does this. Other messages clear themselves, so there is nothing to dismiss.
-  @objc public func dismissMessage(_ sender: Any?) { dispatch(.dismissMessage) }
-
-  /// Shows the command palette over the window, or hides it when it shows.
-  @objc public func toggleCommandPalette(_ sender: Any?) { dispatch(.showCommandPalette) }
-
   /// Reopens the pane that closed last from its description, in its former place, with a new ID.
   ///
   /// The window calls this for the standard undo action, except while a text control is being
@@ -690,14 +623,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
     reopen(closed)
   }
-
-  /// Closes the focused pane's selected tab when its applet has several. Otherwise it closes the
-  /// pane, and with one pane left the window closes too.
-  ///
-  /// A tab running something asks first, and the applet does the asking. A pane close asks when any
-  /// of its tabs is running something. A close that ends the window asks when anything in the
-  /// window is running.
-  @objc public func closePane(_ sender: Any?) { dispatch(.close) }
 
   // MARK: Saved layout
 

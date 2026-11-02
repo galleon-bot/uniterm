@@ -72,7 +72,7 @@ final class QuitGuardTests: XCTestCase {
     made[3].isRunningSomething = true
     made[3].labels = ["emacs"]
     second.confirmer = { _, _ in true }
-    second.closePane(nil)
+    second.dispatch(.close)
     await second.pendingGuard?.value
 
     XCTAssertTrue(made[3].closed)

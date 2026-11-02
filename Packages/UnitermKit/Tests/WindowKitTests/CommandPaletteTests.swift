@@ -36,6 +36,7 @@ final class CommandPaletteTests: XCTestCase {
   private var controller: MainWindowController { fixture.controller }
   private var palette: CommandPaletteView { controller.contentController.commandPalette }
   private var savedMenu: NSMenu?
+  private var installed: CommandMenu?
 
   override func setUp() async throws {
     fixture = try WindowFixture()
@@ -68,37 +69,23 @@ final class CommandPaletteTests: XCTestCase {
         charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0))
   }
 
-  /// A File menu like the app's, with each item aimed at the controller so the test needs no key
-  /// window. The Show Command Palette item uses a Control chord, as a user's remap might.
+  /// The app's menu, built from the controller's registry, with the key window fixed to the test's
+  /// window so the test needs no key window. A probe item on a Control chord stands in for a menu
+  /// item that a user's remap put on a key.
   private func installMenu(probe: MenuProbe? = nil) {
-    let main = NSMenu()
-    let item = NSMenuItem()
-    let file = NSMenu(title: "File")
-    item.submenu = file
-    main.addItem(item)
-
-    func add(_ title: String, _ action: Selector, _ key: String, _ flags: NSEvent.ModifierFlags) {
-      let entry = NSMenuItem(title: title, action: action, keyEquivalent: key)
-      entry.keyEquivalentModifierMask = flags
-      entry.target = controller
-      file.addItem(entry)
-    }
-
-    add("New Tab", #selector(MainWindowController.newTab(_:)), "t", .command)
-    add("Close Pane", #selector(MainWindowController.closePane(_:)), "w", .command)
-    add(
-      "Show Command Palette", #selector(MainWindowController.toggleCommandPalette(_:)), "p",
-      [.command, .shift])
+    let commandMenu = CommandMenu(
+      registry: controller.commands, activeController: { [controller] in controller })
+    commandMenu.keyController = { [controller] in controller }
+    commandMenu.install()
+    installed = commandMenu
 
     if let probe {
       let extra = NSMenuItem(
         title: "Probe", action: #selector(MenuProbe.fire(_:)), keyEquivalent: "a")
       extra.keyEquivalentModifierMask = .control
       extra.target = probe
-      file.addItem(extra)
+      commandMenu.menu.items[1].submenu?.addItem(extra)
     }
-
-    NSApp.mainMenu = main
   }
 
   // MARK: Showing and hiding
@@ -220,7 +207,7 @@ final class CommandPaletteTests: XCTestCase {
     controller.showCommandPalette()
     type("new tab")
 
-    XCTAssertEqual(entry(.newTab)?.isEnabled, false)
+    XCTAssertEqual(entry(.fakeNewTab)?.isEnabled, false)
     XCTAssertNil(palette.selection)
 
     _ = palette.control(
@@ -235,7 +222,7 @@ final class CommandPaletteTests: XCTestCase {
     controller.showCommandPalette()
 
     XCTAssertNil(entry(.showCommandPalette))
-    XCTAssertNil(entry(.selectTab(number: 3)))
+    XCTAssertNil(entry(.fakeTab(3)))
     XCTAssertNotNil(entry(.splitRight))
   }
 
@@ -277,9 +264,10 @@ final class CommandPaletteTests: XCTestCase {
     let focused = controller.focusedPane
     let other = try XCTUnwrap(controller.paneIDs.first { $0 != focused })
 
-    controller.commands.run(.biggerText, in: CommandContext(controller: controller, pane: other))
+    controller.commands.run(
+      .fakeBiggerText, in: CommandContext(controller: controller, pane: other))
 
-    XCTAssertEqual(try applet(other).textActions, [.increaseSize])
+    XCTAssertEqual(try applet(other).textActions, ["bigger-text"])
     XCTAssertEqual(try applet(focused).textActions, [])
   }
 

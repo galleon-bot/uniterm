@@ -193,7 +193,7 @@ final class LauncherTests: XCTestCase {
   /// Catches a split that still waits for a dialog, or a launcher that does not take the keyboard
   /// as the pane appears.
   func testSplittingShowsALauncherThatHoldsTheKeyboardInItsFilter() throws {
-    controller.splitRight(nil)
+    controller.dispatch(.splitRight)
 
     XCTAssertNil(controller.window?.attachedSheet)
     XCTAssertEqual(controller.paneIDs.count, 2)
@@ -400,7 +400,7 @@ final class LauncherTests: XCTestCase {
   func testClosingALauncherAddsNoUndoEntry() throws {
     _ = try openLauncher()
 
-    controller.closePane(nil)
+    controller.dispatch(.close)
 
     XCTAssertEqual(controller.paneIDs.count, 1)
     XCTAssertTrue(controller.ledger.entries.isEmpty)

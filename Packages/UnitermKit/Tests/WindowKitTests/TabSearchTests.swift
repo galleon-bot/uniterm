@@ -110,7 +110,7 @@ final class TabSearchTests: XCTestCase {
     let closing = firstApplet.tabID(0)
     XCTAssertNotNil(entry(pane: first, tab: closing))
 
-    _ = await firstApplet.closeSelectedTab()
+    _ = await firstApplet.closeCurrentTab()
     firstApplet.tabsChanged()
     wake.fire()
 
@@ -274,14 +274,14 @@ final class TabSearchTests: XCTestCase {
     controller.paneArea.focus(first, keyboard: false)
 
     let context = CommandContext(controller: controller, pane: first)
-    XCTAssertTrue(controller.commands.run(.actualSize, in: context))
+    XCTAssertTrue(controller.commands.run(.fakeActualSize, in: context))
 
     controller.showCommandPalette()
 
     let kinds = palette.entries.map { entry -> String in
       switch entry.id {
       case .tab(let pane, _): return entry.title.isEmpty ? "" : "tab:\(pane == first ? 1 : 2)"
-      case .command(let id): return id == .actualSize ? "recent-command" : "command"
+      case .command(let id): return id == .fakeActualSize ? "recent-command" : "command"
       }
     }
 

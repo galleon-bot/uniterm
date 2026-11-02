@@ -70,6 +70,13 @@ private final class RecordingHost: AppletHost {
   var confirmations: [AppletConfirmation] = []
   var answer = false
 
+  /// When set, a question waits here until a test answers it.
+  var holdsQuestions = false
+  var pendingAnswer: CheckedContinuation<Bool, Never>?
+
+  /// Signals each question as it is asked, so a test awaits it and never polls.
+  let questions = AsyncStream.makeStream(of: Void.self)
+
   func applet(_ applet: any Applet, post level: StatusLevel, text: String) {
     posts.append((level, text))
   }
@@ -80,6 +87,12 @@ private final class RecordingHost: AppletHost {
 
   func applet(_ applet: any Applet, confirm request: AppletConfirmation) async -> Bool {
     confirmations.append(request)
+    questions.continuation.yield()
+
+    if holdsQuestions {
+      return await withCheckedContinuation { pendingAnswer = $0 }
+    }
+
     return answer
   }
 }
@@ -549,8 +562,8 @@ final class TerminalAppletTests: XCTestCase {
     applet.openTab()
     XCTAssertFalse(bar.isHidden)
 
-    let closed = await applet.closeSelectedTab()
-    XCTAssertTrue(closed)
+    let closed = await applet.closeCurrentTab()
+    XCTAssertEqual(closed, .closed)
     XCTAssertTrue(bar.isHidden)
   }
 
@@ -591,8 +604,8 @@ final class TerminalAppletTests: XCTestCase {
     applet.view.frame = NSRect(x: 0, y: 0, width: 500, height: 200)
     XCTAssertEqual(engine.sessions[1].view.frame, NSRect(x: 0, y: 28, width: 500, height: 172))
 
-    let closed = await applet.closeSelectedTab()
-    XCTAssertTrue(closed)
+    let closed = await applet.closeCurrentTab()
+    XCTAssertEqual(closed, .closed)
     XCTAssertEqual(engine.sessions[0].view.frame, NSRect(x: 0, y: 0, width: 500, height: 200))
   }
 
@@ -688,8 +701,8 @@ final class TerminalAppletTests: XCTestCase {
     applet.openTab()
     engine.sessions[1].onEvent?(.titleChanged("vim notes.txt"))
 
-    let idleClosed = await applet.closeSelectedTab()
-    XCTAssertTrue(idleClosed)
+    let idleClosed = await applet.closeCurrentTab()
+    XCTAssertEqual(idleClosed, .closed)
     XCTAssertTrue(host.confirmations.isEmpty, "an idle prompt asked first")
     XCTAssertTrue(engine.sessions[1].closed)
     XCTAssertEqual(applet.tabCount, 1)
@@ -699,8 +712,8 @@ final class TerminalAppletTests: XCTestCase {
     engine.sessions[2].isRunningSomething = true
     host.answer = false
 
-    let declined = await applet.closeSelectedTab()
-    XCTAssertFalse(declined)
+    let declined = await applet.closeCurrentTab()
+    XCTAssertEqual(declined, .declined)
     XCTAssertEqual(host.confirmations.count, 1)
     XCTAssertTrue(
       host.confirmations.first?.detail.contains("\u{201C}vim notes.txt\u{201D}") ?? false)
@@ -708,11 +721,61 @@ final class TerminalAppletTests: XCTestCase {
     XCTAssertFalse(engine.sessions[2].closed)
 
     host.answer = true
-    let accepted = await applet.closeSelectedTab()
-    XCTAssertTrue(accepted)
+    let accepted = await applet.closeCurrentTab()
+    XCTAssertEqual(accepted, .closed)
     XCTAssertEqual(host.confirmations.count, 2)
     XCTAssertEqual(applet.tabCount, 1)
     XCTAssertTrue(engine.sessions[2].closed)
+  }
+
+  /// Catches a second Cmd-W that stacks on an open tab question, and a decline that closes the pane
+  /// once the tab count drops to one while the question is open. The second request is declined, and
+  /// so is the answer, so neither the tab nor the pane goes.
+  func testADeclinedQuestionKeepsTheTabEvenWhenTheCountDropsToOne() async {
+    let (applet, engine, host, _) = makeApplet()
+    applet.openTab()
+    engine.sessions[1].isRunningSomething = true
+    host.holdsQuestions = true
+
+    let first = Task { await applet.closeCurrentTab() }
+    var questions = host.questions.stream.makeAsyncIterator()
+    await questions.next()
+    XCTAssertNotNil(host.pendingAnswer)
+
+    let second = await applet.closeCurrentTab()
+    XCTAssertEqual(second, .declined)
+    XCTAssertEqual(host.confirmations.count, 1)
+
+    engine.sessions[0].onEvent?(.exited)
+    XCTAssertEqual(applet.tabCount, 1)
+
+    host.pendingAnswer?.resume(returning: false)
+    let answer = await first.value
+
+    XCTAssertEqual(answer, .declined)
+    XCTAssertEqual(applet.tabCount, 1)
+    XCTAssertFalse(host.exited)
+  }
+
+  /// Catches an agreed question that closes a tab which became the only one. There is no tab to
+  /// close then, so the host's pane close asks again before ending the work.
+  func testAnAgreedQuestionOnTheOnlyTabLeftAnswersNothingToClose() async {
+    let (applet, engine, host, _) = makeApplet()
+    applet.openTab()
+    engine.sessions[1].isRunningSomething = true
+    host.holdsQuestions = true
+
+    let task = Task { await applet.closeCurrentTab() }
+    var questions = host.questions.stream.makeAsyncIterator()
+    await questions.next()
+    engine.sessions[0].onEvent?(.exited)
+
+    host.pendingAnswer?.resume(returning: true)
+
+    let answer = await task.value
+    XCTAssertEqual(answer, .nothingToClose)
+    XCTAssertEqual(applet.tabCount, 1)
+    XCTAssertFalse(engine.sessions[1].closed)
   }
 
   /// Catches the last tab closing as a tab. It is a pane close, which the host owns, so the applet
@@ -721,9 +784,9 @@ final class TerminalAppletTests: XCTestCase {
     let (applet, _, host, session) = makeApplet()
     session.isRunningSomething = true
 
-    let closed = await applet.closeSelectedTab()
+    let closed = await applet.closeCurrentTab()
 
-    XCTAssertFalse(closed)
+    XCTAssertEqual(closed, .nothingToClose)
     XCTAssertTrue(host.confirmations.isEmpty)
     XCTAssertFalse(session.closed)
     XCTAssertEqual(applet.tabCount, 1)
@@ -884,7 +947,7 @@ final class TerminalAppletTests: XCTestCase {
     applet.selectTab(at: 0)
     XCTAssertEqual(host.tabsChanged, 2)
 
-    _ = await applet.closeSelectedTab()
+    _ = await applet.closeCurrentTab()
     XCTAssertEqual(host.tabsChanged, 3)
     XCTAssertEqual(applet.publishedTabs.all.count, 1)
   }
@@ -905,7 +968,7 @@ final class TerminalAppletTests: XCTestCase {
     XCTAssertTrue(applet.selectTab(id: ids[2]))
     XCTAssertEqual(applet.publishedTabs.selected, ids[2])
 
-    _ = await applet.closeSelectedTab()
+    _ = await applet.closeCurrentTab()
     XCTAssertFalse(applet.selectTab(id: ids[2]), "a closed tab's ID resolved")
     XCTAssertEqual(applet.publishedTabs.all.map(\.id), [ids[0], ids[1]])
   }

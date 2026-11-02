@@ -22,7 +22,7 @@ In progress.
 | UTERM-002 M2 Tab search | DONE | "Let the command palette find every tab in the window" |
 | UTERM-002 M3 Docked mode | DONE | "Let the command palette dock at the top or bottom of the window" |
 | UTERM-002 row review | DONE | "Ask the applet before hiding the palette, and tidy the row" |
-| UTERM-013 M1 Applet-declared shortcuts | IN PROGRESS | |
+| UTERM-013 M1 Applet-declared shortcuts | DONE | "Let applets declare their own shortcuts and reserve uniterm's window keys" |
 | UTERM-013 M2 Reopen with Cmd-Shift-T | QUEUED | |
 | UTERM-013 row review | QUEUED | |
 | Final review | QUEUED | |

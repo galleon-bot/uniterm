@@ -93,7 +93,7 @@ Decision: each applet item names its own home. The standard edit actions stay fi
 settled decision.
 
 - An item with a macOS home goes there. Text size goes in View, and New Tab goes in File. Close is uniterm's, per the
-  Cmd-W decision. Amended 2026-11-01; see Decision Log.
+  Cmd-W decision. Amended 2026-11-02; see Decision Log.
 - An item with no standard home, such as Clear, goes in an applet menu named for the applet type. That menu appears only
   while the focused applet has such items.
 - The menus follow the key window's focused pane. When Settings or a sheet is key, applet items are disabled.
@@ -110,7 +110,7 @@ Original question: whether a declaration is a key plus a selector, or a richer c
 (UTERM-002).
 
 Decision: a command in UTERM-002's command registry. The standard edit actions are not commands. They stay on the
-responder chain. Amended 2026-11-01; see Decision Log.
+responder chain. Amended 2026-11-02; see Decision Log.
 
 - The registry is UTERM-002's, built by its registry milestone. An entry is owned by uniterm, for a window command, or
   by an applet type, for an applet command.
@@ -121,6 +121,9 @@ responder chain. Amended 2026-11-01; see Decision Log.
 - This proposal adds an optional default key and a menu home to each entry.
 - uniterm builds the menus from the registry: its own commands and the focused applet's. The palette lists the same
   commands.
+- An applet type registers its commands as a set. The run action and the availability check receive the applet of the
+  pane the command is aimed at, and the command keeps no reference to any applet. The ID is the applet type plus the
+  command's name. The IDs that uniterm gave the terminal's actions before this change are retired and never reused.
 
 Rationale: when the palette has focus and runs a command, a selector sent to the first responder reaches the palette
 field, not the applet. A command calls the applet directly. A stable ID gives the palette, and any later caller, a name
@@ -145,6 +148,8 @@ Decision: uniterm owns Cmd-W and asks the focused applet to close its current ta
 - The applet answers closed, declined, or nothing to close.
 - Only "nothing to close" leads uniterm to close the pane. The pane close guard applies as usual.
 - An applet without tabs always answers "nothing to close".
+- While a window that is not a main window is key, such as Settings, File > Close closes that window. A sheet is not
+  closed this way.
 
 Rationale: one owner keeps Cmd-W a window key in every applet, so the pane close guard always runs. It mirrors the
 settled reopen rule, where uniterm asks the applet to reopen a tab. Today's tab close returns one Bool for both a
@@ -182,7 +187,7 @@ see Decision Log. Under window-wide recency, a pane reopens whenever no closed t
 Original question: which keys uniterm reserves, so no applet can claim them. The palette's key is one.
 
 Decision: the reserved set has three parts, and the window enforces it before any view sees a key. Amended
-2026-11-01; see Decision Log.
+2026-11-02; see Decision Log.
 
 - uniterm's window command keys, read from the live menu after the user's App Shortcuts remaps apply. A remapped
   uniterm item takes its reservation with it.
@@ -194,6 +199,12 @@ Decision: the reserved set has three parts, and the window enforces it before an
 - The set guards declared default keys only. A user's remap always wins, over uniterm's defaults and applets' alike.
   When a remap puts two items on one key, uniterm picks the remapped item itself, not AppKit's menu order.
 - Cmd-1 to Cmd-9 are not reserved, since tab selection moves to the terminal. The launcher keeps them.
+- The window tries the items that match a key in a fixed order: a user's remap, then uniterm's own items, then an
+  applet's. The first enabled item runs. A disabled remap or uniterm item consumes the key. A disabled applet item lets
+  the key go on to the view, since an applet's key is not reserved. Two remaps onto one key resolve by that order, then
+  by position in the menu bar.
+- The reserved keys are read from the live menu when the menu installs, when the user defaults change, when the app
+  becomes active, and before each Command-key press that the window routes.
 
 Rationale: AppKit asks the key window's views before the main menu, which the launcher relies on today. A check at
 declaration time alone would let any applet view take Cmd-W or the palette key. Without the Edit keys in the set, an
@@ -210,8 +221,9 @@ Decision: the key is dropped, the user is told, and a test catches built-in conf
 
 - A command that declares a reserved key registers without its key. Its menu item and palette entry still work.
 - When two commands of one applet declare the same key, both lose it.
-- uniterm posts one status bar warning per applet type per session. It names the applet, the command, and the key, and
-  says what to do next.
+- uniterm posts a status bar warning for each applet type that newly loses a key. A reserved-set check posts at most one
+  per applet type. It names the applet, the commands, and the keys newly dropped, and says what to do next. A key
+  already announced this session is not announced again. Amended 2026-11-02; see Decision Log.
 - Keys are compared in a canonical form, so Cmd-} and Cmd-Shift-] match.
 - A unit test checks every built-in applet's commands against the reserved set and against each other.
 
@@ -286,7 +298,7 @@ None.
 
 ### M1: Applet-declared shortcuts
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 Builds on UTERM-002's command registry milestone.
 
@@ -313,16 +325,65 @@ Builds on UTERM-002's command registry milestone.
 - Moved items keep their current titles, such as Clear Screen, so existing App Shortcuts remaps still match. File >
   Close is the one deliberate rename, from Close Pane
 - The conflict warning says what to do next
-- An applet command on a reserved key, or two commands of one applet on one key, keeps working without the key, and one
-  warning per applet type names the applet, the command, and the key
+- An applet command on a reserved key, or two commands of one applet on one key, keeps working without the key, and a
+  warning per applet type, for the keys newly dropped, names the applet, the command, and the key
 - Cmd-} and Cmd-Shift-] count as the same key in the conflict check
 - A unit test fails when any built-in applet command claims a reserved key or a key another of its commands holds
 - The launcher keeps Cmd-1 to Cmd-9
 - After an App Shortcuts remap of a uniterm item, the new key is reserved and the old default is not
 - When a remap puts two items on one key, the remapped item runs, with a terminal or an applet view focused
-- A remap that changes the reserved set rechecks applet keys, and a key it drops gets the one warning
+- A remap that changes the reserved set rechecks applet keys, and a key it drops is announced once
 - A remap made in System Settings while uniterm runs takes effect without a relaunch, or at a stated point. Two remaps
   onto one key resolve by one defined rule
+
+**As built:**
+
+Menus are built from the registry by one object in WindowKit, which owns the main menu. The app target no longer builds
+a menu. Every registry item names its command and targets that object, so the per-command selectors on the window
+controller and the app delegate are gone. An applet type registers a set of commands. The run action receives the
+applet that the pane holds when it runs, so no command keeps an applet. A test pins that a command aimed at a closed
+pane reaches nothing. The unit test could not pin that an applet is freed after close, since the window keeps other
+references to it. The terminal's commands now live in the terminal module with IDs such as `terminal.clear`. The text
+action protocol and the tabbed applet protocol are gone from AppletKit. An applet answers a tab close with closed,
+declined, or nothing to close. The host starts that request so that an answer with no wait finishes in the same turn.
+Only a dialog makes it wait.
+
+Applet items exist in the menu from the start and are hidden unless the key window's focused pane runs their type. A
+hidden item cannot take a key. The applet menu is hidden the same way, so a launcher pane shows no Terminal menu. Items
+are disabled when no main window is key, and a sheet counts as that. Moved items keep their titles. File > Close is
+fixed and its palette entry keeps the title "Close Tab or Pane".
+
+The key route tries matching items in the order the "Which keys uniterm reserves" decision gives. The launcher no longer
+gets a first offer of Cmd-1 to Cmd-9. The terminal's tab items are hidden while the launcher is focused, so the number
+keys reach the launcher through the view chain. Keys compare in one canonical form, which also drives the conflict
+check. It folds the US shifted symbols and capital letters into Shift, so Cmd-} and Cmd-Shift-] are one key. Cmd-Shift-1
+now matches an item named Cmd-!, and Shift stays significant for arrows, which the old comparison dropped.
+
+The reserved set is every key on a menu item that is not an applet's, hidden or not, plus the fixed Edit keys. Reading
+the live items covers AppKit's own additions without a table. It is read when the menu installs, when the user defaults
+change, when the app becomes active, and before each Command-key press the window routes. AppKit's timing for applying
+a remap is not documented, so the press-time read is what guarantees the route and the warning see a remap. A remapped
+applet item keeps its remap, and a recheck never rewrites it. A key an applet lost comes back when the reserved set no
+longer holds it. The warning names the applet, each command, and each key, and it says to choose a key under System
+Settings > Keyboard > Keyboard Shortcuts > App Shortcuts. A recheck posts at most one warning per applet type,
+naming only the drops not announced earlier in the session. A later remap that drops another key warns again, and a
+repeat of a drop already announced is silent.
+
+Cut and Redo are in Edit. Redo repeats an undone text edit and is off when nothing is being edited. Cmd-Z keeps its
+current behavior. With Settings key, File > Close closes Settings, which the Settings controller used to answer through
+the responder chain.
+
+Retired command IDs: the terminal's actions were `uniterm.new-tab`, `uniterm.select-*-tab`, `uniterm.select-tab-N`,
+`uniterm.bigger-text`, `uniterm.smaller-text`, `uniterm.actual-size`, and `uniterm.clear-screen`. They are never reused.
+
+Cut has no meaning in the terminal, so its item is disabled there. Copy, Paste, and Select All reach the terminal view
+through the same selectors as before, which a terminal integration test covers. The Settings window has no editable
+text field, so no Settings row takes Cut, Copy, Paste, or Select All, and the items stay on the responder chain for the
+day one does.
+
+Residuals: the live remap path through the real System Settings pane is not driven. The UI tests use the launch
+argument, which AppKit reads the same way. The unit test of the built-in conflict check adds the full-screen key by
+hand, since AppKit adds it at run time.
 
 ### M2: Reopen with Cmd-Shift-T
 
@@ -433,6 +494,29 @@ Builds on UTERM-002's command registry milestone.
 - 2026-11-01: Scheduled as UTERM-013 M1-M2 in queue.md.
 - 2026-11-01: UTERM-002's "Command source" and M1 were amended to keep the standard edit actions on the responder
   chain and to defer menus to this proposal. The risk that the two disagree is now resolved in the text.
+- 2026-11-02: M1 best guesses (work-queue best guess). Amended "What one shortcut declaration is". It said an applet
+  command is a registry entry with the registry's shape, and left open how an applet supplies one. It now says an applet
+  type registers a set whose actions receive the applet, so no command holds one, and the terminal's earlier IDs are
+  retired and never reused. The reason is that a command that captured its applet would keep it alive after close.
+- 2026-11-02: M1 best guesses (work-queue best guess). Amended "Which keys uniterm reserves". It said the reserved set is
+  read from the live menu, and did not say when, or in what order the window tries items that share a key. It now names
+  the read points: menu install, a defaults change, app activation, and each routed Command-key press. AppKit's timing
+  for applying a remap is not documented, so the press-time read is what guarantees the route and the warning see a
+  remap. The window tries a remap, then uniterm's items, then an applet's. A disabled remap or uniterm item consumes the
+  key, and a disabled applet item does not, because only the first two are reserved. Two remaps onto one key resolve by
+  that order, then menu bar position.
+- 2026-11-02: M1 best guesses (work-queue best guess). Amended "Who decides what Cmd-W closes". It said Close is a File
+  item that asks the focused applet, and did not cover a key window that is not a main window. Item targets are now
+  explicit, so Cmd-W with Settings key would have done nothing, where the responder chain used to reach Settings. Close
+  now closes a closable non-main key window and leaves a sheet alone. When a user agrees to close a running tab that has
+  become the only one, the answer is "nothing to close", so the pane close asks again.
+- 2026-11-02: M1 best guesses (work-queue best guess). The reserved-keys decision said the launcher keeps Cmd-1 to
+  Cmd-9, and the code gave the launcher a first offer of them before the menu. The first offer is gone. The terminal's
+  tab items are hidden while a launcher has focus, so the number keys reach the launcher through the view chain.
+- 2026-11-02: M1 best guesses (work-queue best guess). Amended "What happens on a key conflict". It said uniterm posts one
+  warning per applet type per session. ADR-04 says the applet loses the key and "the user is told", so a key dropped
+  after the first warning must not be silent. A check now posts at most one warning per applet type, naming the keys not
+  announced before, and a repeated drop is silent. The two M1 checks that said one warning per applet type follow.
 
 ## References
 

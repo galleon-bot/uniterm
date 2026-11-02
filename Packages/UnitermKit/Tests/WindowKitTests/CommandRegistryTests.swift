@@ -6,27 +6,36 @@ import XCTest
 @MainActor
 final class CommandRegistryTests: XCTestCase {
   /// Catches an ID that is not namespaced by its owner, which a later applet command could collide
-  /// with. Duplicates trap in the registry's initializer, so building it proves there are none.
-  func testEveryStandardCommandHasAnOwnedIDAndTitle() {
-    let registry = CommandRegistry()
+  /// with. Duplicates trap on registration, so building the registry proves there are none.
+  func testEveryCommandHasAnIDNamespacedByItsOwner() {
+    let registry = CommandRegistry.testing()
 
     XCTAssertGreaterThan(registry.commands.count, 20)
 
     for command in registry.commands {
-      XCTAssertTrue(command.id.rawValue.hasPrefix("uniterm."), "\(command.id)")
+      switch command.owner {
+      case .uniterm:
+        XCTAssertTrue(command.id.rawValue.hasPrefix("uniterm."), "\(command.id)")
+      case .applet(let typeID):
+        XCTAssertTrue(command.id.rawValue.hasPrefix("\(typeID)."), "\(command.id)")
+      }
+
       XCTAssertFalse(command.title.isEmpty)
     }
   }
 
-  /// Catches Cmd-1 to Cmd-9 that miss a command, and number 9 that selects a ninth tab.
-  func testTabNumbersMapToTheirCommands() {
-    let registry = CommandRegistry()
+  /// Catches an applet command that is registered under the wrong owner, or one that lands in the
+  /// palette's recency by number.
+  func testAnAppletTypeOwnsItsCommands() {
+    let registry = CommandRegistry.testing()
+
+    XCTAssertEqual(registry.command(.fakeNewTab)?.owner, .applet(typeID: "fake"))
+    XCTAssertEqual(registry.command(.splitRight)?.owner, .uniterm)
+    XCTAssertEqual(registry.command(.fakeTab(9))?.id.rawValue, "fake.last-tab")
 
     for number in 1...9 {
-      XCTAssertNotNil(registry.command(.selectTab(number: number)), "tab \(number)")
+      XCTAssertNotNil(registry.command(.fakeTab(number)), "tab \(number)")
     }
-
-    XCTAssertEqual(CommandID.selectTab(number: 9).rawValue, "uniterm.select-last-tab")
   }
 
   /// Catches recency that grows without bound or keeps a command twice.
@@ -49,7 +58,7 @@ final class CommandRegistryTests: XCTestCase {
     let controller = fixture.controller
 
     controller.commands.run(.splitRight, in: controller.commandContext())
-    controller.commands.run(.selectTab(number: 1), in: controller.commandContext())
+    controller.commands.run(.fakeTab(1), in: controller.commandContext())
     controller.commands.run(.showCommandPalette, in: controller.commandContext())
 
     XCTAssertEqual(controller.commands.recency, [.splitRight])
