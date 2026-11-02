@@ -700,6 +700,7 @@ public final class TerminalApplet: Applet {
       if tabs.count == 1 {
         host?.appletDidExit(self)
       } else {
+        recordClosed(tab, at: index)
         removeTab(at: index)
       }
     }

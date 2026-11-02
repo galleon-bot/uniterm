@@ -440,9 +440,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
 
   /// Closes one pane. Its space goes to its neighbors. The last pane closes the window.
   ///
-  /// A pane the user closes ends its applet at once, and its description goes on the undo stack. A
-  /// pane that is running something asks first. A pane whose applet ended on its own has nothing to
-  /// undo, and neither has a launcher.
+  /// A close is a close, however it happens. A pane the user closes and a pane whose applet ended
+  /// on its own both end the applet at once and put its description on the reopen list. Only a
+  /// pane the user closes while it runs something asks first. A launcher has nothing to reopen.
   func closePane(_ pane: NodeID, appletEnded: Bool) {
     guard let applet = paneArea.applet(for: pane) else { return }
 
@@ -451,8 +451,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
       return
     }
 
-    if appletEnded || exitedApplets.contains(ObjectIdentifier(applet)) || applet is LauncherApplet {
+    if applet is LauncherApplet {
       discard(pane)
+    } else if appletEnded || exitedApplets.contains(ObjectIdentifier(applet)) {
+      describeAndClose(pane)
     } else if applet.isRunningSomething {
       askBeforeClosing(pane, applet: applet)
     } else {
@@ -488,6 +490,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
       title: applet.title)
 
     started.remove(ObjectIdentifier(applet))
+    exitedApplets.remove(ObjectIdentifier(applet))
     applet.close()
     statusCenter.paneClosed(id: pane.rawValue)
 
@@ -498,7 +501,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     ledger.push(closed)
   }
 
-  /// Closes a pane whose applet ended on its own. Nothing is kept for undo.
+  /// Closes a launcher's pane. A launcher holds nothing to reopen.
   private func discard(_ pane: NodeID) {
     guard let applet = paneArea.applet(for: pane), let removed = try? paneArea.remove(pane)
     else { return }
@@ -799,7 +802,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     statusCenter.post(level: level, source: .pane(id: id, name: applet.title), text: text)
   }
 
-  /// A pane whose applet ended closes, and keeps nothing for undo.
+  /// A pane whose applet ended closes, and goes on the reopen list like any other close.
   public func appletDidExit(_ applet: any Applet) {
     if let pane = paneArea.paneID(for: applet) {
       exitedApplets.insert(ObjectIdentifier(applet))
