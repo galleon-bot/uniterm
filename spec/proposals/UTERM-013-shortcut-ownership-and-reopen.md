@@ -430,6 +430,7 @@ Builds on UTERM-002's command registry milestone.
   and the window reopens the newest close across applets and panes. Waits on UTERM-005 to UTERM-010, which may reshape
   the applet contract.
 - 2026-11-01: Accepted.
+- 2026-11-01: Scheduled as UTERM-013 M1-M2 in queue.md.
 
 ## References
 
