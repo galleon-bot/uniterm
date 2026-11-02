@@ -12,7 +12,7 @@
 
 - UTERM-001 — "How applets publish tabs": the applet contract gains a tab list, a change signal, and tab IDs
 - UTERM-001 — "Command source": every key binding, including those of M1, M2, M5, and M7, moves onto the command
-  registry
+  registry, except the standard edit actions
 - UTERM-003 — "How applets publish tabs": the scripting API may expose the same entries and tab IDs
 - UTERM-003 — "Command source": scripts may invoke registry commands and register their own, on the main thread
 - UTERM-005 through UTERM-010 — "How applets publish tabs" and "Applets without tabs": every applet publishes at least
@@ -82,7 +82,8 @@ This extends UTERM-001's applet contract. UTERM-001 expected the contract to cha
 Original questions: whether commands are declared in Swift only, or also in Janet once UTERM-003 lands; and whether
 the palette should eventually call the Janet API for every command.
 
-Decision: a uniterm command registry in Swift, shared by the palette and uniterm's key bindings.
+Decision: a uniterm command registry in Swift, shared by the palette and uniterm's key bindings. Amended 2026-11-01;
+see Decision Log.
 
 - Each command has a stable ID, a title, a run action, and an availability check.
 - A command targets the pane that had focus before the palette activated, the same pane Escape returns to. It never
@@ -91,10 +92,11 @@ Decision: a uniterm command registry in Swift, shared by the palette and uniterm
   close confirmation, and return before the user answers.
 - A key binding and its palette command run the same registry action. Outside the palette's field, Cmd-W and the
   palette's close command behave the same, including UTERM-001's close confirmations. UTERM-001's key bindings move
-  onto the registry.
+  onto the registry, except the standard edit actions.
+- The standard edit actions are not registry commands. Cut, copy, paste, select all, undo, and redo stay responder-chain
+  items, per UTERM-013. A registry command would act on the pane, not on a find field or address bar inside it.
 - While the palette's search field has focus, text-editing chords go to the field: cut, copy, paste, select all, undo,
-  and redo. This follows UTERM-001's rule that Cmd-Z in a focused text control undoes the edit. Amended 2026-11-01;
-  see Decision Log.
+  and redo. This follows UTERM-001's rule that Cmd-Z in a focused text control undoes the edit.
 - This proposal builds Swift commands only. The palette runs commands through the registry, never through the Janet
   API.
 - UTERM-003 may invoke registry commands, and may register its own. That work belongs to UTERM-003. A Janet caller
@@ -105,8 +107,8 @@ closing a tab rather than the pane. Routing every Enter through Janet would tie 
 UTERM-003 has not settled. It runs under a watchdog, and UTERM-004's control levels would gate built-in commands
 meant for the user. Declaring Janet commands here would make this proposal wait on a draft.
 
-Leaves undone: app menus do not read the registry. Driving menus from it would be a scope addition with no menu
-decision behind it.
+Leaves undone: this proposal does not make app menus read the registry. UTERM-013 does that, and adds a default key
+and a menu home to each entry.
 
 ### Hotkey default
 
@@ -130,12 +132,14 @@ Original question: whether the hotkey is configurable in this proposal.
 
 Decision: the palette action is a menu item with a fixed title, "Show Command Palette", and Cmd-Shift-P as its key
 equivalent. Users rebind it through System Settings > Keyboard > App Shortcuts, which remaps a menu item by its title.
-No in-app binding setting is built here. General key-binding customization would be its own proposal.
+No in-app binding setting is built here. General key-binding customization would be its own proposal. Amended
+2026-11-01; see Decision Log.
 
 Constraint: the palette's key equivalent must reach uniterm before a focused terminal surface takes the key. ADR-04
-already clears libghostty's own bindings. Every uniterm binding runs a registry command, per "Command source". Whether
-a binding is delivered as a menu key equivalent or by a key handler is an implementation detail. Either way it must
-not shadow a user's App Shortcuts remap without the user seeing it in the menu.
+already clears libghostty's own bindings. Every uniterm binding except the standard edit actions runs a registry
+command, per "Command source". Whether a binding is delivered as a menu key equivalent or by a key handler is an
+implementation detail. Either way it must not shadow a user's App Shortcuts remap without the user seeing it in the
+menu.
 
 Rationale: it follows the platform convention and is discoverable from the menu bar. It builds no settings surface. A
 recorder for this one shortcut would need a collision check that knows every uniterm binding, including later ones, and
@@ -270,6 +274,8 @@ window.
 
 **Status:** NOT STARTED
 
+Amended 2026-11-01; see Decision Log.
+
 - A hotkey shows and hides a floating palette over the focused window
 - Typing filters a list of built-in commands, and Enter runs the selected one
 - Escape hides the palette and returns focus to the pane that had it
@@ -280,6 +286,7 @@ window.
 - With the palette's field focused, Cmd-W dismisses the palette and closes nothing. Cmd-T runs on the pane that had
   focus before activation, after the palette hides
 - UTERM-001's key binding checks still pass once its bindings run through the registry
+- The standard edit actions stay responder-chain items, not registry commands
 - With the palette's field focused, Cmd-V pastes into the field and Cmd-Z undoes the field's edit, not a pane close
 - When the pane focused before activation closes while the palette shows, Escape focuses a defined pane, and a
   pane-scoped command posts a status message instead of acting on another pane
@@ -401,6 +408,13 @@ window.
 - 2026-11-01: ADR candidate (cuts across the system): every applet publishes at least one tab, and tab IDs are never
   reused, even across a relaunch. Declined: the user chose not to write it.
 - 2026-11-01: Accepted.
+- 2026-11-01: Scheduled as UTERM-002 M1-M3 in queue.md.
+- 2026-11-01: Amended "Command source" and M1 to match the accepted UTERM-013, before M1 starts. "Command source" said
+  every UTERM-001 binding moves onto the registry. Now the standard edit actions stay on the responder chain, and M1
+  gains a check that says so. Its "Leaves undone" said menus driven from the registry would be a scope addition with
+  no menu decision behind it. It now says UTERM-013 makes menus read the registry. The decision's marker moved from the
+  text-editing bullet to the decision's lead, so it covers both amendments. "Hotkey configurability" and the Impacts
+  line on UTERM-001 said every uniterm binding runs a registry command. Both now leave out the standard edit actions.
 
 ## References
 

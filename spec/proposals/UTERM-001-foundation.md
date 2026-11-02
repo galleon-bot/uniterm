@@ -1,6 +1,6 @@
 # UTERM-001: Foundation
 
-**Status:** accepted
+**Status:** implemented
 **Created:** 2026-10-31
 **Updated:** 2026-11-01
 
@@ -968,7 +968,7 @@ Log.
 
 ### M9: User visual check
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 The proposal ends with the user looking at the finished app.
 
@@ -976,6 +976,16 @@ The proposal ends with the user looking at the finished app.
   As built block
 - The user reviews the window chrome, the status bar at the top and at the bottom, and a nested pane layout, and the
   result is recorded in the As built block
+
+**As built:**
+
+- The user reviewed the app on 2026-11-01. The font, the font size, and the colors in Latte and Mocha look good.
+- The window chrome looks good. A nested pane layout looks good, and so does the warning when a split runs out of room.
+- The status bar looks good at the top and at the bottom, with one bug. After the theme is switched to Dark, the
+  directory segment moves from the trailing edge to the leading edge. Switching to Light or System, running commands,
+  moving the bar, and resizing the window do not restore it. Opening a new pane does. The bug did not reproduce later
+  and is filed in [the bug report](../bugs/20261101-status-bar-segment-leading-after-dark.md). Corrected 2026-11-01;
+  see Decision Log.
 
 ### M10: Undo reopens from the description
 
@@ -1263,6 +1273,8 @@ Added 2026-11-01 by amendment. It can run before or after the user records M9.
   runs before the hidden panes are hung up. M10 removed hidden panes and the ID an insert accepts. The text now says
   the IDs of closed panes stay below the mark and are never issued again, and the quit save has no hang-up step after
   it. M10's check said insert never accepts a retired ID. Insert now takes no ID. (work-queue best guess)
+- 2026-11-01: Correction of fact in M9's As built. It said the status bar bug was fixed as a UI change outside this
+  proposal. Neither the user nor the implementer could reproduce it, so no fix was made. It is filed as an open bug.
 
 ## References
 
