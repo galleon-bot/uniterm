@@ -186,20 +186,19 @@ extension MainWindowController {
     }
   }
 
-  /// Focuses the pane and selects the tab, both by ID. A tab that is gone leaves the palette up,
+  /// Focuses the pane and selects the tab, both by ID. A tab that is gone, or that the applet refuses to select, leaves the palette up,
   /// lists again, and says so. The palette hides without taking the keyboard back, so the chosen
   /// tab ends up holding it.
   private func chooseTab(pane: NodeID, tab: AppletTabID, title: String) {
-    guard let applet = paneArea.applet(for: pane), applet.publishedTabs.contains(tab) else {
+    guard let applet = paneArea.applet(for: pane), applet.publishedTabs.contains(tab),
+      applet.selectTab(id: tab)
+    else {
       refreshCommandPalette()
       postTabGone(for: title)
       return
     }
 
     hideCommandPalette(restoringFocus: false)
-
-    guard applet.selectTab(id: tab) else { return }
-
     paneArea.focus(pane)
   }
 

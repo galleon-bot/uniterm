@@ -216,6 +216,23 @@ final class TabSearchTests: XCTestCase {
     XCTAssertTrue(fixture.center.history.last?.text.contains("vim notes") == true)
   }
 
+  /// Catches an applet that lists a tab but refuses to select it. The palette must not hide with the
+  /// keyboard going nowhere and no message. It stays up, lists again, and says why.
+  func testChoosingATabTheAppletRefusesKeepsThePaletteUpAndPostsAMessage() throws {
+    let (first, second) = try twoPanes()
+    let firstApplet = try applet(first)
+    controller.showCommandPalette()
+
+    let chosen = try XCTUnwrap(entry(pane: first, tab: firstApplet.tabID(1)))
+    firstApplet.refusesTabSelection = true
+
+    palette.onChoose?(chosen)
+
+    XCTAssertFalse(palette.isHidden)
+    XCTAssertEqual(controller.focusedPane, second)
+    XCTAssertTrue(fixture.center.history.last?.text.contains("vim notes") == true)
+  }
+
   /// Catches the same for a pane that is gone.
   func testChoosingATabOfAClosedPaneRefreshesAndPostsAMessage() throws {
     let (first, second) = try twoPanes()

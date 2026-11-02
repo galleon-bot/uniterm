@@ -401,7 +401,7 @@ final class DockedPaletteTests: XCTestCase {
     XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{21E7}\u{2318}O)")
 
     fixture.controller.showCommandPalette()
-    XCTAssertEqual(field.placeholderString, "Search commands")
+    XCTAssertEqual(field.placeholderString, "Search tabs and commands")
   }
 
   // MARK: Mouse

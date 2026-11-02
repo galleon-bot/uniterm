@@ -491,17 +491,17 @@ new placement starts inactive.
 
 The placeholder of an inactive docked palette reads "Search tabs and commands" and then the menu item's key in
 parentheses, such as "(⇧⌘P)". It reads the live item in the main menu when the palette is placed, when it deactivates,
-and when its window becomes key. A remap that applies to the item shows from then on. An active palette reads "Search
-commands", as a floating one does. A menu item with no key leaves the parentheses out.
+and when its window becomes key. A remap that applies to the item shows from then on. An active palette reads "Search tabs
+and commands", as a floating one does. A menu item with no key leaves the parentheses out.
 
 Two settings, `paletteMode` and `paletteDockEdge`, take plain strings, so `defaults write` sets them. Each has a row in
 the Settings window. A value that is not one of the choices falls back to floating or to the top, and the window posts
 one warning for each. The stored text is not rewritten. A change from the Settings window or from outside the app moves
 every open window live.
 
-Constants: the field is 40 points tall and at most 560 wide, 16 points from each window side at the narrowest. A
-floating palette sits 12 points below the top of the pane area. The results sit 4 points from the field. The results
-keep M1's 8 rows of 28 points.
+Constants: the field, width, margins, inset, and rows are M1's. The values this milestone adds are the 4 point gap
+between a floating palette's field and its results, and the 48 point docked strip, with 6 points on the window's side
+and 2 on the pane side.
 
 Residuals: the placeholder is not refreshed when a remap changes while the window is already key, until the palette is
 next activated or the window is next key. A palette docked on the status bar's edge puts the history over the pane area

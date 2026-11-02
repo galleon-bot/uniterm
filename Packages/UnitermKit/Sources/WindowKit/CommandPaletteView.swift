@@ -159,7 +159,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
   /// What the field says when it is empty. An inactive docked palette is the only place the user
   /// is told how to reach it, so it names the key.
   static func placeholder(presentation: Presentation, isActive: Bool, hint: String?) -> String {
-    guard presentation == .docked, !isActive else { return "Search commands" }
+    guard presentation == .docked, !isActive else { return "Search tabs and commands" }
 
     guard let hint else { return "Search tabs and commands" }
 
@@ -211,9 +211,8 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
   func setEntries(_ entries: [PaletteEntry]) {
     self.entries = entries
 
-    if let selection, entries.contains(where: { $0.id == selection && $0.isEnabled }) {
-      // The same entry stays highlighted, wherever it sorted to.
-    } else {
+    // The same entry stays highlighted, wherever it sorted to.
+    if selection.map({ id in !entries.contains { $0.id == id && $0.isEnabled } }) ?? true {
       selection = Self.firstChoice(in: entries, emptyQuery: PaletteRanking.isEmpty(query))
     }
 

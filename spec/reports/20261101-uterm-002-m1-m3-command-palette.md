@@ -189,6 +189,39 @@ Review findings:
 ADR review: no conflicts. The region order and the click delivery are mechanism inside one component and easy to
 reverse, so neither passes the ADR bar.
 
+### UTERM-002 row review
+
+The review covered the three milestone commits together.
+
+Findings and dispositions:
+
+- M3's As built repeated M1's constants, against M1's claim that they live only there: fixed. M3 now records only
+  the values it added.
+- The floating palette and an active docked palette still read "Search commands", stale since M2 added tabs: fixed.
+- Two split helpers had no production callers after M1 moved splits onto the registry: fixed. They moved into a
+  test-only extension, since about 100 test call sites use them.
+- An empty `if` branch held only a comment: fixed.
+- Choosing a tab hid the palette before asking the applet to select it, so a refused selection would leave the
+  keyboard nowhere with no message: traced and confirmed. The palette now asks the applet first, and a refusal
+  takes the gone-tab path. A new test covers it. It was not run against the unfixed code.
+
+Shape notes for UTERM-013 M1, passed to its implementer:
+
+- The registry types are internal to WindowKit, while the menu is built in the App target. Menu generation must widen
+  the types or move menu building into WindowKit.
+- Each command is described in four places: its ID, its registry entry, a selector-to-ID switch with an adapter, and
+  its menu item. Carrying the command ID on the menu item removes the last two.
+- The registry has no registration API, so applet-owned commands need one.
+- The menu key match prefers a remapped item even when it is disabled. The reserved set should decide that case
+  explicitly.
+
+Fix commit: "Ask the applet before hiding the palette, and tidy the row". Checks: `make lint`, which includes
+`fmt-check`, and `make check` pass. `make test-package` ran 497 tests, with 4 skipped and 0 failures. `make test-app`
+ran 69 UI tests, with 0 failures.
+
+ADR review over the row: no conflicts. Its three candidates were already settled. The registry and the one-tab rule
+were declined on 2026-11-01. The key route is mechanism that UTERM-013 keeps out of ADR-04.
+
 ## Status
 
 In progress.

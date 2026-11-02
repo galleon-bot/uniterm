@@ -337,15 +337,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     paneArea.applet(for: pane)?.currentDirectory
   }
 
-  /// Splits the focused pane and starts the chosen applet in the new one, in the directory the
-  /// focused pane reports. Returns nil when the pane is too small, or the applet could not start.
-  /// Either way the status bar says why.
-  @discardableResult
-  func openPane(_ choice: AppletChoice, axis: Axis) -> NodeID? {
-    openPane(choice, axis: axis, from: focusedPane)
-  }
-
   /// Splits `pane` and starts the chosen applet in the new one, in the directory `pane` reports.
+  /// Returns nil when the pane is too small, or the applet could not start. Either way the status
+  /// bar says why.
   @discardableResult
   func openPane(_ choice: AppletChoice, axis: Axis, from pane: NodeID) -> NodeID? {
     contentController.view.layoutSubtreeIfNeeded()
@@ -364,13 +358,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     return place(applet, axis: axis, from: pane)
   }
 
-  /// Splits the focused pane and puts a launcher in the new one, which takes the keyboard. The
-  /// launcher remembers the directory the focused pane reports and starts what it opens there.
-  @discardableResult
-  func openLauncher(axis: Axis) -> NodeID? {
-    openLauncher(axis: axis, from: focusedPane)
-  }
-
+  /// Splits `pane` and puts a launcher in the new one, which takes the keyboard. The launcher
+  /// remembers the directory `pane` reports and starts what it opens there.
   @discardableResult
   func openLauncher(axis: Axis, from pane: NodeID) -> NodeID? {
     contentController.view.layoutSubtreeIfNeeded()

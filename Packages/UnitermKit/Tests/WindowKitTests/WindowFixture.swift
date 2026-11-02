@@ -1,9 +1,23 @@
 import AppKit
+import PaneModel
 import Preferences
 import StatusKit
 import XCTest
 
 @testable import WindowKit
+
+extension MainWindowController {
+  /// Opens `choice` beside the focused pane, as the tests do when no particular pane matters.
+  @discardableResult
+  func openPane(_ choice: AppletChoice, axis: Axis) -> NodeID? {
+    openPane(choice, axis: axis, from: focusedPane)
+  }
+
+  @discardableResult
+  func openLauncher(axis: Axis) -> NodeID? {
+    openLauncher(axis: axis, from: focusedPane)
+  }
+}
 
 final class TestClock: StatusClock, @unchecked Sendable {
   var now: TimeInterval = 0

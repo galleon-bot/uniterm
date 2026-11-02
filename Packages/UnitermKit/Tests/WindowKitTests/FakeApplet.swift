@@ -72,8 +72,11 @@ final class FakeApplet: TabbedApplet, TextActionApplet {
   /// Tells the host the tab list changed, as an applet would.
   func tabsChanged() { host?.appletTabsDidChange(self) }
 
+  /// Makes `selectTab(id:)` return false even for a tab the applet lists.
+  var refusesTabSelection = false
+
   func selectTab(id: AppletTabID) -> Bool {
-    guard let index = tabIDs.firstIndex(of: id) else { return false }
+    guard !refusesTabSelection, let index = tabIDs.firstIndex(of: id) else { return false }
 
     selectedTabIndex = index
     return true
