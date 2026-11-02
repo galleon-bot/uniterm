@@ -36,8 +36,6 @@ struct CloseUndoLedger {
     self.policy = policy
   }
 
-  var newest: ClosedPane? { entries.last }
-
   /// Adds a close. The oldest entries drop when the stack is deeper than the policy.
   mutating func push(_ closed: ClosedPane) {
     entries.append(closed)

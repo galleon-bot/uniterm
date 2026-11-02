@@ -72,7 +72,8 @@ Decision Log. Cmd-Z undoes edits in a focused text field and nothing else.
 - The command is uniterm's `uniterm.reopen-closed`. Its item is in File, beside Close, under the fixed title "Reopen
   Closed Tab or Pane". The title does not change with what the next reopen would be, so an App Shortcuts remap keeps
   matching it.
-- Edit > Undo keeps the title "Undo" and is off unless a text field is being edited. The key route consumes Cmd-Z while
+- Edit > Undo is titled "Undo", or the edit's own undo title while a text field is being edited. It is off unless a text
+  field is being edited. The key route consumes Cmd-Z while
   the item is off, as it does for any reserved key.
 - With nothing to reopen, the item is off and the key is consumed. A direct request, such as from a test, posts "There
   is no closed tab or pane to reopen."
@@ -102,7 +103,7 @@ Decision: each applet item names its own home. The standard edit actions stay fi
 settled decision.
 
 - An item with a macOS home goes there. Text size goes in View, and New Tab goes in File. Close is uniterm's, per the
-  Cmd-W decision. Amended 2026-11-02; see Decision Log.
+  Cmd-W decision. Amended 2026-11-01; see Decision Log.
 - An item with no standard home, such as Clear, goes in an applet menu named for the applet type. That menu appears only
   while the focused applet has such items.
 - The menus follow the key window's focused pane. When Settings or a sheet is key, applet items are disabled.
@@ -152,13 +153,14 @@ that choice.
 Decision: uniterm owns Cmd-W and asks the focused applet to close its current tab.
 
 - Cmd-W is one File item with the fixed title "Close". Its title does not change with the tab count. Amended
-  2026-11-01; see Decision Log.
+  2026-11-02; see Decision Log.
 - The palette's close command runs the same registry action.
 - The applet answers closed, declined, or nothing to close.
 - Only "nothing to close" leads uniterm to close the pane. The pane close guard applies as usual.
 - An applet without tabs always answers "nothing to close".
-- While a window that is not a main window is key, such as Settings, File > Close closes that window. A sheet is not
-  closed this way.
+- While a non-main window is key, such as Settings, File > Close closes that window. A sheet is never closed this way.
+- If the user agrees to close a running tab that has meanwhile become the only one, the answer is "nothing to close".
+  The pane close guard then asks again.
 
 Rationale: one owner keeps Cmd-W a window key in every applet, so the pane close guard always runs. It mirrors the
 settled reopen rule, where uniterm asks the applet to reopen a tab. Today's tab close returns one Bool for both a
@@ -379,8 +381,8 @@ Settings > Keyboard > Keyboard Shortcuts > App Shortcuts. A recheck posts at mos
 naming only the drops not announced earlier in the session. A later remap that drops another key warns again, and a
 repeat of a drop already announced is silent.
 
-Cut and Redo are in Edit. Redo repeats an undone text edit and is off when nothing is being edited. Cmd-Z keeps its
-current behavior. With Settings key, File > Close closes Settings, which the Settings controller used to answer through
+Cut and Redo are in Edit. Redo repeats an undone text edit and is off when nothing is being edited. M1 left Cmd-Z alone.
+M2 then made it text-edit only. With Settings key, File > Close closes Settings, which the Settings controller used to answer through
 the responder chain.
 
 Retired command IDs: the terminal's actions were `uniterm.new-tab`, `uniterm.select-*-tab`, `uniterm.select-tab-N`,
@@ -449,7 +451,7 @@ with what reopened instead or "Nothing was reopened." No message posts when the 
 is missing or the lists are empty, the item is off, so the key is consumed and nothing posts. A failed tab and a pane
 that does not fit each name the title and what to do.
 
-Edit > Undo is "Undo" and off outside a text edit. The UI tests that checked the empty-undo message used it as a way to
+Edit > Undo is "Undo" and off outside a text edit. While a field is edited it takes the field's own undo title. The UI tests that checked the empty-undo message used it as a way to
 get a status message. The history test now uses the debug error post, and the terminal key test checks Cmd-Shift-T
 by closing and reopening a tab.
 
@@ -574,6 +576,11 @@ pane's usual start error.
 - 2026-11-02: M2 best guesses (work-queue best guess). Amended "How long an applet's closed-tab list is". It said the
   depth is a fixed policy value and gave no number. The terminal's is 20, the same as the pane undo depth, with no
   setting.
+- 2026-11-02: Edit > Undo title (work-queue best guess). Amended "Cmd-Shift-T reopens, and Cmd-Z undoes text edits
+  only". It said Edit > Undo keeps the title "Undo". The code retitles it to the field's own undo title, such as "Undo
+  Typing", while a field is edited. That is standard AppKit behavior. The item is built as "Undo" and returns to it
+  outside an edit. A remap of "Undo" under App Shortcuts matches that base title. It may not match while the item shows
+  the retitled form. This was not verified against macOS.
 
 ## References
 

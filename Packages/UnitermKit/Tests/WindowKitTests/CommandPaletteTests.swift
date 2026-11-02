@@ -257,9 +257,9 @@ final class CommandPaletteTests: XCTestCase {
     XCTAssertEqual(controller.focusedPane, remaining)
   }
 
-  /// Catches a registry command that reads the focused pane. The text action must reach the pane
+  /// Catches a registry command that reads the focused pane. The command must reach the pane
   /// the context names, not the one with focus.
-  func testATextActionReachesThePaneTheContextNames() throws {
+  func testARegistryCommandRunsOnThePaneTheContextNames() throws {
     controller.openPane(.terminalShell, axis: .row)
     let focused = controller.focusedPane
     let other = try XCTUnwrap(controller.paneIDs.first { $0 != focused })

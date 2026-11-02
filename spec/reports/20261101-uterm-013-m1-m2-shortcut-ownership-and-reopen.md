@@ -131,6 +131,32 @@ policy is a key binding choice inside UTERM-013 and does not pass the ADR bar.
 UTERM-001's text says Cmd-Z reopens a closed pane, and UTERM-002 refers to it. UTERM-013 supersedes that part. The row
 finish adds a "Superseded in part by UTERM-013" marker to UTERM-001, which the freeze allows.
 
+### UTERM-013 row review
+
+The review covered both milestone commits together. It found no correctness or security defect, and judged the applet
+contract coherent and minimal for the later applets.
+
+Findings and dispositions:
+
+- "Who decides what Cmd-W closes" kept an old marker, and the last-tab rule lived only in the log: fixed. Both 2026-11-02
+  rules are now in the decision text.
+- The menu placement bullet's marker had moved to a date with no matching entry: fixed.
+- M1's As built said Cmd-Z keeps its behavior, which M2 made false: fixed.
+- The proposal said Edit > Undo keeps the title "Undo", but AppKit retitles it while a field is edited: fixed by
+  amendment. Whether an App Shortcuts remap of "Undo" still matches while the item reads "Undo Typing" is unverified.
+  The Decision Log entry says so.
+- The pane undo ledger's `newest` property had no production reader after M2: removed.
+- A palette test still named the removed text-action protocol: renamed.
+- Uniform marker date formats: dismissed, since `proposals.md` says a later revision replaces the marker.
+
+Fix commit: "Tidy shortcut ownership after review". Checks: `make fmt-check`, `make lint`, `make check`, and `make
+test-package` pass. The code changes were a dead property and a test name, so `make test-app` did not rerun.
+
+UTERM-002 text that UTERM-013 changed later, such as the text-action protocol, the launcher's first offer of Cmd-1 to
+Cmd-9, and the uncanonical key match, describes what UTERM-002 shipped. It is not a correction of fact.
+
+ADR review over the row: no conflicts and nothing new. Its candidates are settled or deferred in the Decision Log.
+
 ## Status
 
 In progress.

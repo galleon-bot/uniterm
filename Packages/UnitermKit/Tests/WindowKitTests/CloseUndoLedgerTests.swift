@@ -25,7 +25,7 @@ final class CloseUndoLedgerTests: XCTestCase {
     ledger.push(closed(3))
 
     XCTAssertEqual(ledger.entries.map(\.title), ["Close 2", "Close 3"])
-    XCTAssertEqual(ledger.newest?.title, "Close 3")
+    XCTAssertEqual(ledger.entries.last?.title, "Close 3")
   }
 
   /// Catches a removal that takes the newest entry when an older one was named. Removing by stamp
