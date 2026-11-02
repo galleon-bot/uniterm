@@ -4,10 +4,10 @@ uniterm is a unified terminal emulator for macOS. See [README.md](README.md) for
 
 ## Coding Standards
 
-@~/projects/coding_agent_standards/profiles/swift-macos-app.md
-@~/projects/coding_agent_standards/languages/lisp.md
-@~/projects/coding_agent_standards/languages/janet.md
-@~/projects/coding_agent_standards/languages/lisp-embedding.md
+@~/.claude/coding-standards-current/profiles/swift-macos-app.md
+@~/.claude/coding-standards-current/languages/lisp.md
+@~/.claude/coding-standards-current/languages/janet.md
+@~/.claude/coding-standards-current/languages/lisp-embedding.md
 
 These imports stand in for a future `swift-macos-janet-host` profile. Promote them to a real profile once the
 combination is proven here.
