@@ -21,6 +21,24 @@ combination is proven here.
 - libghostty provides terminal emulation. Its API is unstable. Pin it to an exact version.
 - Janet is the embedded scripting language. It backs the REPL applet and the scripting API.
 
+## Applet Attributes
+
+- When an applet has a concept such as a current directory, that value flows explicitly through the applet contract.
+  It never rides on hidden behavior in a library, such as libghostty passing state from one terminal to the next.
+- uniterm need not sit in the middle of everything. Not every attribute needs plumbing, and not every behavior needs
+  a setting.
+- Whenever implicit inheritance or hidden state flow turns up, raise it with the user as an explicit decision, either
+  way. Do not silently keep it or silently replace it.
+
+## UI Feedback
+
+uniterm is UI-heavy, so the user's hands-on reviews produce a steady stream of tweaks.
+
+- A UI change from a review does not need a proposal. Building it now is always one of the options offered.
+- Default to building visual and interaction polish directly. Review, test, and commit it like any other change.
+- A mockup first helps when the change is a new interaction. A Design canvas artifact works for this.
+- Keep proposals for changes to contracts, ADRs, or rules that cut across applets, such as shortcut ownership.
+
 ## Git
 
 - You may commit without asking first.

@@ -5,7 +5,7 @@
 
 ## Context
 
-Every applet returns a restorable description of itself. Undo close uses it once the grace period ends. Layout
+Every applet returns a restorable description of itself. Undo close uses it. Layout
 persistence uses it at every launch.
 
 A terminal in program mode runs one given command. If its description were a launch recipe, then undo or relaunch would

@@ -1,0 +1,8 @@
+.cache/
+.build/
+.swiftpm/
+xcuserdata/
+*.xcuserstate
+DerivedData/
+Packages/UnitermKit/Frameworks/GhosttyKit.xcframework
+Packages/UnitermKit/Frameworks/GhosttyResources

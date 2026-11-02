@@ -2,7 +2,7 @@
 
 **Status:** draft
 **Created:** 2026-10-31
-**Updated:** 2026-10-31
+**Updated:** 2026-11-01
 
 ## Dependencies
 
@@ -95,10 +95,28 @@ subtree can also merge into a same-axis parent. And a user split can put new pan
 likely needs an explicit owner mark that a layout request creates, with a grouping node kind that does not merge. This
 may revise the settled decision.
 
+Context from UTERM-001's implementation, in support of an ADR candidate on ID scope:
+
+- Node IDs are unique only within one window, and a trust grant keyed by ID must carry the window too.
+- A pane reopened by undo gets a new ID, so a grant keyed by ID does not follow it.
+
 ### Saved layouts
 
 - How a program's requested layout is remembered and restored.
 - Whether a restored layout keeps its trust, or asks again.
+
+Context from UTERM-001: the layout file stores each window's tree with its node IDs and a per-window ID high-water
+mark. Windows are stored by order only, with no saved identity. A description this build cannot read round-trips
+byte-for-byte. A new node kind, such as the group, bumps the schema version, and an older build moves a newer file
+aside.
+
+### Clipboard access from controlled panes
+
+Context from UTERM-001. A terminal program's OSC 52 clipboard read asks the user, in a dialog that names the pane. A
+write goes through without asking, since the generated config sets `clipboard-write` to `allow`. So a program in a
+remote-controlled or exec pane can replace the clipboard silently. Decide whether a control level changes either rule.
+Adding a write prompt back means restoring the write case of the terminal surface's clipboard request, which UTERM-001
+removed as unreachable. An ADR candidate on clipboard trust in UTERM-001's Decision Log may be shaped by this decision.
 
 ## Risks
 
@@ -147,6 +165,8 @@ may revise the settled decision.
 
 - 2026-10-31: Drafted from the original write-up without an interview. The open questions hold everything undecided.
 - 2026-10-31: This proposal defines the group node kind, at the user's request during the UTERM-001 review.
+- 2026-11-01: Added context from UTERM-001's implementation to "What anchors trust" and "Saved layouts", and
+  added "Clipboard access from controlled panes".
 
 ## References
 

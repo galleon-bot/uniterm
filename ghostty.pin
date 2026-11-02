@@ -1,0 +1,11 @@
+# The Ghostty build that uniterm links, and the toolchain it was built with.
+# scripts/build-ghostty.sh reads this file. Bump it deliberately, with the toolchain.
+GHOSTTY_TAG=v1.3.1
+GHOSTTY_COMMIT=332b2aefc6e72d363aa93ab6ecfc86eeeeb5ed28
+ZIG_VERSION=0.15.2
+# Zig 0.15 cannot link against the macOS 26 SDK. It compiles against this older SDK from the Command Line Tools.
+ZIG_SDK_VERSION=15.4
+XCODE_VERSION=26.6
+XCODE_BUILD=17F113
+SDK_VERSION=26.5
+GHOSTTY_TREE_SHA256=dd22aae24fd340960a2ce0b608ce25a62ea3815df84eb07e8ec1fb810f146a9d

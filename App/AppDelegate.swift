@@ -1,0 +1,309 @@
+import AppKit
+import AppletKit
+import OSLog
+import Preferences
+import SettingsKit
+import StatusKit
+import TerminalApplet
+import TerminalSurface
+import WindowKit
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+  private let logger = Logger(subsystem: "dev.uniterm.app", category: "app")
+  private let settings: SettingsStore
+  private var appearance: AppearanceController?
+  private var appearanceToken: UUID?
+  private var paletteSync: TerminalPaletteSync?
+  private var terminalEngine: GhosttyTerminalEngine?
+  private var windowSet: WindowSet?
+  private var layoutPersistence: LayoutPersistence?
+  private var settingsWindowController: SettingsWindowController?
+  private var askingToQuit = false
+
+  /// The `UNITERM_` variables the process started with. The scrub of the inherited environment
+  /// removes them from the process, so they are read from here. Only debug builds honor them.
+  private let debugEnvironment: [String: String]
+
+  init(debugEnvironment: [String: String]) {
+    self.debugEnvironment = debugEnvironment
+    self.settings = SettingsStore(defaults: Self.makeDefaults(debugEnvironment))
+    super.init()
+  }
+
+  /// UI tests set `UNITERM_DEFAULTS_PATH` to a plist path inside the test runner's container, so
+  /// they never touch the developer's real preferences. A write to that file from the sandboxed
+  /// runner reaches the running app the way `defaults write` would. Only debug builds honor it.
+  private static func makeDefaults(_ environment: [String: String]) -> UserDefaults {
+    #if DEBUG
+      if let path = environment["UNITERM_DEFAULTS_PATH"],
+        let defaults = UserDefaults(suiteName: path)
+      {
+        return defaults
+      }
+    #endif
+
+    return .standard
+  }
+
+  /// UI tests set `UNITERM_TERMINAL_DIR` so the generated terminal config stays out of the
+  /// developer's Application Support folder. Only debug builds honor it, since a release build has
+  /// no test to serve.
+  private func terminalConfigDirectory() throws -> URL {
+    #if DEBUG
+      if let path = debugEnvironment["UNITERM_TERMINAL_DIR"] {
+        return URL(fileURLWithPath: path, isDirectory: true)
+      }
+    #endif
+
+    return try TerminalConfigStore.defaultDirectory()
+  }
+
+  /// UI tests set `UNITERM_LAYOUT_DIR` so the saved layout stays out of the developer's Application
+  /// Support folder. Only debug builds honor it, for the same reason as the terminal folder.
+  private func layoutDirectory() throws -> URL {
+    #if DEBUG
+      if let path = debugEnvironment["UNITERM_LAYOUT_DIR"] {
+        return URL(fileURLWithPath: path, isDirectory: true)
+      }
+    #endif
+
+    return try LayoutPersistence.defaultDirectory()
+  }
+
+  /// UI tests set `UNITERM_LAYOUT_DEBOUNCE` to a long delay in seconds, so only the save on quit can
+  /// write the layout. Only debug builds honor it.
+  private func layoutDebounce() -> TimeInterval {
+    #if DEBUG
+      if let text = debugEnvironment["UNITERM_LAYOUT_DEBOUNCE"],
+        let seconds = TimeInterval(text), seconds > 0
+      {
+        return seconds
+      }
+    #endif
+
+    return 1
+  }
+
+  /// The `ghostty` folder that the build copies into the bundle's resources. It holds the
+  /// shell-integration scripts. The `terminfo` folder sits next to it.
+  private static func ghosttyResourcesDirectory() -> URL {
+    let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
+    return resources.appending(path: "ghostty", directoryHint: .isDirectory)
+  }
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    logger.info("libghostty \(TerminalSurfaceInfo.libraryVersion, privacy: .public)")
+
+    let appearance = AppearanceController(store: settings)
+    self.appearance = appearance
+
+    let engine: GhosttyTerminalEngine
+    do {
+      engine = try GhosttyTerminalEngine(
+        configStore: TerminalConfigStore(directory: try terminalConfigDirectory()),
+        resourcesDirectory: Self.ghosttyResourcesDirectory(), palette: appearance.palette)
+    } catch {
+      logger.error("the terminal engine did not start: \(String(describing: error))")
+
+      failLaunch("uniterm could not start its terminal engine", detail: error)
+      return
+    }
+
+    terminalEngine = engine
+
+    NSApp.mainMenu = MainMenu.make(target: self)
+
+    let settings = settings
+
+    let restoreApplet: AppletRestorer = { description in
+      guard description.type == TerminalDescription.typeID else {
+        throw AppletRestoreError.wrongType(
+          expected: TerminalDescription.typeID, found: description.type)
+      }
+
+      return try TerminalApplet(engine: engine, restoring: description)
+    }
+
+    let makeApplet: AppletFactory = { choice, directory in
+      switch choice {
+      case .terminalShell:
+        return TerminalApplet(engine: engine, workingDirectory: directory)
+
+      case .terminalProgram(let command):
+        return try TerminalApplet(engine: engine, program: command, workingDirectory: directory)
+      }
+    }
+
+    let windows = WindowSet(
+      makeRestoredController: { identifier, restored in
+        try MainWindowController(
+          appearance: appearance, settings: settings, identifier: identifier,
+          restoring: restored, restoreApplet: restoreApplet, makeApplet: makeApplet)
+      },
+      makeController: { identifier, directory in
+        try MainWindowController(
+          appearance: appearance, settings: settings, identifier: identifier,
+          startingIn: directory, restoreApplet: restoreApplet, makeApplet: makeApplet)
+      })
+    windowSet = windows
+
+    let persistence: LayoutPersistence?
+    do {
+      persistence = LayoutPersistence(
+        directory: try layoutDirectory(), windows: windows, debounce: layoutDebounce())
+    } catch {
+      logger.error("the layout folder is not available: \(String(describing: error))")
+      persistence = nil
+
+      do {
+        try windows.open()
+        windows.post(
+          level: .error, source: .uniterm,
+          text: "The layout folder is not available, so this window's layout is not saved: \(error)"
+        )
+      } catch {
+        failLaunch("uniterm could not open its first window", detail: error)
+        return
+      }
+    }
+
+    layoutPersistence = persistence
+
+    do {
+      try persistence?.launch()
+    } catch {
+      logger.error("the first window did not open: \(String(describing: error))")
+      failLaunch("uniterm could not open its first window", detail: error)
+      return
+    }
+
+    let sync = TerminalPaletteSync(engine: engine) { [weak self] error in
+      self?.paletteDidNotApply(error)
+    }
+    paletteSync = sync
+    appearanceToken = appearance.addObserver { palette in
+      sync.apply(palette)
+    }
+
+    NSApp.activate()
+
+    if let controller = windows.activeController {
+      postDebugError(to: controller)
+    }
+  }
+
+  /// Tells the user what failed at launch, then quits. Without a window there is nowhere else to
+  /// say it.
+  private func failLaunch(_ message: String, detail: any Error) {
+    let alert = NSAlert()
+    alert.alertStyle = .critical
+    alert.messageText = message
+    alert.informativeText =
+      "\(detail)\n\nQuit uniterm and open it again. If this keeps happening, check the log."
+    alert.runModal()
+    NSApp.terminate(nil)
+  }
+
+  /// UI tests set `UNITERM_DEBUG_POST_ERROR` to get an error on the status bar without relying on
+  /// a feature that may change. Only debug builds honor it.
+  private func postDebugError(to controller: MainWindowController) {
+    #if DEBUG
+      if let text = debugEnvironment["UNITERM_DEBUG_POST_ERROR"] {
+        controller.statusCenter.post(level: .error, source: .uniterm, text: text)
+      }
+    #endif
+  }
+
+  /// Quitting asks first when anything is running in any window.
+  /// The answer comes later, so AppKit waits for it. A second Cmd-Q while the question is open
+  /// does not stack another one.
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard let windowSet, !windowSet.runningTabLabels.isEmpty else { return .terminateNow }
+
+    guard !askingToQuit else { return .terminateCancel }
+
+    askingToQuit = true
+
+    Task { @MainActor [weak self] in
+      let confirmed = await windowSet.shouldQuit()
+      self?.askingToQuit = false
+      sender.reply(toApplicationShouldTerminate: confirmed)
+    }
+
+    return .terminateLater
+  }
+
+  func applicationWillTerminate(_ notification: Notification) {
+    layoutPersistence?.saveForQuit()
+    terminalEngine?.removeConfigFile()
+  }
+
+  /// uniterm restores its own layout on every launch, from its own file. AppKit's window
+  /// restoration is off, so it never opens a second copy of a restored window, and it never follows
+  /// the system setting that closes windows when quitting.
+  func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+    true
+  }
+
+  func application(_ app: NSApplication, shouldRestoreSecureApplicationState coder: NSCoder) -> Bool
+  {
+    false
+  }
+
+  /// Closing the last window leaves the app running, as on macOS generally. Cmd-N or a click on
+  /// the Dock icon opens a new window, and Cmd-Q quits.
+  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    false
+  }
+
+  /// A click on the Dock icon opens a window when none is open. The Settings window does not
+  /// count. With a window open, minimized or not, AppKit's own handling brings it back.
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+    !openWindow(onlyIfNone: true)
+  }
+
+  private func paletteDidNotApply(_ error: any Error) {
+    logger.error("the terminal palette did not update: \(String(describing: error))")
+    windowSet?.post(
+      level: .error, source: .uniterm, text: "The terminal colors did not update: \(error)")
+  }
+
+  @objc func newWindow(_ sender: Any?) {
+    openWindow()
+  }
+
+  /// Says whether a window opened. With `onlyIfNone`, an open window means nothing opens.
+  @discardableResult
+  private func openWindow(onlyIfNone: Bool = false) -> Bool {
+    guard let windowSet else { return false }
+
+    do {
+      if onlyIfNone { return try windowSet.openIfNone() }
+
+      try windowSet.open()
+      return true
+    } catch {
+      logger.error("the window did not open: \(String(describing: error))")
+
+      if let active = windowSet.activeController {
+        active.statusCenter.post(
+          level: .error, source: .uniterm, text: "The window did not open: \(error)")
+        return false
+      }
+
+      let alert = NSAlert()
+      alert.alertStyle = .warning
+      alert.messageText = "uniterm could not open a window"
+      alert.informativeText = "\(error)"
+      alert.runModal()
+      return false
+    }
+  }
+
+  @objc func showSettings(_ sender: Any?) {
+    let controller = settingsWindowController ?? SettingsWindowController(store: settings)
+    settingsWindowController = controller
+    controller.present()
+  }
+}

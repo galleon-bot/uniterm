@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR makes an older run's result moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Zig 0.15 cannot link against the macOS 26 SDK, so the Ghostty build compiles against the macOS
+  # 15.4 SDK. The macos-26 image has only 26.x SDKs. The macos-15 image ships it inside Xcode 16.3.
+  zig-sdk:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Package the macOS 15.4 SDK
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_16.3.app/Contents/Developer
+        run: |
+          sdk="$(xcrun --sdk macosx15.4 --show-sdk-path)"
+          echo "Packaging $sdk"
+          tar -czf "$RUNNER_TEMP/MacOSX15.4.sdk.tar.gz" -C "$sdk" .
+
+      # A tarball keeps the SDK's symlinks, which the artifact upload alone would not.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macosx15.4-sdk
+          path: ${{ runner.temp }}/MacOSX15.4.sdk.tar.gz
+          retention-days: 1
+          compression-level: 0
+
+  ci:
+    needs: zig-sdk
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      ZIG_VERSION: 0.15.2
+      ZIG_SHA256: 3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # ghostty.pin names the exact Xcode build. Selecting it by path keeps an image update that
+      # changes the default Xcode from silently moving the toolchain.
+      - name: Select Xcode
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.6.app
+          xcodebuild -version
+
+      # The terminal tests drive a real zsh. Outside a terminal, libghostty starts the account's
+      # login shell, and the runner account's is the system bash 3.2, which Ghostty's shell
+      # integration does not support.
+      - name: Make zsh the login shell
+        run: |
+          sudo dscl . -create "/Users/$USER" UserShell /bin/zsh
+          dscl . -read "/Users/$USER" UserShell
+
+      - name: Install the Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Install Zig
+        run: |
+          archive="zig-aarch64-macos-$ZIG_VERSION.tar.xz"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive" \
+            "https://ziglang.org/download/$ZIG_VERSION/$archive"
+          echo "$ZIG_SHA256  $RUNNER_TEMP/$archive" | shasum -a 256 --check
+          tar -xJf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-aarch64-macos-$ZIG_VERSION" >>"$GITHUB_PATH"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macosx15.4-sdk
+          path: ${{ runner.temp }}
+
+      - name: Unpack the macOS 15.4 SDK
+        run: |
+          sdk="$RUNNER_TEMP/MacOSX15.4.sdk"
+          mkdir -p "$sdk"
+          tar -xzf "$RUNNER_TEMP/MacOSX15.4.sdk.tar.gz" -C "$sdk"
+          echo "GHOSTTY_ZIG_SDK_PATH=$sdk" >>"$GITHUB_ENV"
+
+      # The source tarball, Zig's package cache, and the built artifact. The offline check rebuilds
+      # from the first two, so all three are kept together.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/ghostty
+          key: ghostty-${{ runner.arch }}-${{ hashFiles('ghostty.pin') }}
+
+      - name: make ci
+        run: make ci
+
+      - name: Keep the UI test results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-test-results
+          path: .build/DerivedData/Logs/Test/*.xcresult
+          retention-days: 7
+          if-no-files-found: ignore

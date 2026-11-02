@@ -1,0 +1,393 @@
+#!/usr/bin/env bash
+#
+# Builds GhosttyKit.xcframework and Ghostty's resources from the commit pinned in ghostty.pin.
+#
+# Usage:
+#   scripts/build-ghostty.sh          build the pinned artifact when it is missing, then link it
+#   scripts/build-ghostty.sh verify   check that the linked artifact matches the pin and the toolchain
+#   scripts/build-ghostty.sh path     print the directory of the artifact for the current pin
+#   scripts/build-ghostty.sh tree-hash  print the source tree hash for GHOSTTY_COMMIT
+#
+# Bumping the pin: set GHOSTTY_TAG and GHOSTTY_COMMIT in ghostty.pin, run `tree-hash` and record its
+# output as GHOSTTY_TREE_SHA256, then update the toolchain fields. A build fails when the extracted
+# source does not hash to GHOSTTY_TREE_SHA256.
+#
+# Layout under $GHOSTTY_CACHE_DIR (default .cache/ghostty in the repo):
+#   dl/<commit>.tar.gz     the Ghostty source for the pinned commit
+#   zig-global/            Zig's global package cache, kept so a cold rebuild needs no network
+#   artifacts/<key>/       finished artifacts. A directory appears here only by an atomic rename.
+#   tmp/                   scratch space for builds in progress
+#   lock/                  held while a build runs, so concurrent builds serialize
+#
+# The key is the Ghostty commit, the Zig version, and the Xcode and SDK versions.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PIN_FILE="${GHOSTTY_PIN_FILE:-$ROOT/ghostty.pin}"
+CACHE="${GHOSTTY_CACHE_DIR:-$ROOT/.cache/ghostty}"
+LINK_DIR="${GHOSTTY_LINK_DIR:-$ROOT/Packages/UnitermKit/Frameworks}"
+OFFLINE="${GHOSTTY_OFFLINE:-0}"
+LOCK_WAIT_SECONDS="${GHOSTTY_LOCK_WAIT_SECONDS:-1800}"
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+read_pin() {
+  [ -f "$PIN_FILE" ] || die "pin file not found: $PIN_FILE"
+  GHOSTTY_TAG="" GHOSTTY_COMMIT="" ZIG_VERSION="" ZIG_SDK_VERSION="" XCODE_VERSION="" XCODE_BUILD="" SDK_VERSION=""
+  # shellcheck disable=SC1090
+  . "$PIN_FILE"
+  for name in GHOSTTY_TAG GHOSTTY_COMMIT ZIG_VERSION ZIG_SDK_VERSION XCODE_VERSION XCODE_BUILD SDK_VERSION; do
+    [ -n "${!name}" ] || die "$PIN_FILE does not set $name"
+  done
+}
+
+read_toolchain() {
+  INSTALLED_ZIG=""
+  if command -v zig >/dev/null; then
+    INSTALLED_ZIG="$(zig version)"
+  fi
+  local xcode_out
+  xcode_out="$(xcodebuild -version 2>/dev/null)" || die "xcodebuild -version failed. Select Xcode $XCODE_VERSION."
+  INSTALLED_XCODE_VERSION="$(printf '%s\n' "$xcode_out" | awk '/^Xcode/ { print $2 }')"
+  INSTALLED_XCODE_BUILD="$(printf '%s\n' "$xcode_out" | awk '/^Build version/ { print $3 }')"
+  INSTALLED_SDK_VERSION="$(xcrun -sdk macosx --show-sdk-version 2>/dev/null)" ||
+    die "xcrun could not report the macOS SDK version."
+}
+
+# Xcode and the SDK must match what the pin was built with.
+check_toolchain() {
+  if [ "$INSTALLED_XCODE_BUILD" != "$XCODE_BUILD" ] || [ "$INSTALLED_SDK_VERSION" != "$SDK_VERSION" ]; then
+    die "ghostty.pin was built with Xcode $XCODE_VERSION ($XCODE_BUILD) and SDK $SDK_VERSION. Installed: Xcode $INSTALLED_XCODE_VERSION ($INSTALLED_XCODE_BUILD), SDK $INSTALLED_SDK_VERSION. Select Xcode $XCODE_VERSION, or bump ghostty.pin together with a Ghostty pin bump."
+  fi
+}
+
+# Zig is needed only to build, and it must match the pin exactly. A verify run happens in Xcode,
+# where Zig is not on PATH.
+check_zig() {
+  [ -n "$INSTALLED_ZIG" ] || die "zig not found. Install Zig $ZIG_VERSION."
+  if [ "$INSTALLED_ZIG" != "$ZIG_VERSION" ]; then
+    die "Zig $INSTALLED_ZIG is installed, but ghostty.pin requires exactly Zig $ZIG_VERSION."
+  fi
+
+  # Zig 0.15 cannot link against the macOS 26 SDK. Its libSystem stub lists only arm64e. Zig
+  # compiles against an older SDK from the Command Line Tools, while Xcode's tools use the current one.
+  ZIG_SDK_PATH="${GHOSTTY_ZIG_SDK_PATH:-/Library/Developer/CommandLineTools/SDKs/MacOSX${ZIG_SDK_VERSION}.sdk}"
+  [ -d "$ZIG_SDK_PATH" ] ||
+    die "Zig $ZIG_VERSION needs the macOS $ZIG_SDK_VERSION SDK, and $ZIG_SDK_PATH is missing. Install the Command Line Tools with that SDK, or set GHOSTTY_ZIG_SDK_PATH."
+}
+
+compute_key() {
+  KEY="${GHOSTTY_COMMIT:0:12}-zig${ZIG_VERSION}-xcode${XCODE_BUILD}-sdk${SDK_VERSION}"
+  ARTIFACT="$CACHE/artifacts/$KEY"
+}
+
+manifest_value() {
+  sed -n "s/^$2=//p" "$1" | head -n 1
+}
+
+# The manifest must agree with the pin and with the installed toolchain.
+check_manifest() {
+  local manifest="$ARTIFACT/manifest"
+  [ -f "$manifest" ] || die "artifact $KEY has no manifest. Run make build."
+
+  local expected_pairs=(
+    "GHOSTTY_COMMIT=$GHOSTTY_COMMIT"
+    "ZIG_VERSION=$ZIG_VERSION"
+    "ZIG_SDK_VERSION=$ZIG_SDK_VERSION"
+    "XCODE_VERSION=$XCODE_VERSION"
+    "XCODE_BUILD=$XCODE_BUILD"
+    "SDK_VERSION=$SDK_VERSION"
+  )
+  local pair name want got
+  for pair in "${expected_pairs[@]}"; do
+    name="${pair%%=*}"
+    want="${pair#*=}"
+    got="$(manifest_value "$manifest" "$name")"
+    if [ "$got" != "$want" ]; then
+      die "libghostty manifest records $name=$got, but the pin and toolchain say $want. The artifact was built with Xcode $(manifest_value "$manifest" XCODE_VERSION) ($(manifest_value "$manifest" XCODE_BUILD)). Run make build."
+    fi
+  done
+
+  [ -d "$ARTIFACT/GhosttyKit.xcframework" ] || die "artifact $KEY has no GhosttyKit.xcframework. Run make build."
+  [ -d "$ARTIFACT/share/ghostty" ] || die "artifact $KEY has no shell-integration resources. Run make build."
+  [ -d "$ARTIFACT/share/terminfo" ] || die "artifact $KEY has no terminfo. Run make build."
+}
+
+link_artifact() {
+  mkdir -p "$LINK_DIR"
+  ln -sfn "$ARTIFACT/GhosttyKit.xcframework" "$LINK_DIR/GhosttyKit.xcframework"
+  ln -sfn "$ARTIFACT/share" "$LINK_DIR/GhosttyResources"
+}
+
+# The lock is a flock on an open file descriptor. The kernel drops it when the last process holding
+# the descriptor exits, even after kill -9, so there is no stale lock to take over. Build children
+# inherit the descriptor, which keeps the lock while any of them still runs.
+acquire_lock() {
+  mkdir -p "$CACHE"
+  exec 9>"$CACHE/build.lock"
+  python3 -c '
+import fcntl, sys, time
+deadline = time.monotonic() + float(sys.argv[1])
+announced = False
+while True:
+    try:
+        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        break
+    except BlockingIOError:
+        if time.monotonic() >= deadline:
+            print("error: timed out waiting for another Ghostty build to finish.", file=sys.stderr)
+            sys.exit(1)
+        if not announced:
+            print("Waiting for another Ghostty build to finish.")
+            announced = True
+        time.sleep(1)
+' "$LOCK_WAIT_SECONDS"
+}
+
+WORK=""
+
+cleanup() {
+  if [ -n "$WORK" ] && [ -d "$WORK" ]; then
+    rm -rf "$WORK"
+  fi
+}
+
+# Leftovers from builds that were killed. Only called while holding the build lock, so no live
+# build owns them.
+remove_stale_work() {
+  local stale
+  for stale in "$CACHE"/tmp/build.*; do
+    [ -d "$stale" ] || continue
+    echo "Removing leftover build directory $(basename "$stale")."
+    rm -rf "$stale"
+  done
+}
+
+FETCHED=0
+
+fetch_source() {
+  local tarball="$CACHE/dl/$GHOSTTY_COMMIT.tar.gz"
+  [ -f "$tarball" ] && return 0
+  [ "$OFFLINE" = "1" ] && die "GHOSTTY_OFFLINE=1, and the Ghostty source for $GHOSTTY_COMMIT is not cached."
+
+  mkdir -p "$CACHE/dl"
+  local partial="$tarball.$$.partial"
+  echo "Fetching Ghostty $GHOSTTY_TAG ($GHOSTTY_COMMIT)."
+  curl --fail --silent --show-error --location \
+    --output "$partial" \
+    "https://codeload.github.com/ghostty-org/ghostty/tar.gz/$GHOSTTY_COMMIT"
+  mv "$partial" "$tarball"
+  FETCHED=1
+}
+
+# One hash over the extracted tree: every file's sha256 and every symlink's target, sorted. It
+# does not depend on how the archive was compressed or ordered, so it holds if codeload
+# regenerates the tarball bytes.
+tree_hash() {
+  (
+    cd "$1"
+    {
+      find . -type f -exec shasum -a 256 {} +
+      find . -type l -exec sh -c 'for link; do printf "link %s %s\n" "$link" "$(readlink "$link")"; done' sh {} +
+    } | LC_ALL=C sort | shasum -a 256 | awk '{ print $1 }'
+  )
+}
+
+# Source files that begin with .git are skipped, since Ghostty's build never reads them. The tree
+# hash covers the tree without them.
+extract_source() {
+  mkdir -p "$1"
+  tar -xzf "$CACHE/dl/$GHOSTTY_COMMIT.tar.gz" -C "$1" --strip-components=1 \
+    --exclude='.gitmodules' --exclude='.gitattributes' --exclude='.gitignore' --exclude='.git'
+}
+
+verify_source() {
+  local actual
+  actual="$(tree_hash "$1")"
+  if [ "$actual" != "${GHOSTTY_TREE_SHA256:-}" ]; then
+    if [ "$FETCHED" = "1" ]; then
+      rm -f "$CACHE/dl/$GHOSTTY_COMMIT.tar.gz"
+    fi
+    die "the Ghostty source for $GHOSTTY_COMMIT hashes to $actual, but ghostty.pin expects ${GHOSTTY_TREE_SHA256:-nothing}. The cached source is not what the pin names."
+  fi
+}
+
+# Prints the tree hash for the pinned commit. Run it after bumping GHOSTTY_COMMIT, and record the
+# result as GHOSTTY_TREE_SHA256 in ghostty.pin.
+print_tree_hash() {
+  fetch_source
+  mkdir -p "$CACHE/tmp"
+  WORK="$(mktemp -d "$CACHE/tmp/hash.XXXXXX")"
+  extract_source "$WORK/src"
+  tree_hash "$WORK/src"
+}
+
+build() {
+  fetch_source
+
+  mkdir -p "$CACHE/tmp" "$CACHE/zig-global" "$CACHE/artifacts"
+  remove_stale_work
+  WORK="$(mktemp -d "$CACHE/tmp/build.XXXXXX")"
+
+  # The build runs without git, so Zig is given the version explicitly.
+  extract_source "$WORK/src"
+  verify_source "$WORK/src"
+
+  local proxy_env=()
+  if [ "$OFFLINE" = "1" ]; then
+    # A dead proxy makes any attempt to fetch a package fail at once.
+    proxy_env=(
+      http_proxy=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9
+      HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9
+    )
+  fi
+
+  # Zig asks xcrun for the macOS SDK path. The xcrun shim answers with the SDK Zig can link against and
+  # passes every other query, such as the Metal compiler, to the real xcrun.
+  mkdir -p "$WORK/shim"
+  cat >"$WORK/shim/xcrun" <<SHIM
+#!/bin/sh
+case " \$* " in
+*" --show-sdk-path "*)
+  case " \$* " in
+  *" macosx "*) echo "$ZIG_SDK_PATH"; exit 0 ;;
+  esac ;;
+esac
+exec /usr/bin/xcrun "\$@"
+SHIM
+  chmod +x "$WORK/shim/xcrun"
+
+  # Xcode 26's libtool silently drops archive members that are not 8-byte aligned. Zig writes such
+  # members, so the combined library would lose libghostty's own code. This shim unpacks every input
+  # archive and combines the loose objects instead.
+  cat >"$WORK/shim/libtool" <<'SHIM'
+#!/bin/bash
+set -euo pipefail
+if [ "${1:-}" != "-static" ] || [ "${2:-}" != "-o" ]; then
+  exec /usr/bin/libtool "$@"
+fi
+out="$3"
+shift 3
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+index=0
+: >"$scratch/files"
+for input in "$@"; do
+  index=$((index + 1))
+  input="$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
+  mkdir "$scratch/$index"
+  case "$input" in
+  *.a)
+    # ar x writes members by name, so two members with one name would overwrite each other. The
+    # count of extracted files must equal the count of members.
+    members="$(ar t "$input" | grep -vc '^__.SYMDEF' || true)"
+    (cd "$scratch/$index" && ar x "$input" && rm -f __.SYMDEF*)
+    chmod u+rw "$scratch/$index"/*
+    extracted="$(find "$scratch/$index" -type f | wc -l | tr -d ' ')"
+    if [ "$members" != "$extracted" ]; then
+      echo "error: $input has $members members, but $extracted files were extracted. A member name repeats." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    cp "$input" "$scratch/$index/"
+    ;;
+  esac
+  for object in "$scratch/$index"/*; do
+    echo "$object" >>"$scratch/files"
+  done
+done
+/usr/bin/libtool -static -o "$out" -filelist "$scratch/files"
+SHIM
+  chmod +x "$WORK/shim/libtool"
+
+  echo "Building GhosttyKit for $KEY. This takes a few minutes."
+  (
+    cd "$WORK/src"
+    env ${proxy_env[@]+"${proxy_env[@]}"} \
+      PATH="$WORK/shim:$PATH" \
+      ZIG_GLOBAL_CACHE_DIR="$CACHE/zig-global" \
+      zig build \
+      --cache-dir "$WORK/zig-cache" \
+      --prefix "$WORK/prefix" \
+      -Doptimize=ReleaseFast \
+      -Demit-xcframework=true \
+      -Dxcframework-target=native \
+      -Demit-macos-app=false \
+      -Dversion-string="${GHOSTTY_TAG#v}"
+  )
+
+  local built="$WORK/src/macos/GhosttyKit.xcframework"
+  [ -d "$built" ] || die "zig build did not produce GhosttyKit.xcframework."
+  [ -d "$WORK/prefix/share/ghostty" ] || die "zig build did not install shell-integration resources."
+  [ -d "$WORK/prefix/share/terminfo" ] || die "zig build did not install terminfo."
+
+  mkdir -p "$WORK/out/share"
+  mv "$built" "$WORK/out/GhosttyKit.xcframework"
+  mv "$WORK/prefix/share/ghostty" "$WORK/out/share/ghostty"
+  mv "$WORK/prefix/share/terminfo" "$WORK/out/share/terminfo"
+
+  cat >"$WORK/out/manifest" <<EOF
+GHOSTTY_TAG=$GHOSTTY_TAG
+GHOSTTY_COMMIT=$GHOSTTY_COMMIT
+ZIG_VERSION=$ZIG_VERSION
+ZIG_SDK_VERSION=$ZIG_SDK_VERSION
+XCODE_VERSION=$XCODE_VERSION
+XCODE_BUILD=$XCODE_BUILD
+SDK_VERSION=$SDK_VERSION
+BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+
+  # The rename is the commit point. A directory under a valid key is always complete.
+  [ ! -e "$ARTIFACT" ] || die "$ARTIFACT appeared during the build. Run make build again."
+  mv "$WORK/out" "$ARTIFACT"
+}
+
+main() {
+  local mode="${1:-build}"
+  read_pin
+  read_toolchain
+  check_toolchain
+  compute_key
+
+  case "$mode" in
+  path)
+    echo "$ARTIFACT"
+    ;;
+  tree-hash)
+    trap cleanup EXIT
+    print_tree_hash
+    ;;
+  verify)
+    [ -d "$ARTIFACT" ] || die "GhosttyKit is not built. Run make build."
+    check_manifest
+    [ -e "$LINK_DIR/GhosttyKit.xcframework" ] || die "GhosttyKit.xcframework is not linked. Run make build."
+    local target
+    target="$(cd "$LINK_DIR/GhosttyKit.xcframework" && pwd -P)"
+    [ "$target" = "$(cd "$ARTIFACT/GhosttyKit.xcframework" && pwd -P)" ] ||
+      die "GhosttyKit.xcframework links a stale artifact. Run make build."
+    ;;
+  build)
+    if [ ! -d "$ARTIFACT" ]; then
+      check_zig
+      trap cleanup EXIT
+      trap 'exit 130' INT TERM
+      acquire_lock
+      # Another process may have finished the same build while this one waited.
+      [ -d "$ARTIFACT" ] || build
+    fi
+    check_manifest
+    link_artifact
+    echo "GhosttyKit ready: $KEY"
+    ;;
+  *)
+    die "unknown mode: $mode"
+    ;;
+  esac
+}
+
+main "$@"

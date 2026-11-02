@@ -10,7 +10,10 @@ Each window also has a status bar and a command palette. Both can be docked in d
 
 ## Status
 
-Early design. There is no code yet.
+Early development. The terminal applet runs through libghostty, with tabs and a program mode. A window holds splits that
+can be resized, and the app opens several windows. It has a status bar with message history, undo for a closed pane, and
+close guards for running programs. Every window's layout is saved and restored across launches. The other applets and
+the command palette are not built yet.
 
 ## Stack
 
@@ -18,6 +21,36 @@ Early design. There is no code yet.
 - SwiftUI for small views, such as status bar segments.
 - [libghostty](https://ghostty.org) for terminal emulation.
 - [Janet](https://janet-lang.org) for scripting.
+
+## Building
+
+Prerequisites:
+
+- macOS 26 and Xcode 26.6 (build 17F113). Select it with `xcode-select`.
+- The Metal toolchain: `xcodebuild -downloadComponent MetalToolchain`.
+- Zig 0.15.2 and the Command Line Tools, only on a cold cache. The first build and every Ghostty upgrade need them.
+  Zig 0.15 cannot link against the macOS 26 SDK, so the build compiles against the macOS 15.4 SDK from the Command
+  Line Tools.
+
+Commands:
+
+- `make build` builds the pinned libghostty, then `uniterm.app`, into `.build/DerivedData`.
+- `make run` builds, then runs the app in the foreground, so its logs and any crash show in the terminal.
+- `make test` runs the package tests and the app UI tests. UI tests need a logged-in desktop session and Accessibility
+  permission for the terminal.
+- `make fmt`, `make fmt-check`, `make lint`, and `make check` format and check the sources.
+- `make ghostty-offline-check` proves that the pinned libghostty rebuilds with the network off. It takes about four
+  minutes, and `make ci` runs it.
+- `make help` lists every target.
+
+`ghostty.pin` records the Ghostty commit and the toolchain that built it. The build fails when Zig is not exactly the
+pinned version, or when Xcode or the SDK differ from the pin. It also fails when the extracted Ghostty source does not
+match `GHOSTTY_TREE_SHA256`, a hash over every file in the source tree. To bump the pin, set `GHOSTTY_TAG` and
+`GHOSTTY_COMMIT`, run `scripts/build-ghostty.sh tree-hash`, record its output as `GHOSTTY_TREE_SHA256`, then update the
+toolchain fields.
+
+The libghostty build, its Zig package cache, and the artifacts live under `.cache/ghostty`. A rebuild of the pinned
+commit needs no network once that cache exists.
 
 ## License
 
