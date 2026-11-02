@@ -82,7 +82,7 @@ This extends UTERM-001's applet contract. UTERM-001 expected the contract to cha
 Original questions: whether commands are declared in Swift only, or also in Janet once UTERM-003 lands; and whether
 the palette should eventually call the Janet API for every command.
 
-Decision: a uniterm command registry in Swift, shared by the palette and uniterm's key bindings. Amended 2026-11-01;
+Decision: a uniterm command registry in Swift, shared by the palette and uniterm's key bindings. Amended 2026-11-02;
 see Decision Log.
 
 - Each command has a stable ID, a title, a run action, and an availability check.
@@ -97,6 +97,8 @@ see Decision Log.
   items, per UTERM-013. A registry command would act on the pane, not on a find field or address bar inside it.
 - While the palette's search field has focus, text-editing chords go to the field: cut, copy, paste, select all, undo,
   and redo. This follows UTERM-001's rule that Cmd-Z in a focused text control undoes the edit.
+- A key, a menu item, and the palette all reach a command's action through one dispatch point in the window. It applies
+  the palette's rules below, so a key and a menu item chosen with the mouse cannot differ.
 - This proposal builds Swift commands only. The palette runs commands through the registry, never through the Janet
   API.
 - UTERM-003 may invoke registry commands, and may register its own. That work belongs to UTERM-003. A Janet caller
@@ -272,7 +274,7 @@ window.
 
 ### M1: Floating palette with commands
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 Amended 2026-11-01; see Decision Log.
 
@@ -299,6 +301,47 @@ Amended 2026-11-01; see Decision Log.
 - File > Close chosen with the mouse runs the same registry action as Cmd-W
 - With the field focused, a menu item chosen with the mouse behaves the same as its key binding
 - A click outside the floating palette hides it and focuses what was clicked
+
+**As built:**
+
+The registry lives in a `Commands` area of WindowKit, not a new module. Its context carries the window
+controller and the target pane, and the palette view needs the window's theme and pane area. A separate module would
+need protocol indirection for nothing. UTERM-013 can extract it when applets register their own commands.
+
+Every UTERM-001 binding is a registry command owned by uniterm, including the app ones (New Window, Settings, Hide,
+Quit, Minimize) and the terminal ones. Terminal text size and clear reach the pane through a small AppletKit protocol
+that the terminal applet implements. The menu items for them use selectors that the terminal view does not answer.
+Otherwise the responder chain would reach the view first and skip the registry. The select-tab-by-number commands exist
+but are not listed in the palette.
+
+The palette-focused rules live in the window controller's dispatch point and not in the key route, so a menu item chosen
+with the mouse behaves like its key. The key route in the window sends a key to the live menu item before the views,
+and a remapped item wins over a default on the same key. The launcher that holds the keyboard is offered Cmd-1 to
+Cmd-9 first. AppKit rewrites a menu item's key equivalent when a user remap applies, so the route reads the live items.
+
+Constants, all recorded here and nowhere else: the palette is 560 points wide, never wider than the window less 16 on
+each side, and sits 12 below the top of the pane area. It shows up to 8 rows of 28 points under a 40 point field. The
+matcher scores 16 per matched character, with 12 for each consecutive pair, 10 for a word start, 8 for the first
+character, 40 for a contiguous match, 40 more for a prefix, and up to 24 off for skipped characters. A title match sits
+a tier above a detail-only match. Recency adds 24 for the newest command and 6 less for each older one. The registry
+remembers 8 commands, and only commands the palette lists count toward that, so tab-number presses do not push them out.
+
+The key route compares the character a key types, not the raw key. Cmd-Shift-= matches Bigger Text, which names "+",
+and Delete matches Dismiss Message, which names 0x08. Shift is dropped from the comparison for keys that are not letters
+or digits. Cmd-} and Cmd-Shift-] are not unified. An item and a key that differ in the character they type do not match.
+
+Unavailable commands show disabled, ranked like any other, and Enter skips them. The arrow keys skip them too. A
+pane-scoped command whose pane is gone counts as available, so choosing it posts a status message and acts on no other
+pane. A press outside the palette that lands on something taking no keyboard returns the keyboard to the focused pane.
+
+Two defects surfaced and were fixed. Cmd-Z in a field editor that keeps its own undo manager did nothing, so the window
+now undoes through the editor's manager. The app's own Quit item is no longer AppKit's, so it did not disable itself
+while a quit question was open, and a second Cmd-Q cancelled the question. It now disables itself the same way.
+
+Residuals: a remap onto another uniterm binding or a terminal's Control chord gets no collision warning, as decided. The
+hide path that must not take the keyboard from a sheet is covered by a unit test of the rule and by the close and quit
+UI tests, not by a test that drives a sheet over a showing palette. The palette lists "Toggle Message History" under a
+fixed title, while the menu item still retitles itself.
 
 ### M2: Tab search
 
@@ -415,6 +458,11 @@ Amended 2026-11-01; see Decision Log.
   no menu decision behind it. It now says UTERM-013 makes menus read the registry. The decision's marker moved from the
   text-editing bullet to the decision's lead, so it covers both amendments. "Hotkey configurability" and the Impacts
   line on UTERM-001 said every uniterm binding runs a registry command. Both now leave out the standard edit actions.
+- 2026-11-02: Amended "Command source" (work-queue best guess): a key, a menu item, and the palette reach an action
+  through one dispatch point in the window, which applies the palette's rules. The decision said only that a binding
+  and its command run the same action. The key route alone would have left a menu item chosen with the mouse outside
+  the palette rules. Also recorded in M1's As built: the registry lives in WindowKit, and the palette sizes and ranking
+  constants are the implementation's.
 
 ## References
 

@@ -5,7 +5,7 @@ import Theme
 /// Stands in for any applet. It holds one tab and cannot open another, as a plain applet would,
 /// until a test says otherwise.
 @MainActor
-final class FakeApplet: TabbedApplet {
+final class FakeApplet: TabbedApplet, TextActionApplet {
   let typeID = "fake"
   let view = NSView()
   var title = "Fake"
@@ -53,6 +53,14 @@ final class FakeApplet: TabbedApplet {
     selectedTabIndex = min(selectedTabIndex, tabCount - 1)
     return true
   }
+
+  /// The text actions the applet performed, oldest first.
+  var textActions: [TextAction] = []
+  var canPerformText = true
+
+  func canPerform(_ action: TextAction) -> Bool { canPerformText }
+
+  func perform(_ action: TextAction) { textActions.append(action) }
 
   func start() { started = true }
   func close() { closed = true }

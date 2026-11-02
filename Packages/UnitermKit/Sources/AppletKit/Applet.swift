@@ -145,3 +145,21 @@ public protocol TabbedApplet: Applet {
   /// user declined, or when the applet has only one tab.
   func closeSelectedTab() async -> Bool
 }
+
+/// A resize or clear that an applet's text content can answer.
+public enum TextAction: Sendable, Equatable, CaseIterable {
+  case increaseSize
+  case decreaseSize
+  case resetSize
+  case clear
+}
+
+/// An applet that resizes and clears its own text. The host calls it from the command registry, so
+/// the action reaches the pane it was aimed at and never depends on which view has the keyboard.
+@MainActor
+public protocol TextActionApplet: Applet {
+  /// False when the applet has no content to act on right now, such as a program that has not run.
+  func canPerform(_ action: TextAction) -> Bool
+
+  func perform(_ action: TextAction)
+}

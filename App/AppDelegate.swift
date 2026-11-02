@@ -9,7 +9,7 @@ import TerminalSurface
 import WindowKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
   private let logger = Logger(subsystem: "dev.uniterm.app", category: "app")
   private let settings: SettingsStore
   private var appearance: AppearanceController?
@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var paletteSync: TerminalPaletteSync?
   private var terminalEngine: GhosttyTerminalEngine?
   private var windowSet: WindowSet?
+  private var commands: CommandRegistry?
   private var layoutPersistence: LayoutPersistence?
   private var settingsWindowController: SettingsWindowController?
   private var askingToQuit = false
@@ -112,6 +113,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     terminalEngine = engine
 
+    let commands = CommandRegistry(
+      app: AppCommandHooks(
+        newWindow: { [weak self] in self?.openWindow() },
+        showSettings: { [weak self] in self?.presentSettings() }))
+    self.commands = commands
+
     NSApp.mainMenu = MainMenu.make(target: self)
 
     let settings = settings
@@ -139,12 +146,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       makeRestoredController: { identifier, restored in
         try MainWindowController(
           appearance: appearance, settings: settings, identifier: identifier,
-          restoring: restored, restoreApplet: restoreApplet, makeApplet: makeApplet)
+          commands: commands, restoring: restored, restoreApplet: restoreApplet,
+          makeApplet: makeApplet)
       },
       makeController: { identifier, directory in
         try MainWindowController(
           appearance: appearance, settings: settings, identifier: identifier,
-          startingIn: directory, restoreApplet: restoreApplet, makeApplet: makeApplet)
+          startingIn: directory, commands: commands, restoreApplet: restoreApplet,
+          makeApplet: makeApplet)
       })
     windowSet = windows
 
@@ -269,8 +278,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       level: .error, source: .uniterm, text: "The terminal colors did not update: \(error)")
   }
 
+  // Each menu action below names a registry command and dispatches it. With a window open, the
+  // window decides what a showing palette does with the key. With none open, the registry runs
+  // the app command alone.
+
   @objc func newWindow(_ sender: Any?) {
-    openWindow()
+    dispatch(.newWindow)
+  }
+
+  @objc func showSettings(_ sender: Any?) {
+    dispatch(.showSettings)
+  }
+
+  @objc func hideApp(_ sender: Any?) {
+    dispatch(.hideApp)
+  }
+
+  @objc func quitApp(_ sender: Any?) {
+    dispatch(.quit)
+  }
+
+  /// AppKit's own Quit item is disabled while a quit waits for an answer, so a second Cmd-Q does
+  /// nothing. This item is uniterm's, so it follows the same rule. A second terminate request would
+  /// cancel the question that is open.
+  func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    if item.action == #selector(quitApp(_:)) {
+      return !askingToQuit
+    }
+
+    return true
+  }
+
+  private func dispatch(_ id: CommandID) {
+    if let controller = windowSet?.activeController {
+      controller.dispatch(id)
+    } else {
+      commands?.runWithoutWindow(id)
+    }
   }
 
   /// Says whether a window opened. With `onlyIfNone`, an open window means nothing opens.
@@ -301,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
-  @objc func showSettings(_ sender: Any?) {
+  private func presentSettings() {
     let controller = settingsWindowController ?? SettingsWindowController(store: settings)
     settingsWindowController = controller
     controller.present()

@@ -23,7 +23,7 @@ private final class TerminalContainerView: NSView {
 /// each has its own tty. Program mode runs one program in one tab and opens no others. The tab bar
 /// shows only while there is more than one tab.
 @MainActor
-public final class TerminalApplet: TabbedApplet {
+public final class TerminalApplet: TabbedApplet, TextActionApplet {
   /// The longest notification text that reaches the status bar.
   static let maximumMessageLength = 200
 
@@ -355,6 +355,23 @@ public final class TerminalApplet: TabbedApplet {
       return try description.appletDescription()
     } catch {
       preconditionFailure("a terminal description always encodes: \(error)")
+    }
+  }
+
+  // MARK: Text actions
+
+  public func canPerform(_ action: TextAction) -> Bool {
+    selectedTab?.session != nil
+  }
+
+  public func perform(_ action: TextAction) {
+    guard let session = selectedTab?.session else { return }
+
+    switch action {
+    case .increaseSize: session.perform(.increaseFontSize)
+    case .decreaseSize: session.perform(.decreaseFontSize)
+    case .resetSize: session.perform(.resetFontSize)
+    case .clear: session.perform(.clearScreen)
     }
   }
 

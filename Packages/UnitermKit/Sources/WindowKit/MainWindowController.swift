@@ -37,7 +37,17 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   private var statusToken: UUID?
   private var started = Set<ObjectIdentifier>()
   private var panesClosed = false
-  private var historyVisible = false
+  private(set) var historyVisible = false
+
+  /// The commands the window runs. One registry serves every window of the app.
+  let commands: CommandRegistry
+
+  /// The pane that had focus when the palette showed, nil while it is hidden. It is the pane that
+  /// every command run from the palette targets. It is fixed when the palette shows, so a command
+  /// never reads the focus that the palette itself holds.
+  var paletteTarget: NodeID?
+
+  var isPaletteVisible: Bool { paletteTarget != nil }
 
   /// The window's closed panes, as descriptions. No closed applet is kept alive.
   private(set) var ledger: CloseUndoLedger
@@ -81,6 +91,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     identifier: String = "main-window",
     undoPolicy: CloseUndoPolicy = .standard,
     startingIn directory: String? = nil,
+    commands: CommandRegistry = CommandRegistry(),
     restoring restored: RestoredWindow? = nil,
     restoreApplet: @escaping AppletRestorer = { _ in
       throw AppletRestoreError.unsupported("this window cannot reopen a closed pane")
@@ -91,6 +102,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     self.statusCenter = statusCenter
     self.makeApplet = makeApplet
     self.restoreApplet = restoreApplet
+    self.commands = commands
     ledger = CloseUndoLedger(policy: undoPolicy)
     placement = StatusBarPlacement(store: settings, statusCenter: statusCenter)
 
@@ -125,12 +137,16 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     window.delegate = self
     for applet in paneArea.applets { adopt(applet) }
 
-    paneArea.onTreeChange = { [weak self] in self?.updateMinimumSize() }
+    paneArea.onTreeChange = { [weak self] in
+      self?.updateMinimumSize()
+      self?.refreshCommandPalette()
+    }
     paneArea.onLayoutChange = { [weak self] in self?.onLayoutChange?() }
     paneArea.onFocusChange = { [weak self] in self?.refreshStatusBar() }
     contentController.onLayout = { [weak self] in self?.updateMinimumSize() }
     contentController.statusBar.onActivate = { [weak self] in self?.toggleMessageHistory(nil) }
     contentController.statusBar.onDismiss = { [weak self] in self?.dismissMessage(nil) }
+    wireCommandPalette()
     placement.onChange = { [weak self] position in
       self?.contentController.move(.statusBar, to: DockEdge(position))
     }
@@ -279,7 +295,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   /// The directory the focused pane's applet reports, for a pane opened from it.
   var focusedDirectory: String? {
-    paneArea.applet(for: focusedPane)?.currentDirectory
+    directory(of: focusedPane)
+  }
+
+  /// The directory a pane's applet reports, for a pane opened from it.
+  func directory(of pane: NodeID) -> String? {
+    paneArea.applet(for: pane)?.currentDirectory
   }
 
   /// Splits the focused pane and starts the chosen applet in the new one, in the directory the
@@ -287,11 +308,17 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// Either way the status bar says why.
   @discardableResult
   func openPane(_ choice: AppletChoice, axis: Axis) -> NodeID? {
+    openPane(choice, axis: axis, from: focusedPane)
+  }
+
+  /// Splits `pane` and starts the chosen applet in the new one, in the directory `pane` reports.
+  @discardableResult
+  func openPane(_ choice: AppletChoice, axis: Axis, from pane: NodeID) -> NodeID? {
     contentController.view.layoutSubtreeIfNeeded()
 
     let applet: any Applet
     do {
-      applet = try makeApplet(choice, focusedDirectory)
+      applet = try makeApplet(choice, directory(of: pane))
     } catch {
       statusCenter.post(
         level: .error, source: .uniterm,
@@ -300,24 +327,29 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
       return nil
     }
 
-    return place(applet, axis: axis)
+    return place(applet, axis: axis, from: pane)
   }
 
   /// Splits the focused pane and puts a launcher in the new one, which takes the keyboard. The
   /// launcher remembers the directory the focused pane reports and starts what it opens there.
   @discardableResult
   func openLauncher(axis: Axis) -> NodeID? {
-    contentController.view.layoutSubtreeIfNeeded()
-
-    return place(LauncherApplet(directory: focusedDirectory), axis: axis)
+    openLauncher(axis: axis, from: focusedPane)
   }
 
-  private func place(_ applet: any Applet, axis: Axis) -> NodeID? {
+  @discardableResult
+  func openLauncher(axis: Axis, from pane: NodeID) -> NodeID? {
+    contentController.view.layoutSubtreeIfNeeded()
+
+    return place(LauncherApplet(directory: directory(of: pane)), axis: axis, from: pane)
+  }
+
+  private func place(_ applet: any Applet, axis: Axis, from pane: NodeID) -> NodeID? {
     adopt(applet)
 
     let created: NodeID
     do {
-      created = try paneArea.split(axis, adding: applet)
+      created = try paneArea.split(pane, axis, adding: applet)
     } catch {
       applet.close()
       postNoRoom()
@@ -358,56 +390,48 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   /// A sheet, such as a close question or a clipboard question, holds the window's attention. Pane
   /// actions wait until it is answered. Cmd-W does not cancel a sheet, and Escape does.
-  private var paneActionsEnabled: Bool {
+  var paneActionsEnabled: Bool {
     window?.attachedSheet == nil
   }
 
   public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    if let id = commandID(for: item) {
+      let context = commandContext()
+
+      if id == .close {
+        let tabs = commandTabbedApplet(context)?.tabCount ?? 1
+        item.title = tabs > 1 ? "Close Tab" : "Close Pane"
+      }
+
+      if id == .toggleMessageHistory {
+        item.title = historyVisible ? "Hide Message History" : "Show Message History"
+      }
+
+      return commands.isAvailable(id, in: context)
+    }
+
     switch item.action {
-    case #selector(splitRight(_:)), #selector(splitDown(_:)),
-      #selector(focusNextPane(_:)), #selector(focusPreviousPane(_:)),
-      #selector(focusPaneLeft(_:)), #selector(focusPaneRight(_:)),
-      #selector(focusPaneUp(_:)), #selector(focusPaneDown(_:)):
-      return paneActionsEnabled
-
-    case #selector(closePane(_:)):
-      item.title = (focusedTabbedApplet?.tabCount ?? 1) > 1 ? "Close Tab" : "Close Pane"
-      return paneActionsEnabled
-
     case #selector(MainWindow.undoCloseOrEdit(_:)):
       item.title = "Undo Close Pane"
       return paneActionsEnabled
-
-    case #selector(newTab(_:)):
-      return paneActionsEnabled && focusedTabbedApplet?.canOpenTab == true
-
-    case #selector(selectNextTab(_:)), #selector(selectPreviousTab(_:)),
-      #selector(selectTabByNumber(_:)):
-      return paneActionsEnabled && (focusedTabbedApplet?.tabCount ?? 1) > 1
-
-    case #selector(toggleMessageHistory(_:)):
-      item.title = historyVisible ? "Hide Message History" : "Show Message History"
-      return true
-
-    case #selector(dismissMessage(_:)):
-      return statusCenter.display?.message.level == .error
 
     default:
       return true
     }
   }
 
-  private func requestSplit(_ axis: Axis) {
-    guard paneActionsEnabled else { return }
+  /// Splits `pane`, or says there is no room. The new pane holds a launcher.
+  func requestSplit(_ axis: Axis, from pane: NodeID?) {
+    guard paneActionsEnabled, let pane else { return }
 
     contentController.view.layoutSubtreeIfNeeded()
 
-    guard paneArea.canSplit(axis) else {
+    guard paneArea.canSplit(pane, axis) else {
       postNoRoom()
       return
     }
 
-    openLauncher(axis: axis)
+    openLauncher(axis: axis, from: pane)
   }
 
   // MARK: Closing panes
@@ -417,7 +441,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// A pane the user closes ends its applet at once, and its description goes on the undo stack. A
   /// pane that is running something asks first. A pane whose applet ended on its own has nothing to
   /// undo, and neither has a launcher.
-  private func closePane(_ pane: NodeID, appletEnded: Bool) {
+  func closePane(_ pane: NodeID, appletEnded: Bool) {
     guard let applet = paneArea.applet(for: pane) else { return }
 
     guard paneArea.paneCount > 1 else {
@@ -465,7 +489,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     statusCenter.paneClosed(id: pane.rawValue)
 
     if let next = removed.refocus {
-      paneArea.focus(next)
+      paneArea.focus(next, keyboard: !isPaletteVisible)
     }
 
     ledger.push(closed)
@@ -482,7 +506,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     statusCenter.paneClosed(id: pane.rawValue)
 
     if let next = removed.refocus {
-      paneArea.focus(next)
+      paneArea.focus(next, keyboard: !isPaletteVisible)
     }
   }
 
@@ -573,99 +597,61 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
   // MARK: Menu actions
 
-  /// The focused pane's applet when it holds tabs.
-  private var focusedTabbedApplet: (any TabbedApplet)? {
-    paneArea.applet(for: paneArea.focusedPane) as? any TabbedApplet
-  }
+  // Each action below is a thin adapter. It names a registry command and dispatches it, so a key,
+  // a menu item, and the palette run the same action.
 
-  /// Opens a tab in the focused pane's applet. A program-mode terminal has one tab, so the item is
-  /// disabled there.
-  @objc public func newTab(_ sender: Any?) {
-    guard paneActionsEnabled, let applet = focusedTabbedApplet, applet.canOpenTab else { return }
+  @objc public func newTab(_ sender: Any?) { dispatch(.newTab) }
 
-    applet.openTab()
-  }
+  @objc public func selectNextTab(_ sender: Any?) { dispatch(.selectNextTab) }
 
-  @objc public func selectNextTab(_ sender: Any?) {
-    stepTab(by: 1)
-  }
-
-  @objc public func selectPreviousTab(_ sender: Any?) {
-    stepTab(by: -1)
-  }
+  @objc public func selectPreviousTab(_ sender: Any?) { dispatch(.selectPreviousTab) }
 
   /// Selects the tab numbered by the sender's tag, counting from 1. Tag 9 selects the last tab,
   /// as Terminal and Ghostty do.
   @objc public func selectTabByNumber(_ sender: Any?) {
-    guard paneActionsEnabled, let applet = focusedTabbedApplet,
-      let number = (sender as? NSMenuItem)?.tag, number > 0
-    else { return }
+    guard let number = (sender as? NSMenuItem)?.tag, (1...9).contains(number) else { return }
 
-    applet.selectTab(at: number == 9 ? applet.tabCount - 1 : number - 1)
+    dispatch(.selectTab(number: number))
   }
 
-  private func stepTab(by step: Int) {
-    guard paneActionsEnabled, let applet = focusedTabbedApplet, applet.tabCount > 1 else { return }
+  @objc public func splitRight(_ sender: Any?) { dispatch(.splitRight) }
 
-    let count = applet.tabCount
-    applet.selectTab(at: (applet.selectedTabIndex + step + count) % count)
-  }
+  @objc public func splitDown(_ sender: Any?) { dispatch(.splitDown) }
 
-  @objc public func splitRight(_ sender: Any?) {
-    requestSplit(.row)
-  }
+  @objc public func focusNextPane(_ sender: Any?) { dispatch(.focusNextPane) }
 
-  @objc public func splitDown(_ sender: Any?) {
-    requestSplit(.column)
-  }
+  @objc public func focusPreviousPane(_ sender: Any?) { dispatch(.focusPreviousPane) }
 
-  @objc public func focusNextPane(_ sender: Any?) {
-    guard paneActionsEnabled else { return }
+  @objc public func focusPaneLeft(_ sender: Any?) { dispatch(.focusPaneLeft) }
 
-    paneArea.focusNext()
-  }
+  @objc public func focusPaneRight(_ sender: Any?) { dispatch(.focusPaneRight) }
 
-  @objc public func focusPreviousPane(_ sender: Any?) {
-    guard paneActionsEnabled else { return }
+  @objc public func focusPaneUp(_ sender: Any?) { dispatch(.focusPaneUp) }
 
-    paneArea.focusPrevious()
-  }
+  @objc public func focusPaneDown(_ sender: Any?) { dispatch(.focusPaneDown) }
 
-  @objc public func focusPaneLeft(_ sender: Any?) {
-    guard paneActionsEnabled else { return }
+  /// The terminal's text actions use names the terminal view does not answer. A nil-target item
+  /// with the view's own selector would reach the view first and skip the registry.
+  @objc public func biggerText(_ sender: Any?) { dispatch(.biggerText) }
 
-    paneArea.focusNeighbor(.left)
-  }
+  @objc public func smallerText(_ sender: Any?) { dispatch(.smallerText) }
 
-  @objc public func focusPaneRight(_ sender: Any?) {
-    guard paneActionsEnabled else { return }
+  @objc public func actualSize(_ sender: Any?) { dispatch(.actualSize) }
 
-    paneArea.focusNeighbor(.right)
-  }
+  @objc public func clearScreen(_ sender: Any?) { dispatch(.clearScreen) }
 
-  @objc public func focusPaneUp(_ sender: Any?) {
-    guard paneActionsEnabled else { return }
-
-    paneArea.focusNeighbor(.up)
-  }
-
-  @objc public func focusPaneDown(_ sender: Any?) {
-    guard paneActionsEnabled else { return }
-
-    paneArea.focusNeighbor(.down)
-  }
+  @objc public func minimizeWindow(_ sender: Any?) { dispatch(.minimizeWindow) }
 
   /// Opens the message history over the pane area, or closes it. The status bar's click does the
   /// same.
-  @objc public func toggleMessageHistory(_ sender: Any?) {
-    setHistoryVisible(!historyVisible)
-  }
+  @objc public func toggleMessageHistory(_ sender: Any?) { dispatch(.toggleMessageHistory) }
 
   /// Clears the error on the bar. An error stays until a newer message replaces it or the user
   /// does this. Other messages clear themselves, so there is nothing to dismiss.
-  @objc public func dismissMessage(_ sender: Any?) {
-    statusCenter.dismissCurrent()
-  }
+  @objc public func dismissMessage(_ sender: Any?) { dispatch(.dismissMessage) }
+
+  /// Shows the command palette over the window, or hides it when it shows.
+  @objc public func toggleCommandPalette(_ sender: Any?) { dispatch(.showCommandPalette) }
 
   /// Reopens the pane that closed last from its description, in its former place, with a new ID.
   ///
@@ -688,16 +674,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// A tab running something asks first, and the applet does the asking. A pane close asks when any
   /// of its tabs is running something. A close that ends the window asks when anything in the
   /// window is running.
-  @objc public func closePane(_ sender: Any?) {
-    guard paneActionsEnabled else { return }
-
-    if let applet = focusedTabbedApplet, applet.tabCount > 1 {
-      Task { @MainActor in _ = await applet.closeSelectedTab() }
-      return
-    }
-
-    closePane(paneArea.focusedPane, appletEnded: false)
-  }
+  @objc public func closePane(_ sender: Any?) { dispatch(.close) }
 
   // MARK: Saved layout
 

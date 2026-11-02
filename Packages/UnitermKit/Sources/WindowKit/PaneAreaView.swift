@@ -108,17 +108,17 @@ final class PaneAreaView: NSView {
     paneViews.first { $0.value.applet === applet }?.key
   }
 
-  func canSplit(_ axis: Axis) -> Bool {
-    tree.canSplit(focusedPane, axis: axis, in: bounds.size)
+  func canSplit(_ pane: NodeID, _ axis: Axis) -> Bool {
+    tree.canSplit(pane, axis: axis, in: bounds.size)
   }
 
   // MARK: Edits
 
-  /// Splits the focused pane and puts `applet` in the new one. Throws when the pane is too small.
-  /// The new pane takes focus.
+  /// Splits `pane` and puts `applet` in the new one. Throws when the pane is too small. The caller
+  /// moves focus to the new pane.
   @discardableResult
-  func split(_ axis: Axis, adding applet: any Applet) throws -> NodeID {
-    let created = try tree.split(focusedPane, axis: axis, in: bounds.size)
+  func split(_ pane: NodeID, _ axis: Axis, adding applet: any Applet) throws -> NodeID {
+    let created = try tree.split(pane, axis: axis, in: bounds.size)
 
     install(applet, as: created)
     changed()
@@ -196,26 +196,28 @@ final class PaneAreaView: NSView {
 
   // MARK: Focus
 
-  /// Marks a pane focused and gives its applet the keyboard.
-  func focus(_ pane: NodeID) {
+  /// Marks a pane focused and gives its applet the keyboard. With `keyboard` false, only the mark
+  /// moves, as when the palette holds the keyboard.
+  func focus(_ pane: NodeID, keyboard: Bool = true) {
     guard paneViews[pane] != nil else { return }
 
     setFocusedPane(pane)
-    paneViews[pane]?.applet.focus()
-  }
 
-  func focusNext() {
-    if let next = tree.nextPane(after: focusedPane) { focus(next) }
-  }
-
-  func focusPrevious() {
-    if let previous = tree.previousPane(before: focusedPane) { focus(previous) }
-  }
-
-  func focusNeighbor(_ direction: Direction) {
-    if let neighbor = tree.neighbor(of: focusedPane, toward: direction, in: bounds.size) {
-      focus(neighbor)
+    if keyboard {
+      paneViews[pane]?.applet.focus()
     }
+  }
+
+  func pane(after pane: NodeID) -> NodeID? {
+    tree.nextPane(after: pane)
+  }
+
+  func pane(before pane: NodeID) -> NodeID? {
+    tree.previousPane(before: pane)
+  }
+
+  func neighbor(of pane: NodeID, toward direction: Direction) -> NodeID? {
+    tree.neighbor(of: pane, toward: direction, in: bounds.size)
   }
 
   private func setFocusedPane(_ pane: NodeID) {

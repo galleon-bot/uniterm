@@ -15,6 +15,10 @@ final class MainContentViewController: NSViewController {
     var edge: DockEdge
   }
 
+  /// The palette's distance from the top of the pane area, and its smallest side margin.
+  static let paletteTopInset: CGFloat = 12
+  static let paletteMargin: CGFloat = 16
+
   private let chrome = ChromeView()
   private let paneView: NSView
   private var docked: [Docked] = []
@@ -23,6 +27,7 @@ final class MainContentViewController: NSViewController {
 
   let statusBar = StatusBarView()
   let history = HistoryPanelView()
+  let commandPalette = CommandPaletteView()
 
   /// Runs after every layout pass, since the safe area that sets the window's minimum size can
   /// change with it.
@@ -59,6 +64,29 @@ final class MainContentViewController: NSViewController {
     view = chrome
 
     install(statusBar, role: .statusBar, thickness: StatusBarView.height, at: initialStatusBarEdge)
+
+    // The palette is added last, so it draws above the panes and the status bar.
+    commandPalette.translatesAutoresizingMaskIntoConstraints = false
+    chrome.addSubview(commandPalette)
+    NSLayoutConstraint.activate(paletteConstraints())
+  }
+
+  /// The palette floats near the top of the pane area, centered. It is never wider than its fixed
+  /// width, and it fills the window's width less a margin on each side when the window is narrower.
+  /// The fill is weak, so the palette never sets how small the window can get.
+  private func paletteConstraints() -> [NSLayoutConstraint] {
+    let guide = chrome.safeAreaLayoutGuide
+    let fill = commandPalette.widthAnchor.constraint(
+      equalTo: guide.widthAnchor, constant: -2 * Self.paletteMargin)
+    fill.priority = NSLayoutConstraint.Priority(10)
+
+    return [
+      commandPalette.widthAnchor.constraint(lessThanOrEqualToConstant: CommandPaletteView.width),
+      fill,
+      commandPalette.centerXAnchor.constraint(equalTo: guide.centerXAnchor),
+      commandPalette.topAnchor.constraint(
+        equalTo: paneView.topAnchor, constant: Self.paletteTopInset),
+    ]
   }
 
   override func viewDidLayout() {
@@ -70,6 +98,7 @@ final class MainContentViewController: NSViewController {
     chrome.apply(palette)
     statusBar.apply(palette)
     history.apply(palette)
+    commandPalette.apply(palette)
   }
 
   /// The edge a docked region sits against.
