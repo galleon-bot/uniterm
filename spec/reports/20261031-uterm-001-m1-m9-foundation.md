@@ -673,8 +673,13 @@ Checks:
 
 Best guesses:
 - The status bar bug does not block M9. The project's "UI Feedback" rule ships review tweaks as ordinary UI changes.
-  The user's standing rule is to fix a reported bug, so this run fixes it in its own commit. If the bug should block
-  M9 instead, M9 goes back to `IN PROGRESS` and UTERM-001 back to `accepted`.
+  The user's standing rule is to fix a reported bug, so an implementer took it on. If the bug should block M9 instead,
+  M9 goes back to `IN PROGRESS` and UTERM-001 back to `accepted`.
+- The implementer could not reproduce the bug in a package test, a scratch view test, or a UI test. Then the user could
+  not reproduce it on a fresh build. At the user's direction, no fix was made. The bug is filed at
+  `spec/bugs/20261101-status-bar-segment-leading-after-dark.md`, and M9's As built was corrected with a Decision Log
+  entry. The implementer's two non-reproducing tests are in a local git stash named "status bar bug: tests that do not
+  reproduce it".
 - This report is amended in place rather than a new one started, since it is the row's report.
 
 ## Status
