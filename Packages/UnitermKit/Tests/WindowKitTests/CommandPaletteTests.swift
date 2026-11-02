@@ -110,11 +110,11 @@ final class CommandPaletteTests: XCTestCase {
     controller.showCommandPalette()
 
     let window = try XCTUnwrap(controller.window)
-    XCTAssertTrue(window.performKeyEquivalent(with: try key("p", [.command, .shift])))
+    XCTAssertTrue(window.performKeyEquivalent(with: try key("k", .command)))
 
     XCTAssertTrue(palette.isHidden)
 
-    XCTAssertTrue(window.performKeyEquivalent(with: try key("p", [.command, .shift])))
+    XCTAssertTrue(window.performKeyEquivalent(with: try key("k", .command)))
     XCTAssertFalse(palette.isHidden)
   }
 

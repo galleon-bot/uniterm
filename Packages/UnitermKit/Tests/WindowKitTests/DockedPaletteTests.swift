@@ -388,12 +388,12 @@ final class DockedPaletteTests: XCTestCase {
     fixture.controller.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification))
     let field = palette(fixture).field
 
-    XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{21E7}\u{2318}P)")
+    XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{2318}K)")
 
     item.keyEquivalent = "o"
     fixture.controller.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification))
 
-    XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{21E7}\u{2318}O)")
+    XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{2318}O)")
 
     fixture.controller.showCommandPalette()
     XCTAssertEqual(field.placeholderString, "Search tabs and commands")

@@ -240,7 +240,7 @@ extension FakeApplet {
         run: { fake($0)?.step(by: -1) }),
       text("bigger-text", "Bigger Text", KeyChord("+")),
       text("actual-size", "Actual Size", KeyChord("0")),
-      text("clear", "Clear Screen", KeyChord("k"), .applet),
+      text("clear", "Clear Screen", KeyChord("l"), .applet),
     ]
 
     for number in 1...9 {

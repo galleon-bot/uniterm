@@ -23,13 +23,13 @@ final class CommandPaletteUITests: UnitermUITestCase {
   private func showPalette(
     in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
   ) {
-    app.typeKey("p", modifierFlags: [.command, .shift])
+    app.typeKey("k", modifierFlags: .command)
     XCTAssertTrue(
       palette(in: app).waitForExistence(timeout: 5), "the palette never showed", file: file,
       line: line)
   }
 
-  /// Catches a Cmd-Shift-P that a focused terminal takes, a palette that does not hide on the
+  /// Catches a Cmd-K that a focused terminal takes, a palette that does not hide on the
   /// same key, and an Escape that leaves the keyboard in the palette. Keys typed after the hide
   /// must reach the terminal.
   func testTheHotkeyTogglesThePaletteAndEscapeReturnsTheKeyboardToTheTerminal() {
@@ -38,7 +38,7 @@ final class CommandPaletteUITests: UnitermUITestCase {
 
     showPalette(in: app)
 
-    app.typeKey("p", modifierFlags: [.command, .shift])
+    app.typeKey("k", modifierFlags: .command)
     XCTAssertTrue(waitUntilGone(palette(in: app)), "the toggle did not hide the palette")
 
     showPalette(in: app)

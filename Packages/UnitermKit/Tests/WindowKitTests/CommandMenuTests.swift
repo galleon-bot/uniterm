@@ -201,11 +201,11 @@ final class CommandMenuTests: XCTestCase {
     menu.refreshKeys()
 
     let clear = try item(.fakeClear, in: menu)
-    XCTAssertEqual(clear.keyEquivalent, "k")
+    XCTAssertEqual(clear.keyEquivalent, "l")
     XCTAssertTrue(warnings.isEmpty)
 
     let palette = try item(.showCommandPalette, in: menu)
-    palette.keyEquivalent = "k"
+    palette.keyEquivalent = "l"
     palette.keyEquivalentModifierMask = .command
     menu.refreshKeys()
 
@@ -213,11 +213,11 @@ final class CommandMenuTests: XCTestCase {
     XCTAssertEqual(warnings.count, 1)
     XCTAssertTrue(warnings[0].contains("Clear Screen"))
 
-    palette.keyEquivalent = "p"
-    palette.keyEquivalentModifierMask = [.command, .shift]
+    palette.keyEquivalent = "k"
+    palette.keyEquivalentModifierMask = .command
     menu.refreshKeys()
 
-    XCTAssertEqual(clear.keyEquivalent, "k", "the old default is not reserved any more")
+    XCTAssertEqual(clear.keyEquivalent, "l", "the old default is not reserved any more")
     XCTAssertEqual(warnings.count, 1, "a pass that drops nothing is silent")
   }
 
@@ -230,7 +230,7 @@ final class CommandMenuTests: XCTestCase {
     let palette = try item(.showCommandPalette, in: menu)
     let history = try item(.toggleMessageHistory, in: menu)
 
-    palette.keyEquivalent = "k"
+    palette.keyEquivalent = "l"
     palette.keyEquivalentModifierMask = .command
     menu.refreshKeys()
     menu.refreshKeys()

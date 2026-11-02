@@ -111,27 +111,27 @@ final class ShortcutOwnershipUITests: UnitermUITestCase {
     XCTAssertTrue(waitFor(window.textViews["terminal"], timeout: 40) { $0.contains("% ") })
   }
 
-  /// Catches a remap that does not take its reservation. Cmd-K is Clear Screen until the user puts
-  /// the palette on it. Then Cmd-K opens the palette with the terminal focused, the old palette key
-  /// no longer does, and the one warning names the applet, the command, and the key.
+  /// Catches a remap that does not take its reservation. Cmd-T is New Tab until the user puts the
+  /// palette on it. Then Cmd-T opens the palette with the terminal focused, the old palette key no
+  /// longer does, and the one warning names the applet, the command, and the key.
   func testARemapOntoAnAppletKeyWinsAndWarnsOnce() {
-    let app = launchApp(arguments: ["-NSUserKeyEquivalents", #"{"Show Command Palette"="@k";}"#])
+    let app = launchApp(arguments: ["-NSUserKeyEquivalents", #"{"Show Command Palette"="@t";}"#])
     _ = waitForTerminal(in: app)
 
     let warning = message(in: app)
     XCTAssertTrue(warning.waitForExistence(timeout: 10))
     let text = (warning.value as? String) ?? warning.label
     XCTAssertTrue(text.contains("Terminal"), text)
-    XCTAssertTrue(text.contains("Clear Screen"), text)
-    XCTAssertTrue(text.contains("\u{2318}K"), text)
+    XCTAssertTrue(text.contains("New Tab"), text)
+    XCTAssertTrue(text.contains("\u{2318}T"), text)
 
-    app.typeKey("k", modifierFlags: .command)
+    app.typeKey("t", modifierFlags: .command)
     XCTAssertTrue(palette(in: app).waitForExistence(timeout: 5), "the remapped key did not win")
 
     app.typeKey(.escape, modifierFlags: [])
     XCTAssertTrue(waitUntilGone(palette(in: app)))
 
-    app.typeKey("p", modifierFlags: [.command, .shift])
+    app.typeKey("k", modifierFlags: .command)
     XCTAssertFalse(palette(in: app).waitForExistence(timeout: 2), "the old default still works")
   }
 

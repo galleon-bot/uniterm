@@ -15,7 +15,7 @@ final class DockedPaletteUITests: UnitermUITestCase {
   }
 
   private func activate(in app: XCUIApplication) {
-    app.typeKey("p", modifierFlags: [.command, .shift])
+    app.typeKey("k", modifierFlags: .command)
     XCTAssertTrue(results(in: app).waitForExistence(timeout: 5), "the overlay never showed")
   }
 
@@ -28,7 +28,7 @@ final class DockedPaletteUITests: UnitermUITestCase {
 
     XCTAssertTrue(field(in: app).exists, "a docked palette is always on show")
     XCTAssertEqual(
-      field(in: app).placeholderValue, "Search tabs and commands (\u{21E7}\u{2318}P)")
+      field(in: app).placeholderValue, "Search tabs and commands (\u{2318}K)")
     XCTAssertFalse(results(in: app).exists)
 
     app.typeText("echo typed-while-inactive\n")
@@ -40,7 +40,7 @@ final class DockedPaletteUITests: UnitermUITestCase {
     app.typeText("split")
     XCTAssertTrue(waitFor(field(in: app), timeout: 5) { $0 == "split" })
 
-    app.typeKey("p", modifierFlags: [.command, .shift])
+    app.typeKey("k", modifierFlags: .command)
     XCTAssertTrue(waitUntilGone(results(in: app)), "the hotkey did not deactivate the palette")
     XCTAssertTrue(field(in: app).exists)
 
