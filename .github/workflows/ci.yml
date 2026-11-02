@@ -54,6 +54,14 @@ jobs:
           sudo xcode-select --switch /Applications/Xcode_26.6.app
           xcodebuild -version
 
+      # The terminal tests drive a real zsh. Outside a terminal, libghostty starts the account's
+      # login shell, and the runner account's is the system bash 3.2, which Ghostty's shell
+      # integration does not support.
+      - name: Make zsh the login shell
+        run: |
+          sudo dscl . -create "/Users/$USER" UserShell /bin/zsh
+          dscl . -read "/Users/$USER" UserShell
+
       - name: Install the Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
 
