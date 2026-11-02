@@ -406,5 +406,5 @@ Leaves undone: nothing.
 - Original write-up: `~/projects/private_specs/uniterm/spec/research/original-writeup.md`, APPLET-9
 - Coding standards: `languages/janet.md` and `languages/lisp-embedding.md`
 - ADR-02: pane tree nodes have stable IDs
-- ADR-07 (proposed): a failure ends only what failed
-- ADR-08 (proposed): the UI never waits on unbounded work
+- ADR-07 (proposed): Failure Isolation. A failure ends only what failed
+- ADR-08 (proposed): UI Responsiveness. The UI never waits on unbounded work
