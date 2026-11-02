@@ -401,6 +401,7 @@ window.
 - 2026-11-01: ADR candidate (cuts across the system): every applet publishes at least one tab, and tab IDs are never
   reused, even across a relaunch. Declined: the user chose not to write it.
 - 2026-11-01: Accepted.
+- 2026-11-01: Scheduled as UTERM-002 M1-M3 in queue.md.
 
 ## References
 
