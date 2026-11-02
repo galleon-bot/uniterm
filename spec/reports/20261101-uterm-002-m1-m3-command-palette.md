@@ -10,7 +10,7 @@ in `/Users/ripta/projects/uniterm`, on `main`. Nothing is pushed.
 
 The run finished on 2026-11-02. Both rows are done, and UTERM-002 and UTERM-013 are `implemented`. The five milestones
 each landed in their own commit, followed by a review-fix commit and a finishing commit per row, and a final-review
-commit. The last checks were `make test-package` with 521 tests, 4 skipped, and 0 failures, and two full `make test-app`
+commit. The last checks were `make test-package` on the final commit with 540 tests, 4 skipped, and 0 failures, and two full `make test-app`
 runs with 77 of 77 UI tests passing. `make ghostty-offline-check` passed.
 
 For the user:
