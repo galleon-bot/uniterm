@@ -68,6 +68,8 @@ public final class TerminalApplet: TabbedApplet {
   private let mode: TerminalDescription.Mode
   private let commandLine: String?
   private let shellEnvironment: [String: String]
+  private let directoryExists: (String) -> Bool
+  private let home: String
   private var tabs: [Tab]
   private var selectedIndex: Int
   private var started = false
@@ -77,24 +79,48 @@ public final class TerminalApplet: TabbedApplet {
   private var heldNotification: String?
   private var detached = false
 
-  /// A shell in one tab.
-  public convenience init(engine: any TerminalEngine, launch: TerminalLaunch = .loginShell()) {
+  /// A shell in one tab, with the launch as given.
+  public convenience init(engine: any TerminalEngine, launch: TerminalLaunch) {
     self.init(
       engine: engine, mode: .shell, commandLine: nil, shellEnvironment: launch.environment,
-      launches: [launch], selected: 0)
+      launches: [launch], selected: 0, directoryExists: RestoreDirectory.isLocalDirectory,
+      home: NSHomeDirectory())
+  }
+
+  /// A shell in one tab. It starts in the given directory when that is an absolute path and still
+  /// a directory here. Otherwise it starts in the home directory. The launch always carries an
+  /// explicit directory, so the terminal engine never picks one on its own.
+  public convenience init(
+    engine: any TerminalEngine, workingDirectory: String? = nil,
+    directoryExists: @escaping (String) -> Bool = RestoreDirectory.isLocalDirectory,
+    home: String = NSHomeDirectory()
+  ) {
+    let directory = RestoreDirectory.resolve(
+      reported: workingDirectory, starting: nil, home: home, exists: directoryExists)
+
+    self.init(
+      engine: engine, mode: .shell, commandLine: nil, shellEnvironment: [:],
+      launches: [.loginShell(workingDirectory: directory)], selected: 0,
+      directoryExists: directoryExists, home: home)
   }
 
   /// One program in one tab. The line is split into words, and no shell interprets the user's
   /// text. It throws when the line is empty, has an unclosed quote, or holds shell syntax that is
-  /// not quoted.
+  /// not quoted. The directory is chosen as for a shell.
   public convenience init(
-    engine: any TerminalEngine, program line: String, workingDirectory: String? = nil
+    engine: any TerminalEngine, program line: String, workingDirectory: String? = nil,
+    directoryExists: @escaping (String) -> Bool = RestoreDirectory.isLocalDirectory,
+    home: String = NSHomeDirectory()
   ) throws {
     let words = try ShellWords.split(line)
 
+    let directory = RestoreDirectory.resolve(
+      reported: workingDirectory, starting: nil, home: home, exists: directoryExists)
+
     self.init(
       engine: engine, mode: .program, commandLine: line, shellEnvironment: [:],
-      launches: [.program(words, workingDirectory: workingDirectory)], selected: 0)
+      launches: [.program(words, workingDirectory: directory)], selected: 0,
+      directoryExists: directoryExists, home: home)
   }
 
   /// Restores an applet from a description. A shell description starts a fresh shell in each tab.
@@ -105,7 +131,7 @@ public final class TerminalApplet: TabbedApplet {
   /// the home directory.
   public convenience init(
     engine: any TerminalEngine, restoring description: AppletDescription,
-    directoryExists: (String) -> Bool = RestoreDirectory.isLocalDirectory,
+    directoryExists: @escaping (String) -> Bool = RestoreDirectory.isLocalDirectory,
     home: String = NSHomeDirectory()
   ) throws {
     let decoded = try TerminalDescription.decode(description)
@@ -121,7 +147,7 @@ public final class TerminalApplet: TabbedApplet {
       self.init(
         engine: engine, mode: .shell, commandLine: nil, shellEnvironment: [:],
         launches: directories.map { .loginShell(workingDirectory: $0) },
-        selected: decoded.selectedTab)
+        selected: decoded.selectedTab, directoryExists: directoryExists, home: home)
 
     case .program:
       guard let line = decoded.command else {
@@ -138,7 +164,7 @@ public final class TerminalApplet: TabbedApplet {
       self.init(
         engine: engine, mode: .program, commandLine: line, shellEnvironment: [:],
         launches: directories.map { .program(words, workingDirectory: $0) },
-        selected: decoded.selectedTab)
+        selected: decoded.selectedTab, directoryExists: directoryExists, home: home)
 
       for tab in tabs { tab.awaitingRun = true }
       refreshTabs()
@@ -147,9 +173,12 @@ public final class TerminalApplet: TabbedApplet {
 
   private init(
     engine: any TerminalEngine, mode: TerminalDescription.Mode, commandLine: String?,
-    shellEnvironment: [String: String], launches: [TerminalLaunch], selected: Int
+    shellEnvironment: [String: String], launches: [TerminalLaunch], selected: Int,
+    directoryExists: @escaping (String) -> Bool, home: String
   ) {
     self.engine = engine
+    self.directoryExists = directoryExists
+    self.home = home
     self.mode = mode
     self.commandLine = commandLine
     self.shellEnvironment = shellEnvironment
@@ -190,6 +219,13 @@ public final class TerminalApplet: TabbedApplet {
   }
 
   public var title: String { selectedTab?.title ?? Self.defaultTitle }
+
+  /// The directory the selected tab's shell last reported through OSC 7, when it is an absolute
+  /// path that is still a directory here. A path from another machine after an ssh login, or one
+  /// that is gone, is not reported.
+  public var currentDirectory: String? {
+    RestoreDirectory.local(selectedTab?.workingDirectory, exists: directoryExists)
+  }
 
   /// True when any tab is running something. A tab at an idle shell prompt is not.
   public var isRunningSomething: Bool {
@@ -332,13 +368,13 @@ public final class TerminalApplet: TabbedApplet {
   public var canOpenTab: Bool { mode == .shell }
 
   /// Opens a shell right after the selected tab, in the directory that tab last reported, and
-  /// selects it. A directory that does not exist locally, as after an ssh login, is skipped by the
-  /// terminal engine.
+  /// selects it. A directory that does not exist locally, as after an ssh login, falls back to the
+  /// home directory.
   public func openTab() {
     guard canOpenTab else { return }
 
     let launch = TerminalLaunch.loginShell(
-      workingDirectory: selectedTab?.workingDirectory, environment: shellEnvironment)
+      workingDirectory: currentDirectory ?? home, environment: shellEnvironment)
     let tab = Tab(launch: launch, title: Self.defaultTitle)
 
     if started {

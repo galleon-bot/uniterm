@@ -13,11 +13,22 @@ public enum TerminalConfigError: Error, Equatable {
 /// add a line of its own. So the builder takes only keys on an allow list and rejects every value
 /// outside a small safe alphabet. It never escapes, because a rejected value cannot be misread.
 public struct TerminalConfig: Sendable, Equatable {
-  /// The only keys uniterm writes. `confirm-close-surface` is here for `true` only.
+  /// The only keys uniterm writes. `confirm-close-surface` is here for `true` only. The inherit keys
+  /// are here for `false` only, and `working-directory` for `home` only.
   static let allowedKeys: Set<String> = [
     "background", "foreground", "cursor-color", "cursor-text", "selection-background",
     "selection-foreground", "palette", "keybind", "shell-integration",
     "shell-integration-features", "clipboard-read", "clipboard-write", "confirm-close-surface",
+    "working-directory", "window-inherit-working-directory", "tab-inherit-working-directory",
+    "split-inherit-working-directory",
+  ]
+
+  private static let requiredValues: [String: String] = [
+    "confirm-close-surface": "true",
+    "working-directory": "home",
+    "window-inherit-working-directory": "false",
+    "tab-inherit-working-directory": "false",
+    "split-inherit-working-directory": "false",
   ]
 
   private static let safeValueScalars: CharacterSet = {
@@ -44,7 +55,7 @@ public struct TerminalConfig: Sendable, Equatable {
       throw TerminalConfigError.unsafeValue(key: key)
     }
 
-    if key == "confirm-close-surface", value != "true" {
+    if let required = Self.requiredValues[key], value != required {
       throw TerminalConfigError.unsafeValue(key: key)
     }
 
@@ -61,7 +72,7 @@ public struct TerminalConfig: Sendable, Equatable {
   }
 
   /// The config for one palette. It clears libghostty's built-in key bindings, so every key reaches
-  /// uniterm first. It turns on shell integration with the `ssh-env` feature, which sets a fallback
+  /// uniterm first. It switches off libghostty's working-directory inheritance. It turns on shell integration with the `ssh-env` feature, which sets a fallback
   /// TERM for ssh sessions started from a shell.
   public static func make(palette: ThemePalette) throws -> TerminalConfig {
     var config = TerminalConfig()
@@ -71,6 +82,14 @@ public struct TerminalConfig: Sendable, Equatable {
     try config.set("shell-integration", "detect")
     try config.set("shell-integration-features", "cursor,title,path,ssh-env")
     try config.set("confirm-close-surface", "true")
+
+    // A new surface starts where uniterm says, never where libghostty last saw a terminal. The
+    // home directory covers a surface that is launched with no directory of its own.
+    try config.set("working-directory", "home")
+    try config.set("window-inherit-working-directory", "false")
+    try config.set("tab-inherit-working-directory", "false")
+    try config.set("split-inherit-working-directory", "false")
+
     try config.set("clipboard-read", "ask")
     try config.set("clipboard-write", "allow")
 

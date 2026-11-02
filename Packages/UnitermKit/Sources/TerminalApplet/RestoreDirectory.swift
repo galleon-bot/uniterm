@@ -10,12 +10,20 @@ public enum RestoreDirectory {
     reported: String?, starting: String?, home: String, exists: (String) -> Bool
   ) -> String {
     for candidate in [reported, starting] {
-      if let candidate, candidate.hasPrefix("/"), exists(candidate) {
-        return candidate
+      if let found = local(candidate, exists: exists) {
+        return found
       }
     }
 
     return home
+  }
+
+  /// The path when it is absolute and still a directory, and nil otherwise. A path a shell reported
+  /// after an ssh login, such as `me@host:/srv`, or one that is gone, is not usable here.
+  static func local(_ path: String?, exists: (String) -> Bool) -> String? {
+    guard let path, path.hasPrefix("/"), exists(path) else { return nil }
+
+    return path
   }
 
   /// True when the path is a directory on this machine.

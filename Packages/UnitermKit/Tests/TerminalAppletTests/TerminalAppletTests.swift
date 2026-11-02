@@ -25,7 +25,7 @@ private final class Answers: @unchecked Sendable {
 }
 
 @MainActor
-private final class FakeSession: TerminalSession {
+final class FakeSession: TerminalSession {
   let view = NSView()
   var onEvent: (@MainActor (TerminalEvent) -> Void)?
   var title = ""
@@ -48,7 +48,7 @@ private final class FakeSession: TerminalSession {
 }
 
 @MainActor
-private final class FakeEngine: TerminalEngine {
+final class FakeEngine: TerminalEngine {
   var sessions: [FakeSession] = []
   var anySessionRunningSomething = false
 
@@ -90,11 +90,74 @@ final class TerminalAppletTests: XCTestCase {
   private func makeApplet() -> (TerminalApplet, FakeEngine, RecordingHost, FakeSession) {
     let engine = FakeEngine()
     let host = RecordingHost()
-    let applet = TerminalApplet(engine: engine)
+    let applet = TerminalApplet(engine: engine, directoryExists: { _ in true })
     applet.host = host
     applet.start()
     retained.append(applet)
     return (applet, engine, host, engine.sessions[0])
+  }
+
+  // MARK: Directories
+
+  /// Catches an applet that reports a path it cannot start a terminal in, such as one from another
+  /// machine after an ssh login, or one that is gone. Only an absolute local directory is
+  /// reported, and it follows the shell.
+  func testCurrentDirectoryFollowsTheShellAndIsNilForPathsThatAreNotUsableHere() {
+    let engine = FakeEngine()
+    let applet = TerminalApplet(engine: engine, workingDirectory: "/tmp", home: "/home-x")
+    retained.append(applet)
+    applet.start()
+
+    XCTAssertEqual(applet.currentDirectory, "/tmp")
+
+    let session = engine.sessions[0]
+    session.onEvent?(.workingDirectoryChanged("/private/var"))
+    XCTAssertEqual(applet.currentDirectory, "/private/var")
+
+    for path in ["me@host:/srv", "relative/dir", "/no/such/uniterm-directory", "/etc/hosts"] {
+      session.onEvent?(.workingDirectoryChanged(path))
+      XCTAssertNil(applet.currentDirectory, path)
+    }
+  }
+
+  /// Catches a terminal that leaves its start to the engine. A given directory that is usable is
+  /// passed on, and anything else starts in the home directory, for a shell and for a program.
+  func testATerminalAlwaysLaunchesWithAnExplicitDirectory() throws {
+    let engine = FakeEngine()
+
+    let cases: [(given: String?, expected: String)] = [
+      (nil, "/home-x"), ("/tmp", "/tmp"), ("/no/such/uniterm-directory", "/home-x"),
+      ("me@host:/srv", "/home-x"),
+    ]
+
+    for (given, expected) in cases {
+      let shell = TerminalApplet(engine: engine, workingDirectory: given, home: "/home-x")
+      let program = try TerminalApplet(
+        engine: engine, program: "htop", workingDirectory: given, home: "/home-x")
+
+      for applet in [shell, program] {
+        retained.append(applet)
+        applet.start()
+      }
+
+      XCTAssertEqual(
+        engine.sessions.suffix(2).map { $0.launch.workingDirectory }, [expected, expected],
+        "\(given ?? "nil")")
+    }
+  }
+
+  /// Catches a new tab that carries a path from another machine into the engine. It falls back to
+  /// the home directory instead.
+  func testANewTabFromARemotePathStartsInHome() {
+    let engine = FakeEngine()
+    let applet = TerminalApplet(engine: engine, workingDirectory: "/tmp", home: "/home-x")
+    retained.append(applet)
+    applet.start()
+
+    engine.sessions[0].onEvent?(.workingDirectoryChanged("me@host:/srv"))
+    applet.openTab()
+
+    XCTAssertEqual(engine.sessions[1].launch.workingDirectory, "/home-x")
   }
 
   /// Waits for the applet's confirmation task, which hops through the main actor.
@@ -252,7 +315,7 @@ final class TerminalAppletTests: XCTestCase {
   /// Catches segments that go stale, or a change that does not tell the host.
   func testSegmentsFollowTheDirectoryAndTheLastExitCode() {
     let (applet, _, host, session) = makeApplet()
-    XCTAssertEqual(applet.segments, [])
+    XCTAssertEqual(applet.segments, [AppletSegment(symbolName: "folder", text: "~")])
 
     session.onEvent?(.workingDirectoryChanged("/var/tmp"))
     XCTAssertEqual(applet.segments, [AppletSegment(symbolName: "folder", text: "tmp")])

@@ -108,13 +108,43 @@ final class TerminalConfigTests: XCTestCase {
   }
 
   /// Keys outside the allow list are refused, whatever the value. They are the ones that would
-  /// break the settled decisions: `command`, `term`, `working-directory`, `config-file`.
+  /// break the settled decisions: `command`, `term`, `config-file`.
   func testUnknownKeysAreRefused() {
     var config = TerminalConfig()
 
-    for key in ["command", "term", "working-directory", "config-file", "shell-integration-x", ""] {
+    for key in ["command", "term", "config-file", "shell-integration-x", ""] {
       XCTAssertThrowsError(try config.set(key, "x")) {
         XCTAssertEqual($0 as? TerminalConfigError, .unknownKey(key))
+      }
+    }
+  }
+
+  /// Catches a config that lets libghostty copy a directory from the last terminal it saw, or that
+  /// starts the first pane wherever the app was launched. uniterm passes every directory itself.
+  func testDirectoriesAreNeverInheritedAndTheDefaultIsHome() throws {
+    let text = try TerminalConfig.make(palette: .mocha).render()
+    let lines = Set(text.split(separator: "\n").map(String.init))
+
+    for line in [
+      "working-directory = home", "window-inherit-working-directory = false",
+      "tab-inherit-working-directory = false", "split-inherit-working-directory = false",
+    ] {
+      XCTAssertTrue(lines.contains(line), "missing \(line)")
+    }
+  }
+
+  /// Catches a builder that can be told to turn inheritance back on, or to start somewhere other
+  /// than home.
+  func testTheDirectoryKeysTakeOnlyTheirSettledValues() {
+    var config = TerminalConfig()
+
+    for (key, value) in [
+      ("working-directory", "inherit"), ("working-directory", "/tmp"),
+      ("window-inherit-working-directory", "true"), ("tab-inherit-working-directory", "true"),
+      ("split-inherit-working-directory", "true"),
+    ] {
+      XCTAssertThrowsError(try config.set(key, value), "\(key) = \(value)") {
+        XCTAssertEqual($0 as? TerminalConfigError, .unsafeValue(key: key))
       }
     }
   }

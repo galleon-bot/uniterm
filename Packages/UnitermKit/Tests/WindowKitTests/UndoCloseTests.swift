@@ -45,7 +45,7 @@ final class UndoFixture {
         recorder.restored.append(applet)
         return applet
       },
-      makeApplet: { _ in
+      makeApplet: { _, _ in
         let applet = FakeApplet()
         applet.title = "Fake \(recorder.made.count)"
         recorder.made.append(applet)

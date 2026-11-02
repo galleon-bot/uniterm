@@ -35,8 +35,11 @@ public enum WindowSetError: Error, Equatable {
 /// window closes. Closing the last window leaves the set empty and ends nothing.
 @MainActor
 public final class WindowSet {
-  /// Makes the controller for one window. The identifier names the window to accessibility.
-  public typealias Factory = @MainActor (_ identifier: String) throws -> MainWindowController
+  /// Makes the controller for one window. The identifier names the window to accessibility. The
+  /// directory is where the window's first pane starts, taken from the active window's focused
+  /// pane. It is nil when there is no active window or its pane reports none.
+  public typealias Factory =
+    @MainActor (_ identifier: String, _ directory: String?) throws -> MainWindowController
 
   /// The open windows' controllers, oldest first. A window leaves the list the moment it closes.
   public private(set) var controllers: [MainWindowController] = []
@@ -125,13 +128,15 @@ public final class WindowSet {
   }
 
   /// Opens a window, shows it, and returns its controller. It cascades from the active window, and
-  /// the first window is centered. When the factory throws, nothing opens and no number is used.
+  /// the first window is centered. Its first pane starts in the directory the active window's
+  /// focused pane reports. When the factory throws, nothing opens and no number is used.
   @discardableResult
   public func open() throws -> MainWindowController {
     let anchor = activeController?.window
+    let directory = activeController?.focusedDirectory
 
     let number = serial + 1
-    let controller = try makeController(Self.identifier(forSerial: number))
+    let controller = try makeController(Self.identifier(forSerial: number), directory)
     serial = number
 
     register(controller)

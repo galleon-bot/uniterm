@@ -12,6 +12,9 @@ final class FakeApplet: TabbedApplet {
   var segments: [AppletSegment] = []
   var isRunningSomething = false
   weak var host: (any AppletHost)?
+
+  /// What the applet reports as its current directory. Nil says nothing.
+  var currentDirectory: String?
   var started = false
   var closed = false
   var detachCount = 0

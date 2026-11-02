@@ -6,9 +6,11 @@ import Preferences
 import StatusKit
 import Theme
 
-/// Makes the applet that a new pane runs. It throws when it cannot start the choice. The window
-/// controller owns what it returns.
-public typealias AppletFactory = @MainActor (AppletChoice) throws -> any Applet
+/// Makes the applet that a new pane runs. The directory is where the new pane starts, taken from
+/// the pane it was opened from. It is nil for the first pane of a window, and the factory picks
+/// the start then. The factory throws when it cannot start the choice. The window controller owns
+/// what it returns.
+public typealias AppletFactory = @MainActor (AppletChoice, String?) throws -> any Applet
 
 /// Makes an applet from the description of a closed pane. It throws when the description is
 /// unknown, newer than this build, or unreadable. The applet must start nothing until the window
@@ -72,12 +74,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   /// The undo policy sets how many closes the window remembers.
   ///
   /// A restored window takes its pane tree and its applets from the saved layout, and `makeApplet`
-  /// is not called for the first pane.
+  /// is not called for the first pane. Otherwise the first pane starts in `directory`.
   public init(
     appearance: AppearanceController, settings: SettingsStore,
     statusCenter: StatusCenter = StatusCenter(),
     identifier: String = "main-window",
     undoPolicy: CloseUndoPolicy = .standard,
+    startingIn directory: String? = nil,
     restoring restored: RestoredWindow? = nil,
     restoreApplet: @escaping AppletRestorer = { _ in
       throw AppletRestoreError.unsupported("this window cannot reopen a closed pane")
@@ -96,7 +99,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     if let panes {
       paneArea = PaneAreaView(restoring: panes.tree, applets: panes.applets, focus: panes.focus)
     } else {
-      paneArea = PaneAreaView(firstApplet: try makeApplet(.terminalShell))
+      paneArea = PaneAreaView(firstApplet: try makeApplet(.terminalShell, directory))
     }
 
     contentController = MainContentViewController(
@@ -274,15 +277,21 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
   }
 
-  /// Splits the focused pane and starts the chosen applet in the new one. Returns nil when the
-  /// pane is too small, or the applet could not start. Either way the status bar says why.
+  /// The directory the focused pane's applet reports, for a pane opened from it.
+  var focusedDirectory: String? {
+    paneArea.applet(for: focusedPane)?.currentDirectory
+  }
+
+  /// Splits the focused pane and starts the chosen applet in the new one, in the directory the
+  /// focused pane reports. Returns nil when the pane is too small, or the applet could not start.
+  /// Either way the status bar says why.
   @discardableResult
   func openPane(_ choice: AppletChoice, axis: Axis) -> NodeID? {
     contentController.view.layoutSubtreeIfNeeded()
 
     let applet: any Applet
     do {
-      applet = try makeApplet(choice)
+      applet = try makeApplet(choice, focusedDirectory)
     } catch {
       statusCenter.post(
         level: .error, source: .uniterm,
@@ -294,12 +303,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     return place(applet, axis: axis)
   }
 
-  /// Splits the focused pane and puts a launcher in the new one, which takes the keyboard.
+  /// Splits the focused pane and puts a launcher in the new one, which takes the keyboard. The
+  /// launcher remembers the directory the focused pane reports and starts what it opens there.
   @discardableResult
   func openLauncher(axis: Axis) -> NodeID? {
     contentController.view.layoutSubtreeIfNeeded()
 
-    return place(LauncherApplet(), axis: axis)
+    return place(LauncherApplet(directory: focusedDirectory), axis: axis)
   }
 
   private func place(_ applet: any Applet, axis: Axis) -> NodeID? {
@@ -325,7 +335,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
   private func replace(_ launcher: LauncherApplet, with choice: AppletChoice) throws {
     guard let pane = paneArea.paneID(for: launcher) else { return }
 
-    let applet = try makeApplet(choice)
+    let applet = try makeApplet(choice, launcher.currentDirectory)
     adopt(applet)
 
     guard let replaced = paneArea.replace(pane, with: applet) else {

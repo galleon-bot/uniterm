@@ -82,6 +82,11 @@ public protocol Applet: AnyObject {
 
   var host: (any AppletHost)? { get set }
 
+  /// The directory the applet's current work is in, as an absolute local path. A new pane opened
+  /// from this one starts there. An applet with no such concept, or with no usable directory right
+  /// now, returns nil and says nothing.
+  var currentDirectory: String? { get }
+
   /// The applet is in a pane and on screen. It begins its work.
   func start()
 
@@ -111,6 +116,8 @@ public protocol Applet: AnyObject {
 
 extension Applet {
   public func apply(_ palette: ThemePalette) {}
+
+  public var currentDirectory: String? { nil }
 
   /// An applet with one part running names itself by its title.
   public var runningLabels: [String] {

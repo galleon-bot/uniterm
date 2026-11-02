@@ -8,8 +8,9 @@ import Theme
 /// launcher runs nothing, so it has nothing to pause and closing it asks nothing. It leaves no undo
 /// entry, since there is nothing to bring back.
 ///
-/// A saved launcher restores as a launcher. Its description is inert and carries no state, so the
-/// filter and the typed command start over.
+/// A launcher remembers the directory of the pane it was opened from, and starts what it opens
+/// there. It saves that directory, so a launcher that survives a relaunch still opens where the
+/// user split. The filter and the typed command are not saved and start over.
 @MainActor
 final class LauncherApplet: Applet {
   static let identifier = "launcher"
@@ -23,6 +24,9 @@ final class LauncherApplet: Applet {
 
   let launcher = LauncherView()
 
+  /// Where whatever the user picks starts. Nil when the pane it was opened from had no directory.
+  let currentDirectory: String?
+
   var view: NSView { launcher }
 
   /// Opens the choice in this launcher's pane. It throws when the choice cannot start, and the
@@ -32,7 +36,9 @@ final class LauncherApplet: Applet {
     set { launcher.onChoose = newValue }
   }
 
-  init() {
+  init(directory: String? = nil) {
+    currentDirectory = directory
+
     launcher.onExit = { [weak self] in
       guard let self else { return }
 
@@ -52,7 +58,13 @@ final class LauncherApplet: Applet {
         found: description.version, supported: Self.currentVersion)
     }
 
-    self.init()
+    var directory: String?
+    if case .object(let fields) = description.payload, case .string(let path)? = fields["directory"]
+    {
+      directory = path
+    }
+
+    self.init(directory: directory)
   }
 
   func start() {}
@@ -65,7 +77,13 @@ final class LauncherApplet: Applet {
   }
 
   func describe() -> AppletDescription {
-    AppletDescription(type: Self.identifier, version: Self.currentVersion, payload: .object([:]))
+    var fields: [String: JSONValue] = [:]
+    if let currentDirectory {
+      fields["directory"] = .string(currentDirectory)
+    }
+
+    return AppletDescription(
+      type: Self.identifier, version: Self.currentVersion, payload: .object(fields))
   }
 
   func apply(_ palette: ThemePalette) {

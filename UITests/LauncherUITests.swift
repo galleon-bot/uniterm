@@ -38,6 +38,35 @@ final class LauncherUITests: UnitermUITestCase {
       "the new pane never showed a prompt")
   }
 
+  /// Catches a split that starts in the app's launch directory, or that leans on libghostty
+  /// remembering the last terminal. After cd /tmp in the first pane, Cmd-D and Return start the
+  /// new pane in /tmp. Its status bar and its own pwd both say so.
+  func testASplitStartsInTheDirectoryOfThePaneItCameFrom() {
+    let (app, window) = startedWindow()
+
+    app.typeText("cd /tmp\n")
+    let directory = window.descendants(matching: .any).matching(identifier: "status-applet-0")
+      .firstMatch
+    XCTAssertTrue(
+      waitFor(directory, timeout: 15) { $0 == "tmp" },
+      "the status bar never showed the new directory")
+
+    app.typeKey("d", modifierFlags: .command)
+    XCTAssertTrue(launcher(in: window).waitForExistence(timeout: 5))
+
+    app.typeKey(.return, modifierFlags: [])
+
+    let terminal = window.groups["pane-2"].textViews["terminal"]
+    XCTAssertTrue(terminal.waitForExistence(timeout: 20))
+    XCTAssertTrue(waitFor(terminal, timeout: 40) { $0.contains("% ") })
+
+    app.typeText("echo \"D:$(pwd -P):\"\n")
+    XCTAssertTrue(
+      waitFor(terminal, timeout: 20) { $0.contains("D:/private/tmp:") },
+      "the new pane did not start in /tmp")
+    XCTAssertTrue(waitFor(directory, timeout: 5) { $0 == "tmp" })
+  }
+
   /// Catches an arrow that does not move the selection, a command field that does not take the
   /// keyboard, and a program that opens as a shell. Down, then typing, then Return runs the command
   /// in program mode, where New Tab is off.

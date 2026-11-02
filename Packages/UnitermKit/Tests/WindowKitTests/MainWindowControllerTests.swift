@@ -29,7 +29,7 @@ final class MainWindowControllerTests: XCTestCase {
     reuse = nil
 
     let controller = try MainWindowController(appearance: appearance, settings: store) {
-      [unowned self] choice in
+      [unowned self] choice, _ in
       if case .terminalProgram = choice {
         throw ProgramsUnavailable()
       }

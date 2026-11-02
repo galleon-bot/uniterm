@@ -1185,7 +1185,9 @@ Added 2026-11-01 by amendment. It can run before or after the user records M9.
   Extended 2026-11-01 in M5: the running-state query covers every tab of an applet, since the close guards in M7
   depend on it. Extended 2026-11-01 in M7: window close and quit count hidden panes too. Extended 2026-11-01 in M8:
   descriptions round-trip byte-for-byte when unreadable. Narrowed 2026-11-01: the lifecycle is ADR-05, and description
-  versioning is ADR-06. The rest waits on UTERM-005 to UTERM-010, which may reshape the contract.
+  versioning is ADR-06. The rest waits on UTERM-005 to UTERM-010, which may reshape the contract. Extended
+  2026-11-01 after the run: an optional current directory that a new split or window starts in, passed explicitly
+  instead of through libghostty's own working-directory inheritance, which is now off.
 - 2026-11-01: ADR candidate (cuts across the system): a terminal program never reads the clipboard without the user's
   confirmation naming its pane, and a denial sends it nothing. A program may write the clipboard with OSC 52 without
   asking, because the proposal requires confirmation only for reads and a write gives the program nothing back.

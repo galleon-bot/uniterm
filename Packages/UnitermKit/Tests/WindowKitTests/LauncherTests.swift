@@ -127,13 +127,18 @@ final class LauncherTests: XCTestCase {
   private var suite = ""
   private var layoutChanges = 0
 
+  /// The choice and directory each new applet was asked for, oldest first.
+  private var requests: [(choice: AppletChoice, directory: String?)] = []
+
   override func setUp() async throws {
     suite = "uniterm-launcher-test-\(UUID().uuidString)"
     let store = SettingsStore(defaults: UserDefaults(suiteName: suite)!)
 
     controller = try MainWindowController(
       appearance: AppearanceController(store: store), settings: store
-    ) { [unowned self] choice in
+    ) { [unowned self] choice, directory in
+      requests.append((choice, directory))
+
       if case .terminalProgram(let command) = choice, command.hasPrefix("refuse") {
         throw ProgramRefused()
       }
@@ -222,6 +227,96 @@ final class LauncherTests: XCTestCase {
       controller.contentController.statusBar.segments.contains { $0.text == "from the new applet" },
       "the status bar still shows the launcher")
     XCTAssertEqual(made.last?.palettes.last, .mocha, "the new applet never got the palette")
+  }
+
+  // MARK: Directory
+
+  /// Catches a split that leaves the new pane's directory to a library. The pane the launcher was
+  /// opened from reports /tmp, so the shell is asked to start there. Program mode gets it too.
+  func testWhatTheLauncherOpensStartsInTheDirectoryOfThePaneItWasOpenedFrom() throws {
+    made[0].currentDirectory = "/tmp"
+
+    var (_, launcher) = try openLauncher()
+    var view = launcher.launcher
+    send(#selector(NSResponder.insertNewline(_:)), from: view.filterField, in: view)
+
+    XCTAssertEqual(requests.last?.choice, .terminalShell)
+    XCTAssertEqual(requests.last?.directory, "/tmp")
+
+    made.last?.currentDirectory = "/tmp"
+    (_, launcher) = try openLauncher()
+    view = launcher.launcher
+    view.choose(.program)
+    view.setCommand("htop")
+    send(#selector(NSResponder.insertNewline(_:)), from: view.commandField, in: view)
+
+    XCTAssertEqual(requests.last?.choice, .terminalProgram(command: "htop"))
+    XCTAssertEqual(requests.last?.directory, "/tmp")
+  }
+
+  /// Catches a launcher that invents a directory when the pane it was opened from has none.
+  func testAPaneWithoutADirectoryPassesNone() throws {
+    let (_, launcher) = try openLauncher()
+    send(
+      #selector(NSResponder.insertNewline(_:)), from: launcher.launcher.filterField,
+      in: launcher.launcher)
+
+    XCTAssertEqual(requests.last?.choice, .terminalShell)
+    XCTAssertNil(requests.last?.directory)
+  }
+
+  /// Catches an Applet default that is not nil, which would make every applet claim a directory.
+  func testAnAppletSaysNothingAboutDirectoriesByDefault() {
+    final class Quiet: Applet {
+      let typeID = "quiet"
+      let view = NSView()
+      let title = ""
+      let segments: [AppletSegment] = []
+      let isRunningSomething = false
+      weak var host: (any AppletHost)?
+      func start() {}
+      func close() {}
+      func detach() {}
+      func reattach() {}
+      func focus() {}
+      func describe() -> AppletDescription {
+        AppletDescription(type: "quiet", version: 1, payload: .null)
+      }
+    }
+
+    let applet: any Applet = Quiet()
+    XCTAssertNil(applet.currentDirectory)
+  }
+
+  /// Catches a launcher whose saved form drops the directory, so a relaunch would open elsewhere.
+  /// The launcher is saved with its directory, and the restored one asks for it again.
+  func testALauncherKeepsItsDirectoryAcrossASave() throws {
+    made[0].currentDirectory = "/tmp"
+    let (_, launcher) = try openLauncher()
+
+    let saved = launcher.describe()
+    XCTAssertEqual(saved.payload, .object(["directory": .string("/tmp")]))
+
+    let restored = try LauncherApplet(restoring: saved)
+    XCTAssertEqual(restored.currentDirectory, "/tmp")
+    XCTAssertEqual(restored.describe(), saved)
+
+    let old = AppletDescription(type: "launcher", version: 1, payload: .object([:]))
+    XCTAssertNil(try LauncherApplet(restoring: old).currentDirectory)
+  }
+
+  /// Catches a restored launcher that forgets where it was opened from.
+  func testARestoredLauncherOpensInItsSavedDirectory() throws {
+    let restored = try restoredController(
+      launcher: AppletDescription(
+        type: "launcher", version: 1, payload: .object(["directory": .string("/var")])))
+    defer { restored.window?.close() }
+
+    let launcher = try XCTUnwrap(
+      restored.paneArea.applet(for: NodeID(rawValue: 2)) as? LauncherApplet)
+    launcher.launcher.open()
+
+    XCTAssertEqual(requests.last?.directory, "/var")
   }
 
   /// Catches a program that opens with no command, and a refusal that closes the launcher or
@@ -462,7 +557,9 @@ final class LauncherTests: XCTestCase {
       focus: 1, mark: 3)
 
     let restorer: AppletRestorer = { _ in FakeApplet() }
-    let factory: AppletFactory = { [unowned self] _ in
+    let factory: AppletFactory = { [unowned self] choice, directory in
+      requests.append((choice, directory))
+
       let applet = FakeApplet()
       made.append(applet)
       return applet

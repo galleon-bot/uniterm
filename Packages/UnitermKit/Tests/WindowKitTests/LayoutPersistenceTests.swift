@@ -66,7 +66,7 @@ private final class LaunchFixture {
       return applet
     }
 
-    let make: AppletFactory = { _ in
+    let make: AppletFactory = { _, _ in
       let applet = FakeApplet()
       applet.title = "new"
       return applet
@@ -85,7 +85,7 @@ private final class LaunchFixture {
           appearance: appearance, settings: settings, identifier: identifier,
           restoring: restored, restoreApplet: restore, makeApplet: make)
       },
-      makeController: { identifier in
+      makeController: { identifier, _ in
         if controls.failingDefault {
           throw AppletRestoreError.unsupported("test failure")
         }

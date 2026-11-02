@@ -108,13 +108,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return try TerminalApplet(engine: engine, restoring: description)
     }
 
-    let makeApplet: AppletFactory = { choice in
+    let makeApplet: AppletFactory = { choice, directory in
       switch choice {
       case .terminalShell:
-        return TerminalApplet(engine: engine)
+        return TerminalApplet(engine: engine, workingDirectory: directory)
 
       case .terminalProgram(let command):
-        return try TerminalApplet(engine: engine, program: command)
+        return try TerminalApplet(engine: engine, program: command, workingDirectory: directory)
       }
     }
 
@@ -124,10 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           appearance: appearance, settings: settings, identifier: identifier,
           restoring: restored, restoreApplet: restoreApplet, makeApplet: makeApplet)
       },
-      makeController: { identifier in
+      makeController: { identifier, directory in
         try MainWindowController(
           appearance: appearance, settings: settings, identifier: identifier,
-          restoreApplet: restoreApplet, makeApplet: makeApplet)
+          startingIn: directory, restoreApplet: restoreApplet, makeApplet: makeApplet)
       })
     windowSet = windows
 

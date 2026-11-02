@@ -56,6 +56,9 @@ final class WakeScheduler {
 @MainActor
 final class AppletLog {
   var made: [FakeApplet] = []
+
+  /// The directory each applet was asked to start in, oldest first.
+  var requested: [String?] = []
 }
 
 /// One window over an isolated defaults suite, a manual clock, and fake applets. The first applet
@@ -90,7 +93,7 @@ final class WindowFixture {
 
     controller = try MainWindowController(
       appearance: AppearanceController(store: store), settings: store, statusCenter: center
-    ) { _ in
+    ) { _, _ in
       let applet = FakeApplet()
       log.made.append(applet)
       return applet

@@ -28,7 +28,9 @@ private final class WindowSetFixture {
     self.store = store
     self.appearance = appearance
 
-    let makeApplet: AppletFactory = { _ in
+    let makeApplet: AppletFactory = { _, directory in
+      log.requested.append(directory)
+
       let applet = FakeApplet()
       log.made.append(applet)
       return applet
@@ -36,9 +38,10 @@ private final class WindowSetFixture {
 
     windows = WindowSet(
       visibleFrame: { _ in visibleFrame },
-      makeController: { identifier in
+      makeController: { identifier, directory in
         try MainWindowController(
-          appearance: appearance, settings: store, identifier: identifier, makeApplet: makeApplet)
+          appearance: appearance, settings: store, identifier: identifier, startingIn: directory,
+          makeApplet: makeApplet)
       })
   }
 
@@ -150,6 +153,31 @@ final class WindowSetTests: XCTestCase {
     second.window?.close()
     let third = try fixture.windows.open()
     XCTAssertEqual(third.window?.accessibilityIdentifier(), "main-window-3")
+  }
+
+  // MARK: Directory
+
+  /// Catches a new window that starts wherever the app was launched, or in a directory libghostty
+  /// remembers. The active window's focused applet reports /tmp, so the new window's first pane is
+  /// asked to start there. The first window has no active window to follow.
+  func testANewWindowStartsInTheDirectoryTheActiveWindowReports() throws {
+    let fixture = makeFixture()
+    _ = try fixture.windows.open()
+    fixture.log.made[0].currentDirectory = "/tmp"
+
+    _ = try fixture.windows.open()
+
+    XCTAssertEqual(fixture.log.requested, [nil, "/tmp"])
+  }
+
+  /// Catches a new window that invents a directory when the focused applet reports none.
+  func testANewWindowFromAPaneWithNoDirectoryAsksForNone() throws {
+    let fixture = makeFixture()
+    _ = try fixture.windows.open()
+
+    _ = try fixture.windows.open()
+
+    XCTAssertEqual(fixture.log.requested, [nil, nil])
   }
 
   // MARK: Isolation
@@ -347,12 +375,12 @@ final class WindowSetTests: XCTestCase {
     final class Switch { var fails = true }
     let flag = Switch()
     let fixture = makeFixture()
-    let windows = WindowSet { identifier in
+    let windows = WindowSet { identifier, _ in
       if flag.fails { throw Refused() }
 
       return try MainWindowController(
         appearance: fixture.appearance, settings: fixture.store, identifier: identifier,
-        makeApplet: { _ in FakeApplet() })
+        makeApplet: { _, _ in FakeApplet() })
     }
     addTeardownBlock { @MainActor in
       for controller in windows.controllers { controller.window?.close() }

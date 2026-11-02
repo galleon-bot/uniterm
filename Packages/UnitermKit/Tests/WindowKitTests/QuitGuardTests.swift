@@ -41,10 +41,10 @@ final class QuitGuardTests: XCTestCase {
         asked.append(request)
         return answer
       },
-      makeController: { identifier in
+      makeController: { identifier, _ in
         try MainWindowController(
           appearance: appearance, settings: store, identifier: identifier
-        ) { _ in
+        ) { _, _ in
           let applet = FakeApplet()
           applet.title = "Fake \(log.made.count)"
           log.made.append(applet)
