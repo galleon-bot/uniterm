@@ -1,4 +1,4 @@
-# ADR-07: A Failure Ends Only What Failed
+# ADR-07: Failure Isolation
 
 **Status:** proposed
 **Date:** 2026-11-02

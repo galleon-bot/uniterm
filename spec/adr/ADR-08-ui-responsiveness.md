@@ -1,4 +1,4 @@
-# ADR-08: The UI Never Waits on Unbounded Work
+# ADR-08: UI Responsiveness
 
 **Status:** proposed
 **Date:** 2026-11-02
