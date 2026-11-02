@@ -83,7 +83,8 @@ private final class LaunchFixture {
 
         return try MainWindowController(
           appearance: appearance, settings: settings, identifier: identifier,
-          restoring: restored, restoreApplet: restore, makeApplet: make)
+          restoring: restored, restoreApplet: restore, makeApplet: make
+        ).detachFromRealScreen()
       },
       makeController: { identifier, _ in
         if controls.failingDefault {
@@ -92,7 +93,8 @@ private final class LaunchFixture {
 
         return try MainWindowController(
           appearance: appearance, settings: settings, identifier: identifier,
-          restoreApplet: restore, makeApplet: make)
+          restoreApplet: restore, makeApplet: make
+        ).detachFromRealScreen()
       })
 
     let store = LayoutStore(directory: directory)

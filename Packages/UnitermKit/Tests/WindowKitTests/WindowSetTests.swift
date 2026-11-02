@@ -41,7 +41,8 @@ private final class WindowSetFixture {
       makeController: { identifier, directory in
         try MainWindowController(
           appearance: appearance, settings: store, identifier: identifier, startingIn: directory,
-          makeApplet: makeApplet)
+          makeApplet: makeApplet
+        ).detachFromRealScreen()
       })
   }
 

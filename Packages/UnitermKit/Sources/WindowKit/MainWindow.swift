@@ -8,6 +8,15 @@ import AppKit
 /// answers the action itself. While a text control is being edited, it undoes the edit. Otherwise
 /// the action undoes the last pane close.
 public final class MainWindow: NSWindow {
+  /// Whether AppKit keeps the window on the screen it is shown on. Tests turn it off. Their frames
+  /// come from screens they inject, and the display of the machine running them must not move a
+  /// window that the injected screens place correctly.
+  var constrainsFrameToScreen = true
+
+  public override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    constrainsFrameToScreen ? super.constrainFrameRect(frameRect, to: screen) : frameRect
+  }
+
   private var isEditingText: Bool {
     firstResponder is NSText
   }

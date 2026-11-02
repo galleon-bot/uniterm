@@ -1,7 +1,10 @@
+import AppKit
 import AppletKit
 import CoreGraphics
 import LayoutKit
 import PaneModel
+
+@testable import WindowKit
 
 /// A saved pane whose description is a fake applet titled with the name and the ID.
 func savedPane(_ id: UInt64, _ name: String = "p") -> SavedNode {
@@ -23,4 +26,13 @@ func savedWindow(
   SavedWindow(
     frame: frame, screen: CGRect(x: 0, y: 0, width: 1440, height: 900), tree: tree,
     focusedPane: focus.map { NodeID(rawValue: $0) }, highWaterMark: mark)
+}
+
+extension MainWindowController {
+  /// Keeps AppKit from moving the window onto the real display when it is shown. Frame tests use
+  /// injected screens, so the result must not depend on the machine's display.
+  func detachFromRealScreen() -> MainWindowController {
+    (window as? MainWindow)?.constrainsFrameToScreen = false
+    return self
+  }
 }
