@@ -284,6 +284,8 @@ window.
 
 **Status:** DONE
 
+Superseded in part by UTERM-013; see Decision Log.
+
 Amended 2026-11-01; see Decision Log.
 
 - A hotkey shows and hides a floating palette over the focused window
@@ -601,6 +603,10 @@ Settings switch, a remap, and a status bar click. A split pane under the overlay
   so a floating palette's results sit 4 points below the field instead of in one card with it. The palette's sizes and
   insets are the implementation's and are recorded in M3's As built.
 - 2026-11-02: Implemented. M1 to M3 are done, and the row review's fixes landed.
+- 2026-11-02: Superseded in part by UTERM-013. M1's As built describes the shapes M1 shipped: terminal text actions
+  through a small applet protocol, the launcher's first offer of Cmd-1 to Cmd-9, and a key match that keeps Cmd-} and
+  Cmd-Shift-] apart. UTERM-013 M1 replaced them with terminal-owned commands, menus built from the registry, and a
+  canonical key form.
 
 ## References
 

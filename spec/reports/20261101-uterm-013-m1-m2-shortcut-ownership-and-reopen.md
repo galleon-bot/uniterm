@@ -8,7 +8,10 @@ specs live in the code repo, so every commit below is in `/Users/ripta/projects/
 
 ## TL;DR
 
-In progress.
+The row finished on 2026-11-02, and UTERM-013 is `implemented`. M1 moved terminal shortcuts to the terminal, built
+menus from the command registry, and reserved uniterm's window keys. M2 added Cmd-Shift-T to reopen the newest closed
+tab or pane, and made Cmd-Z undo text edits only. One full UI run during M2 failed 5 tests that passed in two later full
+runs, with the cause unresolved.
 
 ## Row base
 
@@ -163,4 +166,4 @@ they bound pane reopen to Cmd-Z. `proposals.py check` and `proposals.py freeze` 
 
 ## Status
 
-In progress.
+Done. The run's final review is in the first row's report. Nothing was pushed.
