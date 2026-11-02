@@ -2,7 +2,7 @@
 
 **Status:** implemented
 **Created:** 2026-10-31
-**Updated:** 2026-11-01
+**Updated:** 2026-11-02
 
 ## Dependencies
 
@@ -799,7 +799,7 @@ Out of scope, for later proposals:
 
 **Status:** DONE
 
-Superseded in part by UTERM-013; see Decision Log.
+Superseded in part by UTERM-014; see Decision Log.
 
 The keep-alive checks below record what M7 built. M10 removes the keep-alive tier. Amended 2026-11-01; see Decision
 Log.
@@ -993,7 +993,7 @@ The proposal ends with the user looking at the finished app.
 
 **Status:** DONE
 
-Superseded in part by UTERM-013; see Decision Log.
+Superseded in part by UTERM-014; see Decision Log.
 
 Added 2026-11-01 by amendment. It can run before or after the user records M9.
 
@@ -1281,6 +1281,8 @@ Added 2026-11-01 by amendment. It can run before or after the user records M9.
   proposal. Neither the user nor the implementer could reproduce it, so no fix was made. It is filed as an open bug.
 - 2026-11-02: Superseded in part by UTERM-013. M7 and M10 bound pane reopen to Cmd-Z. UTERM-013 moves reopen to
   Cmd-Shift-T, which reopens the newest closed tab or pane in the window, and limits Cmd-Z to text edits.
+- 2026-11-02: Superseded in part by UTERM-014. M7 and M10 said a pane whose applet exited on its own closes with no
+  undo entry. UTERM-014 makes every close reopenable, so an exited pane goes on the reopen list without a question.
 
 ## References
 

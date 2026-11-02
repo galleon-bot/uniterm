@@ -312,6 +312,8 @@ None.
 
 **Status:** DONE
 
+Superseded in part by UTERM-014; see Decision Log.
+
 Builds on UTERM-002's command registry milestone.
 
 - An applet declares its shortcuts as registry commands, and they work only while that applet has focus
@@ -400,6 +402,8 @@ hand, since AppKit adds it at run time.
 ### M2: Reopen with Cmd-Shift-T
 
 **Status:** DONE
+
+Superseded in part by UTERM-014; see Decision Log.
 
 - Closing a terminal tab keeps its description in the terminal's closed-tab list
 - Cmd-Shift-T reopens the newest close in the window, tab or pane. A tab reopens in its pane, in the same working
@@ -582,6 +586,9 @@ pane's usual start error.
   outside an edit. A remap of "Undo" under App Shortcuts matches that base title. It may not match while the item shows
   the retitled form. This was not verified against macOS.
 - 2026-11-02: Implemented. M1 and M2 are done, and the row review's fixes landed.
+- 2026-11-02: Superseded in part by UTERM-014. M1 kept Clear Screen on Cmd-K as the terminal's key. UTERM-014 gives
+  Cmd-K to the palette, so Clear Screen has no default key. M2 said a tab whose shell exited on its own adds no
+  closed-tab entry. UTERM-014 makes every close reopenable, so an exited tab is kept like a Cmd-W close.
 
 ## References
 

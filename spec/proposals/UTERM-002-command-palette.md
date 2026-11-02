@@ -115,6 +115,8 @@ and a menu home to each entry.
 
 ### Hotkey default
 
+Superseded in part by UTERM-014; see Decision Log.
+
 Original question: the default hotkey for each mode.
 
 Decision: Cmd-Shift-P for both modes. One action, "activate the palette", toggles it.
@@ -130,6 +132,8 @@ relearn it when they switch modes. The macOS Page Setup convention on Cmd-Shift-
 print path.
 
 ### Hotkey configurability
+
+Superseded in part by UTERM-014; see Decision Log.
 
 Original question: whether the hotkey is configurable in this proposal.
 
@@ -284,7 +288,7 @@ window.
 
 **Status:** DONE
 
-Superseded in part by UTERM-013; see Decision Log.
+Superseded in part by UTERM-014; see Decision Log.
 
 Amended 2026-11-01; see Decision Log.
 
@@ -431,6 +435,8 @@ combining marks.
 ### M3: Docked mode
 
 **Status:** DONE
+
+Superseded in part by UTERM-014; see Decision Log.
 
 Amended 2026-11-02; see Decision Log.
 
@@ -607,6 +613,10 @@ Settings switch, a remap, and a status bar click. A split pane under the overlay
   through a small applet protocol, the launcher's first offer of Cmd-1 to Cmd-9, and a key match that keeps Cmd-} and
   Cmd-Shift-] apart. UTERM-013 M1 replaced them with terminal-owned commands, menus built from the registry, and a
   canonical key form.
+- 2026-11-02: Superseded in part by UTERM-014. "Hotkey default" and M1 put the palette on Cmd-Shift-P, an autonomous
+  choice. The user had asked for Cmd-K, so UTERM-014 moves the palette to Cmd-K and drops Clear Screen's key. M3 put
+  a top-docked strip below the title bar with a 40-point field. UTERM-014 moves it into the title bar row and resizes
+  the field and results.
 
 ## References
 
