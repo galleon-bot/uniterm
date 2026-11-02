@@ -4,7 +4,7 @@
 |----------|-------------|--------|
 | [UTERM-001](UTERM-001-foundation.md) | Windows, regions, pane tree, status bar, and the libghostty terminal applet | implemented |
 | [UTERM-002](UTERM-002-command-palette.md) | Floating or docked command palette with tab search | accepted |
-| [UTERM-003](UTERM-003-janet-scripting.md) | Embedded Janet, host API, `uniterm run`, and the REPL applet | draft |
+| [UTERM-003](UTERM-003-janet-scripting.md) | Embedded Janet, host API, `uniterm run`, and the REPL applet | accepted |
 | [UTERM-004](UTERM-004-control-and-trust.md) | Control levels, pane trust, exec panes, and layout requests | draft |
 | [UTERM-005](UTERM-005-browser-applet.md) | WebKit browser applet with tabs and a security indicator | draft |
 | [UTERM-006](UTERM-006-image-viewer-applet.md) | Image viewer applet with folder slideshow | draft |
