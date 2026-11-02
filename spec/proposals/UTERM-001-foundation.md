@@ -1,6 +1,6 @@
 # UTERM-001: Foundation
 
-**Status:** accepted
+**Status:** implemented
 **Created:** 2026-10-31
 **Updated:** 2026-11-01
 
@@ -968,7 +968,7 @@ Log.
 
 ### M9: User visual check
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 The proposal ends with the user looking at the finished app.
 
@@ -976,6 +976,15 @@ The proposal ends with the user looking at the finished app.
   As built block
 - The user reviews the window chrome, the status bar at the top and at the bottom, and a nested pane layout, and the
   result is recorded in the As built block
+
+**As built:**
+
+- The user reviewed the app on 2026-11-01. The font, the font size, and the colors in Latte and Mocha look good.
+- The window chrome looks good. A nested pane layout looks good, and so does the warning when a split runs out of room.
+- The status bar looks good at the top and at the bottom, with one bug. After the theme is switched to Dark, the
+  directory segment moves from the trailing edge to the leading edge. Switching to Light or System, running commands,
+  moving the bar, and resizing the window do not restore it. Opening a new pane does. The bug is fixed as a UI change
+  outside this proposal.
 
 ### M10: Undo reopens from the description
 

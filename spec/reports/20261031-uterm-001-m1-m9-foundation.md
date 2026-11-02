@@ -8,8 +8,8 @@ commit below is in `/Users/ripta/projects/uniterm`. The branch is `agent/petunia
 
 The run finished on 2026-11-01. M1 to M8 are done, each in its own commit, followed by a row-review fix commit and a
 final-review fix commit. The last full runs were `make test-package` with 380 tests, 0 failures, and 4 US-layout skips,
-and `make test-app` with 46 UI tests and 0 failures. M9 is the user's visual check, so the row stays in `queue.md` and
-UTERM-001 stays `accepted`.
+and `make test-app` with 46 UI tests and 0 failures. M9 was held for the user's visual check. A second run on
+2026-11-01 recorded it. The row is now in `history.md`, and UTERM-001 is `implemented`.
 
 For the user:
 - After the run, the user ruled that undo reopens a pane from its description and is not a snapshot of running
@@ -36,11 +36,11 @@ The session was interrupted during M7. A new coordinator session resumed it from
 | M6 Multiple windows | DONE | "Add multiple windows with per-window panes and status" |
 | M7 Undo close pane | DONE | "Add undo close pane with grace and description tiers and close guards" |
 | M8 Layout persistence | DONE | "Save and restore every window's layout across launches" |
-| M9 User visual check | HELD: a check only the user can perform | |
+| M9 User visual check | DONE, in a second run | This report's own commit |
 | Row review fixes | DONE | "Fix undo order, placeholder undo, and background-tab saves found in review" |
 | Final review fixes | DONE | "Ask once and settle pane exits during close questions" |
 
-Held or blocked rows: none. M9 is left to the user. The row stays in `queue.md` until the user records it.
+Held or blocked rows: none.
 
 ## Environment
 
@@ -653,7 +653,30 @@ M10 review findings:
 
 The `.cg.yaml` allowlist was committed at the user's direction.
 
+## M9: User visual check
+
+A second `/work-queue` run took the row on 2026-11-01. Its base commit was "Merge pull request #5 from
+space-armada/agent/petunia/uterm-001". M9 had no code to build, so no implementer ran for it. The coordinator built and
+launched the app with `make run`, outside the sandbox, and the user reviewed it.
+
+The user's verdict:
+- The font, the font size, and the Latte and Mocha colors look good.
+- The window chrome looks good.
+- Nested panes look good, and so does the warning when a split runs out of room.
+- The status bar looks good at the top and the bottom, with one bug. After the theme is switched to Dark, the directory
+  segment moves from the trailing edge to the leading edge. Light, System, commands, docking, and resizing do not
+  restore it. Opening a new pane does, and it stays fixed after that pane closes.
+
+Checks:
+- The app built and launched. It exited with status 0 when the user quit it. No new uniterm crash report appeared.
+- `proposals.py check` and `proposals.py freeze` both print `[]`.
+
+Best guesses:
+- The status bar bug does not block M9. The project's "UI Feedback" rule ships review tweaks as ordinary UI changes.
+  The user's standing rule is to fix a reported bug, so this run fixes it in its own commit. If the bug should block
+  M9 instead, M9 goes back to `IN PROGRESS` and UTERM-001 back to `accepted`.
+- This report is amended in place rather than a new one started, since it is the row's report.
+
 ## Status
 
-Finished, except M9. M10 is done. The user's visual check is left to the user. Record its result in M9's As built block. Then mark
-M9 DONE, move the row to `history.md`, and set UTERM-001 to `implemented`.
+Finished. UTERM-001 is `implemented`, and its row is in `history.md`.
