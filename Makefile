@@ -52,8 +52,12 @@ clean: ## Remove Xcode and SwiftPM build output. Keeps the Ghostty cache
 
 ##@ Test
 
+.PHONY: test-ci
+test-ci: ## Verify CI change detection and result gating with temporary Git history
+	bash scripts/test-ci.sh
+
 .PHONY: test
-test: test-package test-app ## Run the package tests and the app UI tests
+test: test-ci test-package test-app ## Run CI gating, package tests, and app UI tests
 
 .PHONY: test-package
 test-package: ghostty ## Run the package tests with swift test
@@ -101,3 +105,11 @@ licenses: ## Collect the license notices for Ghostty and its libraries into Lice
 
 .PHONY: ci
 ci: fmt-check lint check test ghostty-offline-check ## Run what CI runs. Includes the 4-minute offline Ghostty rebuild
+
+.PHONY: ci-changes
+ci-changes:
+	bash scripts/ci-changes.sh
+
+.PHONY: ci-result
+ci-result:
+	bash scripts/ci-result.sh

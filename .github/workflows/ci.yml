@@ -15,9 +15,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build_required: ${{ steps.changes.outputs.build_required }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify CI gating
+        run: make test-ci
+
+      - name: Detect build inputs
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: make ci-changes
+
   # Zig 0.15 cannot link against the macOS 26 SDK, so the Ghostty build compiles against the macOS
   # 15.4 SDK. The macos-26 image has only 26.x SDKs. The macos-15 image ships it inside Xcode 16.3.
   zig-sdk:
+    needs: changes
+    if: needs.changes.outputs.build_required == 'true'
     runs-on: macos-15
     timeout-minutes: 15
     steps:
@@ -37,8 +60,9 @@ jobs:
           retention-days: 1
           compression-level: 0
 
-  ci:
-    needs: zig-sdk
+  build:
+    needs: [changes, zig-sdk]
+    if: needs.changes.outputs.build_required == 'true'
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -104,3 +128,22 @@ jobs:
           path: .build/DerivedData/Logs/Test/*.xcresult
           retention-days: 7
           if-no-files-found: ignore
+
+  # Keep the required check present even when macOS jobs are intentionally skipped or fail.
+  ci:
+    needs: [changes, zig-sdk, build]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require the expected job results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BUILD_REQUIRED: ${{ needs.changes.outputs.build_required }}
+          SDK_RESULT: ${{ needs.zig-sdk.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: make ci-result
