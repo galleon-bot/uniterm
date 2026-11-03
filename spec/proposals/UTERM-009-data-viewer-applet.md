@@ -40,6 +40,11 @@ Decision: files open from inside the pane now. Pipe and script input is deferred
 
 - The pane starts from the launcher like any applet, so the applet factory does not change. Inside it, the user opens
   a file with an open panel or by dropping a file onto the pane. A drop accepts file URLs only.
+- A pane shows one file. Opening another file replaces it: the old load is cancelled, and the new file starts with no
+  sort or filter. The open panel selects one file. A drop of several files is refused with a message asking for one
+  file, and the pane keeps what it showed. Amended 2026-11-03; see Decision Log.
+- A drawer of open documents beside the table, as Preview has, is an idea for later. This proposal does not commit to
+  it. Building it needs its own proposal, since it changes what a pane and its description hold.
 - All loading goes through one internal entry point that takes a source. Today the only source is a file URL. A
   byte-stream source is added when its first caller lands. It spools to a file when a format needs random access, as
   `.xlsx` does.
@@ -231,6 +236,8 @@ None.
 - A pane can run the data viewer and open a CSV file as a table, from an open panel or by dropping a file on the pane
 - Every load goes through the one source-taking entry point
 - A drop accepts file URLs only, and the data viewer binds no File > Open shortcut
+- Opening a file into a pane that shows one replaces it, cancels any load still running, and clears the sort and
+  filter. A drop of several files is refused with a message asking for one file, and the pane keeps what it showed
 - The loader opens regular files only, so a FIFO, a device, or a stalled mount never blocks the pane, and reads off the
   main thread
 - A missing or unreadable file shows a message in the pane. Stored sort and filter state that names an absent column
@@ -357,6 +364,9 @@ None.
   rotated-away file. Once the new file was renamed, the next restore followed the bookmark to the stale file. Found in
   the UTERM-006 review, which settles the same rule. The marker on the `currentDirectory` bullet moved here, since a
   decision carries one marker; the 2026-11-02 entry above still records that change.
+- 2026-11-03: Amended "Input sources": a pane shows one file, opening another replaces it, and a drop of several files
+  is refused with a message asking for one. Before, the decision said nothing about either case. Noted a Preview-style
+  document drawer as an idea that needs its own proposal. The user's decision.
 
 ## References
 
