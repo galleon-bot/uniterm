@@ -116,7 +116,7 @@ Rationale: UTERM-006 settled this shape in review, and the user kept it at the r
 with no file capability could probe which files exist, and borrow uniterm's macOS privacy grants for Downloads,
 Documents, and Desktop. The scope protects controllers that have no file access of their own. A process uniterm
 starts, such as a shell or an exec driver, already holds those grants directly, and the scope does not change that.
-The grant's declaration and approval are open. See "How the path-reading power is granted".
+How a controller gets the power is settled in "How the path-reading power is granted".
 
 ### Which entry points open files
 
@@ -443,13 +443,13 @@ a libghostty that cannot mark rows, one remote session turns off clicks in that 
 - Each applet type declares the content types it opens, and the router picks one applet per file by the rule "How a
   file type maps to an applet" settles
 - The router hands each file to the chosen applet's source-taking entry point, the same one its open panel and drop
-  use
+  use, and a folder routed to the terminal creates a new terminal pane at that folder
 - A file no applet declares is refused with a message that names the file and its type
 - Working out a routed file's type never opens or blocks on a FIFO or a device node
 - Routing works with fixture applets, so it needs no production viewer to test
 - A routed pane starts in the file's folder, even when split beside a pane in another folder
 - A routed pane opens beside the pane the request came from, never in another window, and never joins a group a
-  controller owns
+  controller owns, tested against a fixture group and again against UTERM-004's groups once its M4 lands
 - A routed new window holds only the routed pane, starts no other shell, and inherits no directory
 - A saved choice survives a round trip through an older build, and a corrupt or unknown entry falls back to the rank
 - A batch opens in one new window, splitting the largest pane each time, and a window with a sheet attached is
@@ -621,10 +621,14 @@ a libghostty that cannot mark rows, one remote session turns off clicks in that 
   addition: the mouse-over-link action joins the terminal surface protocol, with a hover display and a remote marker)
 - 2026-11-03: Coherence review: no weak decisions. Stated each milestone's dependencies on UTERM-003 and UTERM-004,
   so M5 starts only after UTERM-004 M6. Brought the Summary and Dependencies up to the settled design, reworded the
-  new-window rule so a routed folder's terminal is the routed pane, added three risks, tagged five untagged additions,
+  new-window rule so a routed folder's terminal is the routed pane, added three risks, tagged four untagged additions,
   and routed seven checks to M1, M2, M3, and M5. Amended "One route from a path to a pane", which said every file
   reaches a source-taking entry point. A folder routed to the terminal creates a new pane instead, since the terminal
   has no source to replace. (autonomous)
+- 2026-11-03: Coherence re-check converged. Fixed a stale "open" sentence and M1's routing check, and made M1 re-run
+  the group check once UTERM-004 M4 lands. Risk review: every risk is rated and mitigated or accepted, none is high
+  likelihood and high impact, and the stored choices and the new permission carry skew checks in M1 and M4.
+  (autonomous)
 
 ## References
 
