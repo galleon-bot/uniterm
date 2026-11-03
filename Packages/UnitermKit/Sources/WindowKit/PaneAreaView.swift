@@ -112,6 +112,11 @@ final class PaneAreaView: NSView {
     tree.canSplit(pane, axis: axis, in: bounds.size)
   }
 
+  /// True when `insert(_:at:)` would succeed. A caller checks it before it builds an applet.
+  func canInsert(at placement: PanePlacement) -> Bool {
+    tree.canInsert(at: placement, in: bounds.size)
+  }
+
   // MARK: Edits
 
   /// Splits `pane` and puts `applet` in the new one. Throws when the pane is too small. The caller

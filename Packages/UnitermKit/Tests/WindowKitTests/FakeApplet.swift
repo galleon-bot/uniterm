@@ -2,10 +2,12 @@ import AppKit
 import AppletKit
 import Theme
 
+@testable import WindowKit
+
 /// Stands in for any applet. It holds one tab and cannot open another, as a plain applet would,
 /// until a test says otherwise.
 @MainActor
-final class FakeApplet: TabbedApplet, TextActionApplet {
+final class FakeApplet: Applet {
   let typeID = "fake"
   let view = NSView()
   var title = "Fake"
@@ -98,23 +100,65 @@ final class FakeApplet: TabbedApplet, TextActionApplet {
     selectedTabIndex = index
   }
 
-  func closeSelectedTab() async -> Bool {
-    guard tabCount > 1 else { return false }
+  /// When set, the applet answers a tab close with this and changes nothing. A test uses it to stand
+  /// in for a dialog the user declined.
+  var tabCloseOverride: TabCloseResult?
+  var tabCloseRequests = 0
+
+  func closeCurrentTab() async -> TabCloseResult {
+    tabCloseRequests += 1
+
+    if let tabCloseOverride { return tabCloseOverride }
+
+    guard tabCount > 1 else { return .nothingToClose }
 
     tabsClosed += 1
+
+    if let host {
+      closedTabs.insert(
+        ClosedTab(stamp: host.issueCloseStamp(), title: "\(title) tab \(selectedTabIndex + 1)"),
+        at: 0)
+    }
+
     tabIDs.remove(at: selectedTabIndex)
     tabTitles = tabTitles.enumerated().filter { $0.offset != selectedTabIndex }.map(\.element)
     selectedTabIndex = min(selectedTabIndex, tabCount - 1)
-    return true
+    return .closed
+  }
+
+  struct ClosedTab: Equatable {
+    let stamp: UInt64
+    let title: String
+  }
+
+  /// The tabs the applet closed, newest first.
+  var closedTabs: [ClosedTab] = []
+
+  /// Stamps whose reopen fails, as a session that does not start would.
+  var failingReopens: Set<UInt64> = []
+
+  /// The stamps reopened, oldest first.
+  var reopened: [UInt64] = []
+
+  var closedTabStamps: [UInt64] { closedTabs.map(\.stamp) }
+
+  func reopenTab(stamp: UInt64) -> TabReopenResult {
+    guard let closed = closedTabs.first(where: { $0.stamp == stamp }) else { return .missing }
+
+    if failingReopens.contains(stamp) {
+      return .failed(title: closed.title, reason: "the session did not start")
+    }
+
+    closedTabs.removeAll { $0.stamp == stamp }
+    reopened.append(stamp)
+    tabIDs.append(.make())
+    selectedTabIndex = tabCount - 1
+    return .reopened(title: closed.title)
   }
 
   /// The text actions the applet performed, oldest first.
-  var textActions: [TextAction] = []
+  var textActions: [String] = []
   var canPerformText = true
-
-  func canPerform(_ action: TextAction) -> Bool { canPerformText }
-
-  func perform(_ action: TextAction) { textActions.append(action) }
 
   func start() { started = true }
   func close() { closed = true }
@@ -134,6 +178,107 @@ final class FakeApplet: TabbedApplet, TextActionApplet {
 
   /// The description carries the title, so a test can tell which applet a reopened pane came from.
   func describe() -> AppletDescription {
-    fixedDescription ?? AppletDescription(type: "fake", version: 1, payload: .string(title))
+    fixedDescription
+      ?? AppletDescription(type: "fake", version: 1, payload: .string(title), undoState: undoState)
+  }
+
+  /// The undo-only part of the description: the closed tabs, newest first, as a terminal carries
+  /// them.
+  var undoState: JSONValue? {
+    guard !closedTabs.isEmpty else { return nil }
+
+    return .array(
+      closedTabs.map {
+        .object(["stamp": .number(Double($0.stamp)), "title": .string($0.title)])
+      })
+  }
+
+  /// Takes the closed tabs back from a description, as a reopened pane does.
+  func restoreClosedTabs(from description: AppletDescription) {
+    guard case .array(let entries)? = description.undoState else { return }
+
+    closedTabs = entries.compactMap { entry in
+      guard case .object(let fields) = entry, case .number(let stamp)? = fields["stamp"],
+        case .string(let title)? = fields["title"]
+      else { return nil }
+
+      return ClosedTab(stamp: UInt64(stamp), title: title)
+    }
+  }
+}
+
+extension FakeApplet {
+  /// Commands shaped like the terminal's, so the window's tab and text size paths have something
+  /// to run. The type is `fake`, so the IDs are `fake.new-tab` and so on.
+  static let commandSet: AppletCommandSet = {
+    @MainActor func fake(_ applet: any Applet) -> FakeApplet? { applet as? FakeApplet }
+
+    @MainActor func several(_ applet: any Applet) -> Bool { (fake(applet)?.tabCount ?? 1) > 1 }
+
+    @MainActor func text(
+      _ name: String, _ title: String, _ key: KeyChord?, _ home: AppletMenuHome = .view
+    )
+      -> AppletCommand
+    {
+      AppletCommand(
+        name: name, title: title, key: key, home: home,
+        isAvailable: { fake($0)?.canPerformText == true },
+        run: { fake($0)?.textActions.append(name) })
+    }
+
+    var commands = [
+      AppletCommand(
+        name: "new-tab", title: "New Tab", key: KeyChord("t"), home: .file, section: 1,
+        isAvailable: { fake($0)?.canOpenTab == true }, run: { fake($0)?.openTab() }),
+      AppletCommand(
+        name: "next-tab", title: "Select Next Tab", home: .window, section: 1,
+        isAvailable: several,
+        run: { fake($0)?.step(by: 1) }),
+      AppletCommand(
+        name: "previous-tab", title: "Select Previous Tab", home: .window, section: 1,
+        isAvailable: several,
+        run: { fake($0)?.step(by: -1) }),
+      text("bigger-text", "Bigger Text", KeyChord("+")),
+      text("actual-size", "Actual Size", KeyChord("0")),
+      text("clear", "Clear Screen", KeyChord("k"), .applet),
+    ]
+
+    for number in 1...9 {
+      commands.append(
+        AppletCommand(
+          name: number == 9 ? "last-tab" : "tab-\(number)", title: "Select Tab \(number)",
+          key: KeyChord(String(number)), home: .window, section: 1, listedInPalette: false,
+          isAvailable: several,
+          run: { fake($0)?.selectTab(at: number == 9 ? (fake($0)?.tabCount ?? 1) - 1 : number - 1) }
+        ))
+    }
+
+    return AppletCommandSet(typeID: "fake", menuTitle: "Fake", commands: commands)
+  }()
+
+  fileprivate func step(by step: Int) {
+    selectedTabIndex = (selectedTabIndex + step + tabCount) % tabCount
+  }
+}
+
+extension CommandRegistry {
+  /// A registry with the fake applet's commands, for windows whose panes are fake applets.
+  static func testing() -> CommandRegistry {
+    let registry = CommandRegistry()
+    registry.register(FakeApplet.commandSet)
+    return registry
+  }
+}
+
+extension CommandID {
+  static let fakeNewTab: CommandID = "fake.new-tab"
+  static let fakeNextTab: CommandID = "fake.next-tab"
+  static let fakePreviousTab: CommandID = "fake.previous-tab"
+  static let fakeBiggerText: CommandID = "fake.bigger-text"
+  static let fakeActualSize: CommandID = "fake.actual-size"
+  static let fakeClear: CommandID = "fake.clear"
+
+  static func fakeTab(_ number: Int) -> CommandID {
+    CommandID(number == 9 ? "fake.last-tab" : "fake.tab-\(number)")
   }
 }

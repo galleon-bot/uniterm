@@ -26,12 +26,6 @@ public final class SettingsWindowController: NSWindowController {
     fatalError("init(coder:) is not supported")
   }
 
-  /// Cmd-W is a menu item with no target that closes the pane. The responder chain ends here when
-  /// Settings is the key window, so this closes Settings instead of leaving the key dead.
-  @objc public func closePane(_ sender: Any?) {
-    window?.performClose(sender)
-  }
-
   public func present() {
     NSApp.activate()
     showWindow(nil)

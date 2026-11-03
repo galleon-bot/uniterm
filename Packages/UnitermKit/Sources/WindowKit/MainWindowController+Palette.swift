@@ -253,22 +253,10 @@ extension MainWindowController {
   /// Reads the key of the "Show Command Palette" menu item as it is now, so a user's App Shortcuts
   /// remap shows in the docked placeholder.
   func refreshPaletteHotkeyHint() {
-    let item = Self.menuItem(for: #selector(toggleCommandPalette(_:)), in: NSApp.mainMenu)
+    let live = commands.menu?.keyEquivalent(of: .showCommandPalette)
 
     contentController.commandPalette.setHotkeyHint(
-      item.flatMap {
-        KeyEquivalentText.spell(key: $0.keyEquivalent, modifiers: $0.keyEquivalentModifierMask)
-      })
-  }
-
-  private static func menuItem(for action: Selector, in menu: NSMenu?) -> NSMenuItem? {
-    for item in menu?.items ?? [] {
-      if item.action == action { return item }
-
-      if let found = menuItem(for: action, in: item.submenu) { return found }
-    }
-
-    return nil
+      live.flatMap { KeyEquivalentText.spell(key: $0.key, modifiers: $0.modifiers) })
   }
 
   public func windowDidBecomeKey(_ notification: Notification) {

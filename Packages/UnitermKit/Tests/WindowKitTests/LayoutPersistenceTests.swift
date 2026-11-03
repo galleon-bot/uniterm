@@ -251,7 +251,7 @@ final class LayoutPersistenceTests: XCTestCase {
     let mark = controller.paneArea.tree.highWaterMark
 
     controller.paneArea.focus(third)
-    controller.closePane(nil)
+    controller.dispatch(.close)
 
     XCTAssertFalse(controller.paneIDs.contains(third))
     XCTAssertEqual(controller.paneArea.tree.highWaterMark, mark)

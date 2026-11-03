@@ -110,7 +110,8 @@ final class WindowFixture {
     self.log = log
 
     controller = try MainWindowController(
-      appearance: AppearanceController(store: store), settings: store, statusCenter: center
+      appearance: AppearanceController(store: store), settings: store, statusCenter: center,
+      commands: .testing()
     ) { _, _ in
       let applet = FakeApplet()
       log.made.append(applet)
@@ -167,4 +168,33 @@ func runDefaults(_ arguments: [String]) throws -> String {
   XCTAssertEqual(process.terminationStatus, 0, "defaults \(arguments) failed")
 
   return String(decoding: output, as: UTF8.self)
+}
+
+/// A menu built from a window's registry, not installed, with the window as its key window.
+@MainActor
+struct MenuHarness {
+  let menu: CommandMenu
+
+  init(_ controller: MainWindowController) {
+    menu = CommandMenu(registry: controller.commands, activeController: { controller })
+    menu.keyController = { controller }
+  }
+
+  func item(_ id: CommandID) -> CommandMenuItem? {
+    func find(in menu: NSMenu) -> CommandMenuItem? {
+      for item in menu.items {
+        if let found = item as? CommandMenuItem, found.commandID == id { return found }
+
+        if let submenu = item.submenu, let found = find(in: submenu) { return found }
+      }
+
+      return nil
+    }
+
+    return find(in: menu.menu)
+  }
+
+  func validate(_ id: CommandID) -> Bool {
+    item(id).map { menu.validateMenuItem($0) } ?? false
+  }
 }

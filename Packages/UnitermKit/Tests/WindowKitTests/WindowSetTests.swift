@@ -234,7 +234,7 @@ final class WindowSetTests: XCTestCase {
     let second = try fixture.windows.open()
 
     first.openPane(.terminalShell, axis: .row)
-    first.closePane(nil)
+    first.dispatch(.close)
 
     XCTAssertEqual(first.paneIDs, [NodeID(rawValue: 1)])
     XCTAssertEqual(second.paneIDs, [NodeID(rawValue: 1)])

@@ -1,3 +1,4 @@
+import AppletKit
 import PaneModel
 
 /// What only the app can do. The app delegate supplies these, since a window has no way to open
@@ -6,12 +7,22 @@ public struct AppCommandHooks {
   public var newWindow: @MainActor () -> Void
   public var showSettings: @MainActor () -> Void
 
+  /// False while a quit waits for its answer, so a second request does not cancel the question.
+  public var canQuit: @MainActor () -> Bool
+
+  /// Tells the user something about the app's commands, such as a key an applet could not have.
+  public var warn: @MainActor (String) -> Void
+
   public init(
     newWindow: @escaping @MainActor () -> Void = {},
-    showSettings: @escaping @MainActor () -> Void = {}
+    showSettings: @escaping @MainActor () -> Void = {},
+    canQuit: @escaping @MainActor () -> Bool = { true },
+    warn: @escaping @MainActor (String) -> Void = { _ in }
   ) {
     self.newWindow = newWindow
     self.showSettings = showSettings
+    self.canQuit = canQuit
+    self.warn = warn
   }
 }
 
@@ -26,17 +37,117 @@ public final class CommandRegistry {
 
   private(set) var commands: [Command]
   private var index: [CommandID: Int] = [:]
+  private let hooks: AppCommandHooks
+
+  /// The applet types that registered commands, in registration order.
+  private(set) var appletSets: [AppletCommandSet] = []
+
+  /// The menu built from this registry, once the app installs it.
+  weak var menu: CommandMenu?
+
+  /// The drops already announced this session, so a repeat of one is silent.
+  private var announced = Set<AnnouncedDrop>()
+
+  private struct AnnouncedDrop: Hashable {
+    let command: CommandID
+    let key: KeyChord
+  }
+
+  /// The key each applet command holds now. A command that lost its key, or never asked for one,
+  /// has no entry.
+  private(set) var appletKeys: [CommandID: KeyChord] = [:]
 
   /// The IDs of recently run commands, newest first.
   private(set) var recency: [CommandID] = []
 
   public init(app: AppCommandHooks = AppCommandHooks()) {
-    commands = StandardCommands.make(app: app)
+    hooks = app
+    commands = []
 
-    for (position, command) in commands.enumerated() {
+    add(StandardCommands.make(app: app))
+  }
+
+  private func add(_ new: [Command]) {
+    for command in new {
       precondition(index[command.id] == nil, "the command \(command.id) is registered twice")
-      index[command.id] = position
+      index[command.id] = commands.count
+      commands.append(command)
     }
+  }
+
+  /// The ID of an applet type's command.
+  public static func commandID(typeID: String, name: String) -> CommandID {
+    CommandID("\(typeID).\(name)")
+  }
+
+  /// Adds an applet type's commands. Each is owned by the type, and its ID is namespaced by it.
+  /// The command acts on the applet of its type in the pane it was aimed at. It holds no applet.
+  /// Register every applet type before the menu is built.
+  public func register(_ set: AppletCommandSet) {
+    precondition(
+      !appletSets.contains { $0.typeID == set.typeID } && set.typeID != Self.windowOwner,
+      "the applet type \(set.typeID) registered its commands twice")
+
+    appletSets.append(set)
+
+    let typeID = set.typeID
+
+    add(
+      set.commands.map { spec in
+        Command(
+          Self.commandID(typeID: typeID, name: spec.name), spec.title, scope: .pane,
+          owner: .applet(typeID: typeID), key: spec.key,
+          menu: MenuPlacement(spec.home.menuHome, section: spec.section),
+          listedInPalette: spec.listedInPalette,
+          isAvailable: { context in
+            guard context.actionsEnabled, let applet = context.applet(ofType: typeID) else {
+              return false
+            }
+
+            return spec.isAvailable(applet)
+          },
+          run: { context in
+            guard let applet = context.applet(ofType: typeID) else { return }
+
+            spec.run(applet)
+          })
+      })
+  }
+
+  static let windowOwner = "uniterm"
+
+  /// The registered applet type that owns a command, nil for a uniterm command.
+  func appletSet(owning id: CommandID) -> AppletCommandSet? {
+    guard case .applet(let typeID) = command(id)?.owner else { return nil }
+
+    return appletSets.first { $0.typeID == typeID }
+  }
+
+  /// Settles which applet command holds which key, given the keys uniterm reserves. Keys that
+  /// are dropped are returned. Each applet type gets at most one warning per pass, and it names
+  /// only the drops not announced before this session.
+  @discardableResult
+  func resolveKeys(reserved: Set<KeyChord>) -> [KeyConflict] {
+    let resolution = KeyReservations.resolve(sets: appletSets, reserved: reserved)
+    appletKeys = resolution.keys
+
+    var byType: [String: [KeyConflict]] = [:]
+
+    for conflict in resolution.conflicts {
+      byType[conflict.typeID, default: []].append(conflict)
+    }
+
+    for set in appletSets {
+      let fresh = (byType[set.typeID] ?? []).filter {
+        announced.insert(AnnouncedDrop(command: $0.commandID, key: $0.key)).inserted
+      }
+
+      guard !fresh.isEmpty else { continue }
+
+      hooks.warn(KeyReservations.warning(for: fresh, menuTitle: set.menuTitle))
+    }
+
+    return resolution.conflicts
   }
 
   func command(_ id: CommandID) -> Command? {
@@ -48,6 +159,8 @@ public final class CommandRegistry {
   /// the pane behind it.
   func isAvailable(_ id: CommandID, in context: CommandContext) -> Bool {
     guard let command = command(id) else { return false }
+
+    if command.scope != .app, context.controller == nil { return false }
 
     if command.scope == .pane, !Self.paneExists(context) {
       return true

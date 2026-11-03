@@ -8,7 +8,18 @@ in `/Users/ripta/projects/uniterm`, on `main`. Nothing is pushed.
 
 ## TL;DR
 
-In progress.
+The run finished on 2026-11-02. Both rows are done, and UTERM-002 and UTERM-013 are `implemented`. The five milestones
+each landed in their own commit, followed by a review-fix commit and a finishing commit per row, and a final-review
+commit. The last checks were `make test-package` on the final commit with 540 tests, 4 skipped, and 0 failures, and two full `make test-app`
+runs with 77 of 77 UI tests passing. `make ghostty-offline-check` passed.
+
+For the user:
+
+- One full UI run during UTERM-013 M2 failed 5 tests that passed in two later full runs. The cause is unresolved. See
+  the UTERM-013 report.
+- ADR-03, ADR-04, and ADR-05 still say Cmd-Z or "undo" brings back a closed pane. Their decisions still hold. A minor
+  wording edit would match Cmd-Shift-T. The run left the ADRs alone.
+- No new ADR candidate passed the bar. The candidates raised were already declined or deferred in the Decision Logs.
 
 ## Run state
 
@@ -22,10 +33,10 @@ In progress.
 | UTERM-002 M2 Tab search | DONE | "Let the command palette find every tab in the window" |
 | UTERM-002 M3 Docked mode | DONE | "Let the command palette dock at the top or bottom of the window" |
 | UTERM-002 row review | DONE | "Ask the applet before hiding the palette, and tidy the row" |
-| UTERM-013 M1 Applet-declared shortcuts | IN PROGRESS | |
-| UTERM-013 M2 Reopen with Cmd-Shift-T | QUEUED | |
-| UTERM-013 row review | QUEUED | |
-| Final review | QUEUED | |
+| UTERM-013 M1 Applet-declared shortcuts | DONE | "Let applets declare their own shortcuts and reserve uniterm's window keys" |
+| UTERM-013 M2 Reopen with Cmd-Shift-T | DONE | "Reopen the newest closed tab or pane with Cmd-Shift-T" |
+| UTERM-013 row review | DONE | "Tidy shortcut ownership after review" |
+| Final review | DONE | "Mark the palette's first milestone as superseded in part" |
 
 Held or blocked rows: none. UTERM-013's row depends on UTERM-002 M1, which this run builds first.
 
@@ -225,6 +236,28 @@ moved to `history.md`. `proposals.py check` reports nothing.
 ADR review over the row: no conflicts. Its three candidates were already settled. The registry and the one-tab rule
 were declined on 2026-11-01. The key route is mechanism that UTERM-013 keeps out of ADR-04.
 
+## Final review
+
+The review covered the whole run. It found no correctness or security defect, and confirmed that the run edits no
+ADR. `proposals.py freeze` over all the run's commits reports nothing.
+
+Findings and dispositions:
+
+- UTERM-002 M1's As built describes shapes that UTERM-013 M1 later replaced: fixed. M1 now carries "Superseded in part
+  by UTERM-013", with a Decision Log entry. The As built text stays as written, since it was true when it shipped.
+- Two UTERM-013 markers read "2026-11-01 and 2026-11-02", and some lines wrap ragged: dismissed. UTERM-013 is
+  implemented, and the freeze allows only corrections of fact.
+- ADR-03's rationale and ADR-04's context still say Cmd-Z gets a closed pane back, and ADR-05 calls reopen "undo":
+  left for the user. No decision changed, so a minor wording edit would do. No superseding ADR is needed.
+
+Fix commit: "Mark the palette's first milestone as superseded in part". `make ghostty-offline-check` passed in 80
+seconds.
+
+The ADR review over the run found no conflicts. Its candidates match the Decision Logs: the registry and the one-tab
+rule were declined on 2026-11-01, and the command ID namespace and the host-stamped closes are deferred to UTERM-003 and
+to UTERM-005 through UTERM-010.
+
 ## Status
 
-In progress.
+Done. Every change in this run is committed on `main`. Nothing was pushed. The working tree holds only the
+user's `.cg.yaml` allowlist edits, which get their own commit.

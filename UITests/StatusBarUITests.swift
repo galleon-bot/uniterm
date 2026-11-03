@@ -53,27 +53,20 @@ final class StatusBarUITests: UnitermUITestCase {
 
   /// Catches a bar that cannot expand into the history, or a history that hides level or source.
   func testClickingTheBarShowsTheHistoryWithLevelAndSource() {
-    let app = launchApp()
+    let app = launchApp(environment: ["UNITERM_DEBUG_POST_ERROR": Self.errorText])
     let window = app.windows["main-window"]
     _ = waitForTerminal(in: app)
     let message = window.staticTexts["status-message"]
-
-    app.typeKey("z", modifierFlags: .command)
-    XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("no closed pane to undo") })
-    app.typeKey("z", modifierFlags: .command)
+    XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains(Self.errorText) })
 
     let bar = window.groups["status-bar"]
     bar.click()
 
     let rows = window.staticTexts.matching(identifier: "history-row")
     XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "the history never opened")
-    XCTAssertGreaterThanOrEqual(rows.count, 2)
+    XCTAssertGreaterThanOrEqual(rows.count, 1)
     XCTAssertEqual(
-      rows.element(boundBy: 0).value as? String,
-      "info  uniterm: There is no closed pane to undo.")
-    XCTAssertEqual(
-      rows.element(boundBy: 1).value as? String,
-      "info  uniterm: There is no closed pane to undo.")
+      rows.element(boundBy: 0).value as? String, "error  uniterm: \(Self.errorText)")
 
     bar.click()
     XCTAssertTrue(waitForGone(rows.firstMatch), "a second click left the history open")

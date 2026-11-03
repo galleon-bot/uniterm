@@ -14,11 +14,25 @@ public struct AppletDescription: Sendable, Equatable, Codable {
   /// still finds what it wrote. The payload of such a description is not meaningful.
   public let verbatim: Data?
 
-  public init(type: String, version: Int, payload: JSONValue, verbatim: Data? = nil) {
+  /// What undo restores beyond the payload, such as a terminal's closed tabs. It lives in memory
+  /// with the window's undo state. A layout file never writes it and never reads it, and it is
+  /// dropped at quit. Two descriptions that differ only here hold the same saved state.
+  public let undoState: JSONValue?
+
+  public init(
+    type: String, version: Int, payload: JSONValue, verbatim: Data? = nil,
+    undoState: JSONValue? = nil
+  ) {
     self.type = type
     self.version = version
     self.payload = payload
     self.verbatim = verbatim
+    self.undoState = undoState
+  }
+
+  /// The description as a layout file holds it, without the undo-only part.
+  public var withoutUndoState: AppletDescription {
+    AppletDescription(type: type, version: version, payload: payload, verbatim: verbatim)
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -33,6 +47,7 @@ public struct AppletDescription: Sendable, Equatable, Codable {
     version = try container.decode(Int.self, forKey: .version)
     payload = try container.decode(JSONValue.self, forKey: .payload)
     verbatim = nil
+    undoState = nil
   }
 
   public func encode(to encoder: any Encoder) throws {

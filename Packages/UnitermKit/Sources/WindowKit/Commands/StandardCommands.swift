@@ -2,140 +2,131 @@ import AppKit
 import AppletKit
 import PaneModel
 
-/// The commands that uniterm itself owns. Every UTERM-001 key binding is one, including the
-/// terminal ones, until applets own their own commands.
+/// The commands that uniterm itself owns: the ones that act on the app, a window, or the pane tree.
+/// An applet's commands are registered by the applet type.
 ///
 /// The standard edit actions are not here. Cut, copy, paste, select all, undo, and redo stay
 /// responder-chain menu items, since a command would act on the pane and not on a text field
 /// inside it.
 @MainActor
 enum StandardCommands {
+  private static let commandShift: NSEvent.ModifierFlags = [.command, .shift]
+  private static let commandOption: NSEvent.ModifierFlags = [.command, .option]
+
   static func make(app: AppCommandHooks) -> [Command] {
-    var commands = appCommands(app) + paneCommands() + textCommands() + windowCommands()
-
-    for number in 1...9 {
-      commands.append(
-        Command(
-          .selectTab(number: number), number == 9 ? "Select Last Tab" : "Select Tab \(number)",
-          scope: .pane, listedInPalette: false,
-          isAvailable: { $0.hasSeveralTabs },
-          run: { context in
-            context.controller?.selectTab(number: number, in: context.pane)
-          }))
-    }
-
-    return commands
+    appCommands(app) + paneCommands() + windowCommands()
   }
 
   private static func appCommands(_ app: AppCommandHooks) -> [Command] {
     [
-      Command(.newWindow, "New Window", scope: .app) { _ in app.newWindow() },
-      Command(.showSettings, "Settings", scope: .app) { _ in app.showSettings() },
-      Command(.hideApp, "Hide uniterm", scope: .app) { _ in NSApp.hide(nil) },
-      Command(.quit, "Quit uniterm", scope: .app) { _ in NSApp.terminate(nil) },
+      Command(
+        .showSettings, "Settings", scope: .app, key: KeyChord(","),
+        menu: MenuPlacement(.app, section: 0, title: "Settings\u{2026}")
+      ) { _ in app.showSettings() },
+      Command(
+        .hideApp, "Hide uniterm", scope: .app, key: KeyChord("h"),
+        menu: MenuPlacement(.app, section: 1)
+      ) { _ in NSApp.hide(nil) },
+      Command(
+        .quit, "Quit uniterm", scope: .app, key: KeyChord("q"),
+        menu: MenuPlacement(.app, section: 2),
+        isAvailable: { _ in app.canQuit() },
+        run: { _ in NSApp.terminate(nil) }
+      ),
+      Command(
+        .newWindow, "New Window", scope: .app, key: KeyChord("n"),
+        menu: MenuPlacement(.file, section: 0)
+      ) { _ in app.newWindow() },
     ]
   }
 
   private static func paneCommands() -> [Command] {
     [
+      pane(.splitRight, "Split Right", KeyChord("d"), .file, 1) { context in
+        context.controller?.requestSplit(.row, from: context.pane)
+      },
+      pane(.splitDown, "Split Down", KeyChord("d", commandShift), .file, 1) { context in
+        context.controller?.requestSplit(.column, from: context.pane)
+      },
       Command(
-        .newTab, "New Tab", scope: .pane,
-        isAvailable: { $0.canRun { $0.tabbedApplet(in: $1)?.canOpenTab == true } },
-        run: { context in
-          context.controller?.openTab(in: context.pane)
-        }
-      ),
-      Command(
-        .splitRight, "Split Right", scope: .pane,
-        isAvailable: { $0.actionsEnabled },
-        run: { context in
-          context.controller?.requestSplit(.row, from: context.pane)
-        }
-      ),
-      Command(
-        .splitDown, "Split Down", scope: .pane,
-        isAvailable: { $0.actionsEnabled },
-        run: { context in
-          context.controller?.requestSplit(.column, from: context.pane)
-        }
-      ),
-      Command(
-        .close, "Close Tab or Pane", scope: .pane,
+        .close, "Close Tab or Pane", scope: .pane, key: KeyChord("w"),
+        menu: MenuPlacement(.file, section: 2, title: "Close"),
         isAvailable: { $0.actionsEnabled },
         run: { context in
           context.controller?.closeTabOrPane(context.pane)
         }
       ),
       Command(
-        .selectNextTab, "Select Next Tab", scope: .pane,
-        isAvailable: { $0.hasSeveralTabs },
+        .reopenClosed, "Reopen Closed Tab or Pane", scope: .window,
+        key: KeyChord("t", commandShift), menu: MenuPlacement(.file, section: 2),
+        isAvailable: { context in
+          context.actionsEnabled && context.controller?.hasReopenableClose == true
+        },
         run: { context in
-          context.controller?.stepTab(by: 1, in: context.pane)
+          context.controller?.reopenClosed()
         }
       ),
-      Command(
-        .selectPreviousTab, "Select Previous Tab", scope: .pane,
-        isAvailable: { $0.hasSeveralTabs },
-        run: { context in
-          context.controller?.stepTab(by: -1, in: context.pane)
-        }
-      ),
-      focus(.focusNextPane, "Focus Next Pane", .next),
-      focus(.focusPreviousPane, "Focus Previous Pane", .previous),
-      focus(.focusPaneLeft, "Focus Pane Left", .toward(.left)),
-      focus(.focusPaneRight, "Focus Pane Right", .toward(.right)),
-      focus(.focusPaneUp, "Focus Pane Up", .toward(.up)),
-      focus(.focusPaneDown, "Focus Pane Down", .toward(.down)),
+      focus(.focusNextPane, "Focus Next Pane", KeyChord("]"), .next, 2),
+      focus(.focusPreviousPane, "Focus Previous Pane", KeyChord("["), .previous, 2),
+      focus(.focusPaneLeft, "Focus Pane Left", arrow(NSLeftArrowFunctionKey), .toward(.left), 3),
+      focus(
+        .focusPaneRight, "Focus Pane Right", arrow(NSRightArrowFunctionKey), .toward(.right), 3),
+      focus(.focusPaneUp, "Focus Pane Up", arrow(NSUpArrowFunctionKey), .toward(.up), 3),
+      focus(.focusPaneDown, "Focus Pane Down", arrow(NSDownArrowFunctionKey), .toward(.down), 3),
     ]
   }
 
-  private static func focus(_ id: CommandID, _ title: String, _ move: PaneFocusMove) -> Command {
-    Command(
-      id, title, scope: .pane, isAvailable: { $0.actionsEnabled },
-      run: { context in
-        context.controller?.moveFocus(move, from: context.pane)
-      })
+  private static func arrow(_ code: Int) -> KeyChord {
+    KeyChord(String(UnicodeScalar(UInt32(code)).map(Character.init) ?? " "), commandOption)
   }
 
-  private static func textCommands() -> [Command] {
-    [
-      text(.biggerText, "Bigger Text", .increaseSize),
-      text(.smallerText, "Smaller Text", .decreaseSize),
-      text(.actualSize, "Actual Size", .resetSize),
-      text(.clearScreen, "Clear Screen", .clear),
-    ]
+  private static func pane(
+    _ id: CommandID, _ title: String, _ key: KeyChord, _ home: MenuHome, _ section: Int,
+    run: @escaping @MainActor (CommandContext) -> Void
+  ) -> Command {
+    Command(
+      id, title, scope: .pane, key: key, menu: MenuPlacement(home, section: section),
+      isAvailable: { $0.actionsEnabled }, run: run)
   }
 
-  private static func text(_ id: CommandID, _ title: String, _ action: TextAction) -> Command {
-    Command(
-      id, title, scope: .pane,
-      isAvailable: { $0.canRun { $0.textApplet(in: $1)?.canPerform(action) == true } },
-      run: { context in
-        context.controller?.perform(action, in: context.pane)
-      }
-    )
+  private static func focus(
+    _ id: CommandID, _ title: String, _ key: KeyChord, _ move: PaneFocusMove, _ section: Int
+  ) -> Command {
+    pane(id, title, key, .window, section) { context in
+      context.controller?.moveFocus(move, from: context.pane)
+    }
   }
 
   private static func windowCommands() -> [Command] {
     [
-      Command(.minimizeWindow, "Minimize", scope: .window) { context in
+      Command(
+        .minimizeWindow, "Minimize", scope: .window, key: KeyChord("m"),
+        menu: MenuPlacement(.window, section: 0)
+      ) { context in
         context.controller?.window?.performMiniaturize(nil)
       },
-      Command(.toggleMessageHistory, "Toggle Message History", scope: .window) { context in
+      Command(
+        .showCommandPalette, "Show Command Palette", scope: .window,
+        key: KeyChord("p", commandShift), menu: MenuPlacement(.view, section: 1),
+        listedInPalette: false,
+        isAvailable: { $0.actionsEnabled },
+        run: { context in
+          context.controller?.showCommandPalette()
+        }
+      ),
+      Command(
+        .toggleMessageHistory, "Toggle Message History", scope: .window,
+        key: KeyChord("m", commandShift),
+        menu: MenuPlacement(.view, section: 1, title: "Show Message History")
+      ) { context in
         context.controller?.toggleHistory()
       },
       Command(
         .dismissMessage, "Dismiss Message", scope: .window,
+        key: KeyChord("\u{8}", commandOption), menu: MenuPlacement(.view, section: 1),
         isAvailable: { $0.controller?.statusCenter.display?.message.level == .error },
         run: { context in
           context.controller?.statusCenter.dismissCurrent()
-        }
-      ),
-      Command(
-        .showCommandPalette, "Show Command Palette", scope: .window, listedInPalette: false,
-        isAvailable: { $0.actionsEnabled },
-        run: { context in
-          context.controller?.showCommandPalette()
         }
       ),
     ]
@@ -144,19 +135,7 @@ enum StandardCommands {
 
 extension CommandContext {
   /// False while a sheet holds the window's attention. Pane actions wait until it is answered.
-  fileprivate var actionsEnabled: Bool {
+  var actionsEnabled: Bool {
     controller?.paneActionsEnabled ?? false
-  }
-
-  fileprivate var hasSeveralTabs: Bool {
-    canRun { ($0.tabbedApplet(in: $1)?.tabCount ?? 1) > 1 }
-  }
-
-  fileprivate func canRun(
-    _ check: (MainWindowController, NodeID) -> Bool
-  ) -> Bool {
-    guard let controller, let pane, controller.paneActionsEnabled else { return false }
-
-    return check(controller, pane)
   }
 }

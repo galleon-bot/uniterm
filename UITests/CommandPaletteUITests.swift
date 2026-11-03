@@ -128,12 +128,12 @@ final class CommandPaletteUITests: UnitermUITestCase {
       waitFor(mainWindow(in: app).textViews["terminal"], timeout: 40) { $0.contains("% ") })
 
     showPalette(in: app)
-    app.menuBars.menuItems["Close Tab"].click()
+    app.menuBars.menuItems["Close"].click()
 
     XCTAssertTrue(waitUntilGone(palette(in: app)))
     XCTAssertTrue(tab(1, in: app).exists, "the menu item closed a tab with the palette up")
 
-    app.menuBars.menuItems["Close Tab"].click()
+    app.menuBars.menuItems["Close"].click()
     XCTAssertTrue(waitUntilGone(tab(1, in: app), timeout: 15), "File > Close did not close the tab")
   }
 

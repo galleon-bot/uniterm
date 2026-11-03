@@ -157,9 +157,9 @@ final class PaneTreeUITests: UnitermUITestCase {
   }
 
   /// Catches an undo that does not reopen the pane where it was: after Cmd-W closes the second
-  /// pane, no segment promises a kept session, and Cmd-Z opens a new pane beside pane 1. The old ID
-  /// is retired, so the reopened pane is pane 4, and it runs a fresh shell.
-  func testUndoReopensTheClosedPaneFromItsDescription() {
+  /// pane, no segment promises a kept session, and Cmd-Shift-T opens a new pane beside pane 1. The
+  /// old ID is retired, so the reopened pane is pane 4, and it runs a fresh shell.
+  func testReopenBringsBackTheClosedPaneFromItsDescription() {
     let app = launchApp()
     let window = app.windows["main-window"]
     _ = waitForTerminal(in: app)
@@ -173,14 +173,39 @@ final class PaneTreeUITests: UnitermUITestCase {
     XCTAssertTrue(waitUntilGone(window.groups["pane-2"], timeout: 15))
     XCTAssertFalse(window.staticTexts["status-grace"].exists)
 
-    app.typeKey("z", modifierFlags: .command)
+    app.typeKey("t", modifierFlags: [.command, .shift])
 
-    XCTAssertTrue(window.groups["pane-4"].waitForExistence(timeout: 15), "undo never reopened it")
+    XCTAssertTrue(
+      window.groups["pane-4"].waitForExistence(timeout: 15), "Cmd-Shift-T never reopened it")
     XCTAssertFalse(window.groups["pane-2"].exists, "the retired ID came back")
     XCTAssertTrue(waitForPaneCount(2, in: window))
     XCTAssertGreaterThan(window.groups["pane-4"].frame.minX, window.groups["pane-1"].frame.minX)
     XCTAssertTrue(
       waitFor(window.groups["pane-4"].textViews["terminal"], timeout: 40) { $0.contains("% ") })
+  }
+
+  /// Catches a Cmd-Z that still reopens panes. After Cmd-W closes the second pane, Cmd-Z leaves it
+  /// closed. Cmd-Shift-T then brings it back, so the pane was there to reopen all along.
+  func testCommandZLeavesAClosedPaneClosed() {
+    let app = launchApp()
+    let window = app.windows["main-window"]
+    _ = waitForTerminal(in: app)
+
+    openPane(in: app, keys: "d", modifiers: .command)
+    XCTAssertTrue(window.groups["pane-2"].waitForExistence(timeout: 20))
+
+    app.typeKey("w", modifierFlags: .command)
+    XCTAssertTrue(waitUntilGone(window.groups["pane-2"], timeout: 15))
+
+    app.typeKey("z", modifierFlags: .command)
+
+    XCTAssertFalse(
+      window.groups["pane-4"].waitForExistence(timeout: 3), "Cmd-Z reopened the closed pane")
+    XCTAssertTrue(waitForPaneCount(1, in: window))
+
+    app.typeKey("t", modifierFlags: [.command, .shift])
+
+    XCTAssertTrue(window.groups["pane-4"].waitForExistence(timeout: 15))
   }
 
   /// Catches a window that can shrink past its panes. With three panes in a row the minimum is

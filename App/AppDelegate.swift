@@ -9,7 +9,7 @@ import TerminalSurface
 import WindowKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class AppDelegate: NSObject, NSApplicationDelegate {
   private let logger = Logger(subsystem: "dev.uniterm.app", category: "app")
   private let settings: SettingsStore
   private var appearance: AppearanceController?
@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
   private var terminalEngine: GhosttyTerminalEngine?
   private var windowSet: WindowSet?
   private var commands: CommandRegistry?
+  private var commandMenu: CommandMenu?
   private var layoutPersistence: LayoutPersistence?
   private var settingsWindowController: SettingsWindowController?
   private var askingToQuit = false
@@ -116,10 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let commands = CommandRegistry(
       app: AppCommandHooks(
         newWindow: { [weak self] in self?.openWindow() },
-        showSettings: { [weak self] in self?.presentSettings() }))
+        showSettings: { [weak self] in self?.presentSettings() },
+        canQuit: { [weak self] in self?.askingToQuit == false },
+        warn: { [weak self] text in
+          self?.windowSet?.post(level: .warning, source: .uniterm, text: text)
+        }))
+    commands.register(TerminalApplet.commandSet)
     self.commands = commands
-
-    NSApp.mainMenu = MainMenu.make(target: self)
 
     let settings = settings
 
@@ -156,6 +160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
           makeApplet: makeApplet)
       })
     windowSet = windows
+
+    let menu = CommandMenu(
+      registry: commands, activeController: { [weak self] in self?.windowSet?.activeController })
+    commandMenu = menu
+    menu.install()
 
     let persistence: LayoutPersistence?
     do {
@@ -276,45 +285,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     logger.error("the terminal palette did not update: \(String(describing: error))")
     windowSet?.post(
       level: .error, source: .uniterm, text: "The terminal colors did not update: \(error)")
-  }
-
-  // Each menu action below names a registry command and dispatches it. With a window open, the
-  // window decides what a showing palette does with the key. With none open, the registry runs
-  // the app command alone.
-
-  @objc func newWindow(_ sender: Any?) {
-    dispatch(.newWindow)
-  }
-
-  @objc func showSettings(_ sender: Any?) {
-    dispatch(.showSettings)
-  }
-
-  @objc func hideApp(_ sender: Any?) {
-    dispatch(.hideApp)
-  }
-
-  @objc func quitApp(_ sender: Any?) {
-    dispatch(.quit)
-  }
-
-  /// AppKit's own Quit item is disabled while a quit waits for an answer, so a second Cmd-Q does
-  /// nothing. This item is uniterm's, so it follows the same rule. A second terminate request would
-  /// cancel the question that is open.
-  func validateMenuItem(_ item: NSMenuItem) -> Bool {
-    if item.action == #selector(quitApp(_:)) {
-      return !askingToQuit
-    }
-
-    return true
-  }
-
-  private func dispatch(_ id: CommandID) {
-    if let controller = windowSet?.activeController {
-      controller.dispatch(id)
-    } else {
-      commands?.runWithoutWindow(id)
-    }
   }
 
   /// Says whether a window opened. With `onlyIfNone`, an open window means nothing opens.

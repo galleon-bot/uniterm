@@ -56,6 +56,35 @@ public protocol AppletHost: AnyObject {
 
   /// Asks the user. Nothing happens until the user answers.
   func applet(_ applet: any Applet, confirm request: AppletConfirmation) async -> Bool
+
+  /// The next close stamp of the window. Stamps only grow, and pane closes draw from the same
+  /// counter, so the window can order a closed tab against a closed pane. An applet asks for one
+  /// when it records a close, after any question has been answered.
+  func issueCloseStamp() -> UInt64
+}
+
+/// How an applet answers a request to reopen one of its closed tabs.
+public enum TabReopenResult: Sendable, Equatable {
+  /// The tab is back. The title names it for the window's message.
+  case reopened(title: String)
+
+  /// The applet holds no closed tab with this stamp.
+  case missing
+
+  /// The tab could not come back, and the applet is unchanged. The entry stays for another try.
+  case failed(title: String, reason: String)
+}
+
+/// How an applet answers a request to close its current tab.
+public enum TabCloseResult: Sendable, Equatable {
+  /// The tab closed.
+  case closed
+
+  /// The user was asked and said no, or a close of the same tab is already waiting for an answer.
+  case declined
+
+  /// The applet has no tab to close. Closing the last tab is a pane close, which the host owns.
+  case nothingToClose
 }
 
 /// What a pane runs. Every applet implements this contract.
@@ -66,7 +95,8 @@ public protocol AppletHost: AnyObject {
 /// what an event means for its own content.
 ///
 /// Undo reopens a closed pane from its description, in the same place, with the same kind of
-/// applet. An applet that wants an undo to bring back more saves it in the description.
+/// applet. An applet that wants an undo to bring back more saves it in the description's undo-only
+/// part, which a layout file never holds.
 @MainActor
 public protocol Applet: AnyObject {
   var typeID: String { get }
@@ -121,6 +151,19 @@ public protocol Applet: AnyObject {
   /// Gives the applet keyboard focus.
   func focus()
 
+  /// Closes the applet's current tab, after asking when it is running something. The answer says
+  /// whether it closed, the user declined, or the applet has no tab to close. Only the last lets
+  /// the host close the pane. An applet without tabs always answers that it has none.
+  func closeCurrentTab() async -> TabCloseResult
+
+  /// The stamps of the closed tabs the applet can reopen, newest first. The applet keeps the list.
+  /// The host keeps no copy. An applet without tabs reports none.
+  var closedTabStamps: [UInt64] { get }
+
+  /// Reopens the closed tab with this stamp, in its former place. A failure keeps the entry, adds
+  /// no tab, and leaves the selection as it was.
+  func reopenTab(stamp: UInt64) -> TabReopenResult
+
   func describe() -> AppletDescription
 
   /// Tells the applet the palette to draw its own chrome with. The host calls it when the applet
@@ -129,6 +172,12 @@ public protocol Applet: AnyObject {
 }
 
 extension Applet {
+  public func closeCurrentTab() async -> TabCloseResult { .nothingToClose }
+
+  public var closedTabStamps: [UInt64] { [] }
+
+  public func reopenTab(stamp: UInt64) -> TabReopenResult { .missing }
+
   public func apply(_ palette: ThemePalette) {}
 
   public func selectTab(id: AppletTabID) -> Bool {
@@ -141,43 +190,4 @@ extension Applet {
   public var runningLabels: [String] {
     isRunningSomething ? [title] : []
   }
-}
-
-/// An applet that holds several tabs. The host routes the tab menu items and Cmd-W to it.
-///
-/// Closing the last tab is not a tab close. It is a pane close, which the host owns.
-@MainActor
-public protocol TabbedApplet: Applet {
-  var tabCount: Int { get }
-  var selectedTabIndex: Int { get }
-
-  /// False in a mode that runs one program in one tab.
-  var canOpenTab: Bool { get }
-
-  func openTab()
-
-  /// Selects a tab. An index outside the tabs does nothing.
-  func selectTab(at index: Int)
-
-  /// Closes the selected tab, after asking when it is running something. Returns false when the
-  /// user declined, or when the applet has only one tab.
-  func closeSelectedTab() async -> Bool
-}
-
-/// A resize or clear that an applet's text content can answer.
-public enum TextAction: Sendable, Equatable, CaseIterable {
-  case increaseSize
-  case decreaseSize
-  case resetSize
-  case clear
-}
-
-/// An applet that resizes and clears its own text. The host calls it from the command registry, so
-/// the action reaches the pane it was aimed at and never depends on which view has the keyboard.
-@MainActor
-public protocol TextActionApplet: Applet {
-  /// False when the applet has no content to act on right now, such as a program that has not run.
-  func canPerform(_ action: TextAction) -> Bool
-
-  func perform(_ action: TextAction)
 }

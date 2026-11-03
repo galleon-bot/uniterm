@@ -28,7 +28,9 @@ final class MainWindowControllerTests: XCTestCase {
     choices = []
     reuse = nil
 
-    let controller = try MainWindowController(appearance: appearance, settings: store) {
+    let controller = try MainWindowController(
+      appearance: appearance, settings: store, commands: .testing()
+    ) {
       [unowned self] choice, _ in
       if case .terminalProgram = choice {
         throw ProgramsUnavailable()
@@ -85,20 +87,19 @@ final class MainWindowControllerTests: XCTestCase {
     XCTAssertTrue(made[0].started)
   }
 
-  /// Catches an undo with nothing to undo that does nothing silently. The item stays on, so Cmd-Z
-  /// reaches the window and the action says there is nothing to undo.
-  func testUndoWithNothingClosedStaysOnAndSaysSo() throws {
+  /// Catches a reopen with nothing closed that does nothing silently. The command is off, so the
+  /// reserved key is consumed, and a direct request says there is nothing to reopen.
+  func testReopenWithNothingClosedIsOffAndSaysSo() throws {
     let controller = try makeController()
-    let item = NSMenuItem(
-      title: "Undo", action: #selector(MainWindow.undoCloseOrEdit(_:)), keyEquivalent: "z")
 
-    XCTAssertTrue(controller.validateMenuItem(item))
-    XCTAssertEqual(item.title, "Undo Close Pane")
+    XCTAssertFalse(controller.hasReopenableClose)
+    XCTAssertFalse(controller.commands.isAvailable(.reopenClosed, in: controller.commandContext()))
 
-    controller.undoClosePane(nil)
+    controller.reopenClosed()
 
     XCTAssertEqual(controller.statusCenter.history.count, 1)
-    XCTAssertEqual(controller.statusCenter.history.last?.text, "There is no closed pane to undo.")
+    XCTAssertEqual(
+      controller.statusCenter.history.last?.text, "There is no closed tab or pane to reopen.")
     XCTAssertTrue(controller.statusCenter.history.allSatisfy { $0.source == .uniterm })
   }
 
@@ -141,7 +142,7 @@ final class MainWindowControllerTests: XCTestCase {
     XCTAssertEqual(first?.accessibilityValue() as? String, "unfocused")
     XCTAssertEqual(second?.accessibilityValue() as? String, "focused")
 
-    controller.focusPaneLeft(nil)
+    controller.dispatch(.focusPaneLeft)
 
     XCTAssertEqual(first?.accessibilityValue() as? String, "focused")
     XCTAssertEqual(second?.accessibilityValue() as? String, "unfocused")
@@ -199,7 +200,7 @@ final class MainWindowControllerTests: XCTestCase {
     XCTAssertEqual(window.contentMinSize.width, 405)
     XCTAssertEqual(window.contentMinSize.height, single.height + 105)
 
-    controller.closePane(nil)
+    controller.dispatch(.close)
     XCTAssertEqual(window.contentMinSize.height, single.height)
   }
 
@@ -213,7 +214,7 @@ final class MainWindowControllerTests: XCTestCase {
     defer { controller.window?.close() }
     controller.openPane(.terminalShell, axis: .row)
 
-    controller.closePane(nil)
+    controller.dispatch(.close)
 
     XCTAssertEqual(controller.paneIDs, [NodeID(rawValue: 1)])
     XCTAssertEqual(controller.focusedPane, NodeID(rawValue: 1))
@@ -275,7 +276,7 @@ final class MainWindowControllerTests: XCTestCase {
     controller.openPane(.terminalShell, axis: .row)
     controller.openPane(.terminalShell, axis: .row)
 
-    controller.closePane(nil)
+    controller.dispatch(.close)
 
     XCTAssertEqual(controller.focusedPane, NodeID(rawValue: 2))
   }
@@ -316,36 +317,28 @@ final class MainWindowControllerTests: XCTestCase {
     XCTAssertNotNil(window.attachedSheet)
 
     let before = controller.focusedPane
-    controller.closePane(nil)
-    controller.focusPaneLeft(nil)
-    controller.focusNextPane(nil)
-    controller.splitRight(nil)
+    controller.dispatch(.close)
+    controller.dispatch(.focusPaneLeft)
+    controller.dispatch(.focusNextPane)
+    controller.dispatch(.splitRight)
 
     XCTAssertEqual(controller.paneIDs.count, 2)
     XCTAssertEqual(controller.focusedPane, before)
 
-    let actions: [Selector] = [
-      #selector(MainWindowController.closePane(_:)),
-      #selector(MainWindowController.splitRight(_:)),
-      #selector(MainWindowController.splitDown(_:)),
-      #selector(MainWindowController.focusNextPane(_:)),
-      #selector(MainWindowController.focusPreviousPane(_:)),
-      #selector(MainWindowController.focusPaneLeft(_:)),
-      #selector(MainWindowController.focusPaneRight(_:)),
-      #selector(MainWindowController.focusPaneUp(_:)),
-      #selector(MainWindowController.focusPaneDown(_:)),
+    let commands: [CommandID] = [
+      .close, .splitRight, .splitDown, .focusNextPane, .focusPreviousPane, .focusPaneLeft,
+      .focusPaneRight, .focusPaneUp, .focusPaneDown, .fakeNewTab, .fakeBiggerText,
     ]
-    for action in actions {
+    made[0].canOpenTab = true
+
+    for id in commands {
       XCTAssertFalse(
-        controller.validateMenuItem(NSMenuItem(title: "x", action: action, keyEquivalent: "")),
-        "\(action) is live under a sheet")
+        controller.commands.isAvailable(id, in: controller.commandContext()),
+        "\(id) is live under a sheet")
     }
 
     window.endSheet(sheet)
-    XCTAssertTrue(
-      controller.validateMenuItem(
-        NSMenuItem(
-          title: "x", action: #selector(MainWindowController.closePane(_:)), keyEquivalent: "")))
+    XCTAssertTrue(controller.commands.isAvailable(.close, in: controller.commandContext()))
   }
 
   // MARK: Tabs
@@ -359,49 +352,33 @@ final class MainWindowControllerTests: XCTestCase {
     let tabbed = made[1]
     tabbed.tabCount = 2
 
-    controller.closePane(nil)
+    controller.dispatch(.close)
     let closedTab = await waitUntil { tabbed.tabsClosed == 1 }
 
     XCTAssertTrue(closedTab)
     XCTAssertEqual(controller.paneIDs.count, 2)
     XCTAssertFalse(tabbed.closed)
 
-    controller.closePane(nil)
+    controller.dispatch(.close)
 
     XCTAssertEqual(controller.paneIDs.count, 1)
     XCTAssertTrue(tabbed.closed)
     XCTAssertEqual(tabbed.tabsClosed, 1)
   }
 
-  /// Catches a close item that reads Close Pane while Cmd-W would close only a tab.
-  func testTheCloseItemNamesWhatItCloses() throws {
-    let controller = try makeController()
-    let item = NSMenuItem(
-      title: "Close Pane", action: #selector(MainWindowController.closePane(_:)), keyEquivalent: "w"
-    )
-
-    XCTAssertTrue(controller.validateMenuItem(item))
-    XCTAssertEqual(item.title, "Close Pane")
-
-    made[0].tabCount = 2
-    XCTAssertTrue(controller.validateMenuItem(item))
-    XCTAssertEqual(item.title, "Close Tab")
-  }
-
-  /// Catches New Tab that opens a tab in an applet that cannot, as program mode cannot. The item
-  /// is disabled for it and the action does nothing. It is live for an applet that can.
+  /// Catches New Tab that opens a tab in an applet that cannot, as program mode cannot. The command
+  /// is unavailable for it and does nothing. It is live for an applet that can.
   func testNewTabNeedsAnAppletThatCanOpenOne() throws {
     let controller = try makeController()
-    let item = NSMenuItem(
-      title: "New Tab", action: #selector(MainWindowController.newTab(_:)), keyEquivalent: "t")
+    let context = controller.commandContext()
 
-    XCTAssertFalse(controller.validateMenuItem(item))
-    controller.newTab(nil)
+    XCTAssertFalse(controller.commands.isAvailable(.fakeNewTab, in: context))
+    XCTAssertFalse(controller.commands.run(.fakeNewTab, in: context))
     XCTAssertEqual(made[0].openedTabs, 0)
 
     made[0].canOpenTab = true
-    XCTAssertTrue(controller.validateMenuItem(item))
-    controller.newTab(nil)
+    XCTAssertTrue(controller.commands.isAvailable(.fakeNewTab, in: context))
+    controller.dispatch(.fakeNewTab)
     XCTAssertEqual(made[0].openedTabs, 1)
     XCTAssertEqual(made[0].tabCount, 2)
   }
@@ -415,48 +392,37 @@ final class MainWindowControllerTests: XCTestCase {
     applet.tabCount = 3
     applet.selectedTabIndex = 2
 
-    controller.selectNextTab(nil)
+    controller.dispatch(.fakeNextTab)
     XCTAssertEqual(applet.selectedTabIndex, 0)
 
-    controller.selectPreviousTab(nil)
+    controller.dispatch(.fakePreviousTab)
     XCTAssertEqual(applet.selectedTabIndex, 2)
 
-    func number(_ tag: Int) {
-      let item = NSMenuItem(title: "x", action: nil, keyEquivalent: "")
-      item.tag = tag
-      controller.selectTabByNumber(item)
-    }
-
-    number(2)
+    controller.dispatch(.fakeTab(2))
     XCTAssertEqual(applet.selectedTabIndex, 1)
 
-    number(9)
+    controller.dispatch(.fakeTab(9))
     XCTAssertEqual(applet.selectedTabIndex, 2)
 
-    number(1)
-    number(5)
+    controller.dispatch(.fakeTab(1))
+    controller.dispatch(.fakeTab(5))
     XCTAssertEqual(applet.selectedTabIndex, 0)
   }
 
-  /// Catches tab switching items that are live with one tab, or under a sheet.
-  func testTabSwitchingItemsNeedSeveralTabs() throws {
+  /// Catches tab switching commands that are live with one tab.
+  func testTabSwitchingCommandsNeedSeveralTabs() throws {
     let controller = try makeController()
-    let actions: [Selector] = [
-      #selector(MainWindowController.selectNextTab(_:)),
-      #selector(MainWindowController.selectPreviousTab(_:)),
-      #selector(MainWindowController.selectTabByNumber(_:)),
-    ]
+    let ids: [CommandID] = [.fakeNextTab, .fakePreviousTab, .fakeTab(2)]
+    let context = controller.commandContext()
 
-    for action in actions {
-      XCTAssertFalse(
-        controller.validateMenuItem(NSMenuItem(title: "x", action: action, keyEquivalent: "")))
+    for id in ids {
+      XCTAssertFalse(controller.commands.isAvailable(id, in: context), "\(id)")
     }
 
     made[0].tabCount = 2
 
-    for action in actions {
-      XCTAssertTrue(
-        controller.validateMenuItem(NSMenuItem(title: "x", action: action, keyEquivalent: "")))
+    for id in ids {
+      XCTAssertTrue(controller.commands.isAvailable(id, in: context), "\(id)")
     }
   }
 
@@ -470,18 +436,18 @@ final class MainWindowControllerTests: XCTestCase {
     controller.openPane(.terminalShell, axis: .column)
     XCTAssertEqual(controller.focusedPane, NodeID(rawValue: 4))
 
-    controller.focusPaneUp(nil)
+    controller.dispatch(.focusPaneUp)
     XCTAssertEqual(controller.focusedPane, NodeID(rawValue: 2))
 
-    controller.focusPaneDown(nil)
-    controller.focusPaneLeft(nil)
+    controller.dispatch(.focusPaneDown)
+    controller.dispatch(.focusPaneLeft)
     XCTAssertEqual(controller.focusedPane, NodeID(rawValue: 1))
 
-    controller.focusNextPane(nil)
+    controller.dispatch(.focusNextPane)
     XCTAssertEqual(controller.focusedPane, NodeID(rawValue: 2))
 
-    controller.focusPreviousPane(nil)
-    controller.focusPreviousPane(nil)
+    controller.dispatch(.focusPreviousPane)
+    controller.dispatch(.focusPreviousPane)
     XCTAssertEqual(controller.focusedPane, NodeID(rawValue: 4))
   }
 

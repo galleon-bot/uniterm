@@ -15,6 +15,8 @@ public struct CloseUndoPolicy: Sendable, Equatable {
 
 /// A closed pane, as undo needs it: where it sat, and what it was. The pane's applet is gone.
 struct ClosedPane: Equatable {
+  /// Where the close falls among every close of the window, tabs included. The window issues it.
+  let stamp: UInt64
   let placement: PanePlacement
   let description: AppletDescription
   let title: String
@@ -22,8 +24,8 @@ struct ClosedPane: Equatable {
 
 /// One window's stack of closed panes, newest last.
 ///
-/// Undo opens a new pane from the newest entry. The pane gets a new ID, since the closed pane's ID
-/// is retired.
+/// Reopening opens a new pane from an entry. The pane gets a new ID, since the closed pane's ID is
+/// retired. The window picks the entry by stamp, because a newer close may be a tab.
 struct CloseUndoLedger {
   let policy: CloseUndoPolicy
 
@@ -34,8 +36,6 @@ struct CloseUndoLedger {
     self.policy = policy
   }
 
-  var newest: ClosedPane? { entries.last }
-
   /// Adds a close. The oldest entries drop when the stack is deeper than the policy.
   mutating func push(_ closed: ClosedPane) {
     entries.append(closed)
@@ -45,8 +45,9 @@ struct CloseUndoLedger {
     }
   }
 
-  mutating func removeNewest() {
-    _ = entries.popLast()
+  /// Removes the entry with this stamp and leaves the others where they are.
+  mutating func remove(stamp: UInt64) {
+    entries.removeAll { $0.stamp == stamp }
   }
 
   mutating func removeAll() {

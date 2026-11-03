@@ -23,7 +23,7 @@ private final class TerminalContainerView: NSView {
 /// each has its own tty. Program mode runs one program in one tab and opens no others. The tab bar
 /// shows only while there is more than one tab.
 @MainActor
-public final class TerminalApplet: TabbedApplet, TextActionApplet {
+public final class TerminalApplet: Applet {
   /// The longest notification text that reaches the status bar.
   static let maximumMessageLength = 200
 
@@ -76,6 +76,14 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
   private var selectedIndex: Int
   private var started = false
   private var closingTab = false
+
+  /// The most closed tabs the applet remembers. A policy value with no setting, equal to the
+  /// window's pane undo depth.
+  static let closedTabDepth = 20
+
+  /// The tabs the user closed, newest first. They live in memory with the window's undo state and
+  /// ride in the description's undo-only part, so a reopened pane brings them back.
+  private var closedTabs: [TerminalDescription.ClosedTab] = []
 
   /// The newest notification that arrived while the applet was detached.
   private var heldNotification: String?
@@ -137,6 +145,7 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
     home: String = NSHomeDirectory()
   ) throws {
     let decoded = try TerminalDescription.decode(description)
+    let carried = TerminalDescription.closedTabs(in: description)
 
     let directories = decoded.tabs.map {
       RestoreDirectory.resolve(
@@ -171,6 +180,8 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
       for tab in tabs { tab.awaitingRun = true }
       refreshTabs()
     }
+
+    closedTabs = Array(carried.prefix(Self.closedTabDepth))
   }
 
   private init(
@@ -372,7 +383,7 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
       selectedTab: selectedIndex)
 
     do {
-      return try description.appletDescription()
+      return try description.appletDescription(closedTabs: closedTabs)
     } catch {
       preconditionFailure("a terminal description always encodes: \(error)")
     }
@@ -380,19 +391,13 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
 
   // MARK: Text actions
 
-  public func canPerform(_ action: TextAction) -> Bool {
+  /// False when the selected tab has no content to act on, such as a program that has not run.
+  var hasSession: Bool {
     selectedTab?.session != nil
   }
 
-  public func perform(_ action: TextAction) {
-    guard let session = selectedTab?.session else { return }
-
-    switch action {
-    case .increaseSize: session.perform(.increaseFontSize)
-    case .decreaseSize: session.perform(.decreaseFontSize)
-    case .resetSize: session.perform(.resetFontSize)
-    case .clear: session.perform(.clearScreen)
-    }
+  func perform(_ action: TerminalAction) {
+    selectedTab?.session?.perform(action)
   }
 
   // MARK: Tabs
@@ -455,19 +460,25 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
     return true
   }
 
-  public func closeSelectedTab() async -> Bool {
+  public func closeCurrentTab() async -> TabCloseResult {
     await closeTab(at: selectedIndex)
   }
 
   /// Closes a tab. It asks first when the tab is running something. A tab at an idle prompt closes
   /// at once. The last tab never closes here, since that is a pane close.
-  func closeTab(at index: Int) async -> Bool {
-    guard tabs.count > 1, tabs.indices.contains(index), !closingTab else { return false }
+  ///
+  /// A close that waits for an answer holds the applet's one question. A second request meanwhile
+  /// is declined and does nothing. When the user agrees and the tab has since become the only one,
+  /// there is no tab left to close, and the host's pane close asks again.
+  func closeTab(at index: Int) async -> TabCloseResult {
+    guard tabs.count > 1 else { return .nothingToClose }
+
+    guard tabs.indices.contains(index), !closingTab else { return .declined }
 
     let tab = tabs[index]
 
     if tab.isRunningSomething {
-      guard let host else { return false }
+      guard let host else { return .declined }
 
       closingTab = true
       defer { closingTab = false }
@@ -477,15 +488,75 @@ public final class TerminalApplet: TabbedApplet, TextActionApplet {
         detail: "\u{201C}\(label(of: tab))\u{201D} is running something. Closing the tab ends it.",
         confirmTitle: "Close Tab", cancelTitle: "Cancel")
 
-      guard await host.applet(self, confirm: confirmation) else { return false }
+      guard await host.applet(self, confirm: confirmation) else { return .declined }
     }
 
-    guard let current = tabs.firstIndex(where: { $0 === tab }) else { return true }
+    guard let current = tabs.firstIndex(where: { $0 === tab }) else { return .closed }
 
-    guard tabs.count > 1 else { return false }
+    guard tabs.count > 1 else { return .nothingToClose }
 
+    recordClosed(tab, at: current)
     removeTab(at: current)
-    return true
+    return .closed
+  }
+
+  /// Keeps a closed tab for reopening. The stamp and the index are taken now, after any close
+  /// question was answered, so both describe the tab as it left.
+  private func recordClosed(_ tab: Tab, at index: Int) {
+    guard let host else { return }
+
+    closedTabs.insert(
+      TerminalDescription.ClosedTab(
+        stamp: host.issueCloseStamp(), index: index, title: tab.title,
+        tab: TerminalDescription.Tab(
+          workingDirectory: tab.workingDirectory, startDirectory: tab.launch.workingDirectory)),
+      at: 0)
+
+    if closedTabs.count > Self.closedTabDepth {
+      closedTabs.removeLast(closedTabs.count - Self.closedTabDepth)
+    }
+  }
+
+  public var closedTabStamps: [UInt64] {
+    closedTabs.map(\.stamp)
+  }
+
+  /// Starts a fresh shell from the closed tab's description, in the directory it last reported
+  /// when that is absolute and still exists, else its start directory, else home. The tab goes
+  /// back to its former index, clamped to the tab count, and is selected.
+  ///
+  /// The session starts before anything changes. A session that fails to start leaves no tab, the
+  /// entry stays, and the selection is as it was.
+  public func reopenTab(stamp: UInt64) -> TabReopenResult {
+    guard let entry = closedTabs.first(where: { $0.stamp == stamp }) else { return .missing }
+
+    let directory = RestoreDirectory.resolve(
+      reported: entry.tab.workingDirectory, starting: entry.tab.startDirectory, home: home,
+      exists: directoryExists)
+
+    let tab = Tab(
+      launch: .loginShell(workingDirectory: directory, environment: shellEnvironment),
+      title: Self.defaultTitle)
+
+    if started {
+      do {
+        try startSession(for: tab)
+      } catch {
+        return .failed(title: entry.title, reason: error.localizedDescription)
+      }
+    }
+
+    closedTabs.removeAll { $0.stamp == stamp }
+
+    let position = min(max(entry.index, 0), tabs.count)
+    tabs.insert(tab, at: position)
+    selectedIndex = position
+
+    refreshTabs()
+    updateSegments()
+    host?.appletDidChange(self)
+    host?.appletTabsDidChange(self)
+    return .reopened(title: entry.title)
   }
 
   /// A tab shows its title. In program mode the one tab shows the command.

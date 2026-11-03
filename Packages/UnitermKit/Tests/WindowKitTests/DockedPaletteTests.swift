@@ -376,21 +376,16 @@ final class DockedPaletteTests: XCTestCase {
     let saved = NSApp.mainMenu
     defer { NSApp.mainMenu = saved }
 
-    let main = NSMenu()
-    let top = NSMenuItem()
-    let menu = NSMenu(title: "View")
-    top.submenu = menu
-    main.addItem(top)
-
-    let item = NSMenuItem(
-      title: "Show Command Palette",
-      action: #selector(MainWindowController.toggleCommandPalette(_:)),
-      keyEquivalent: "p")
-    item.keyEquivalentModifierMask = [.command, .shift]
-    menu.addItem(item)
-    NSApp.mainMenu = main
-
     let fixture = try makeFixture()
+    let commandMenu = CommandMenu(
+      registry: fixture.controller.commands, activeController: { fixture.controller })
+    commandMenu.install()
+    let item = try XCTUnwrap(
+      commandMenu.menu.items[3].submenu?.items.first {
+        ($0 as? CommandMenuItem)?.commandID == .showCommandPalette
+      })
+
+    fixture.controller.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification))
     let field = palette(fixture).field
 
     XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{21E7}\u{2318}P)")

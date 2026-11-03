@@ -58,13 +58,12 @@ final class TerminalUITests: UnitermUITestCase {
   }
 
   /// Catches Ghostty's built-in bindings catching keys before uniterm. With the terminal focused,
-  /// Cmd-T opens a tab, which shows the tab bar, and Cmd-Z reaches uniterm's menu and answers with
-  /// a status message. Cmd-D and Cmd-Shift-D reach it too, and each opens the launcher.
+  /// Cmd-T opens a tab, which shows the tab bar. Cmd-D and Cmd-Shift-D reach uniterm too, and each
+  /// opens the launcher.
   func testCommandKeysReachUnitermWhileTheTerminalIsFocused() {
     let app = launchApp()
     let window = app.windows["main-window"]
     _ = waitForTerminal(in: app)
-    let message = window.staticTexts["status-message"]
 
     app.typeKey("t", modifierFlags: .command)
     XCTAssertTrue(
@@ -83,9 +82,6 @@ final class TerminalUITests: UnitermUITestCase {
       "Cmd-Shift-D never opened the launcher")
     app.typeKey(.escape, modifierFlags: [])
     XCTAssertTrue(waitUntilGone(launcher(in: window)))
-
-    app.typeKey("z", modifierFlags: .command)
-    XCTAssertTrue(waitFor(message, timeout: 5) { $0.contains("no closed pane to undo") })
   }
 
   /// Cmd-W closes the pane, and with one pane the window closes. The app keeps running.

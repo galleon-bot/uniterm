@@ -82,11 +82,11 @@ final class PaletteRankingTests: XCTestCase {
 
   /// Catches a toggle that does more than hide, and a Cmd-W that closes while the palette shows.
   func testDispatchRulesWhileThePaletteShows() {
-    XCTAssertEqual(PaletteDispatch.rule(for: .newTab, paletteShown: false), .run)
+    XCTAssertEqual(PaletteDispatch.rule(for: .splitRight, paletteShown: false), .run)
     XCTAssertEqual(PaletteDispatch.rule(for: .close, paletteShown: false), .run)
     XCTAssertEqual(PaletteDispatch.rule(for: .showCommandPalette, paletteShown: true), .dismissOnly)
     XCTAssertEqual(PaletteDispatch.rule(for: .close, paletteShown: true), .dismissOnly)
-    XCTAssertEqual(PaletteDispatch.rule(for: .newTab, paletteShown: true), .dismissThenRun)
+    XCTAssertEqual(PaletteDispatch.rule(for: .splitRight, paletteShown: true), .dismissThenRun)
     XCTAssertEqual(PaletteDispatch.rule(for: .quit, paletteShown: true), .dismissThenRun)
   }
 }

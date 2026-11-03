@@ -799,6 +799,8 @@ Out of scope, for later proposals:
 
 **Status:** DONE
 
+Superseded in part by UTERM-013; see Decision Log.
+
 The keep-alive checks below record what M7 built. M10 removes the keep-alive tier. Amended 2026-11-01; see Decision
 Log.
 
@@ -990,6 +992,8 @@ The proposal ends with the user looking at the finished app.
 ### M10: Undo reopens from the description
 
 **Status:** DONE
+
+Superseded in part by UTERM-013; see Decision Log.
 
 Added 2026-11-01 by amendment. It can run before or after the user records M9.
 
@@ -1275,6 +1279,8 @@ Added 2026-11-01 by amendment. It can run before or after the user records M9.
   it. M10's check said insert never accepts a retired ID. Insert now takes no ID. (work-queue best guess)
 - 2026-11-01: Correction of fact in M9's As built. It said the status bar bug was fixed as a UI change outside this
   proposal. Neither the user nor the implementer could reproduce it, so no fix was made. It is filed as an open bug.
+- 2026-11-02: Superseded in part by UTERM-013. M7 and M10 bound pane reopen to Cmd-Z. UTERM-013 moves reopen to
+  Cmd-Shift-T, which reopens the newest closed tab or pane in the window, and limits Cmd-Z to text edits.
 
 ## References
 
