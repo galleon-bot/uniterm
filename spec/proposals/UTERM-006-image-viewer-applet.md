@@ -94,8 +94,12 @@ Decision: files and folders open from inside the pane, following UTERM-009's "In
 
 - The launcher offers the image viewer, and the pane starts empty. Inside it, the user opens a file or a folder with an
   open panel, or drops file URLs onto the pane.
-- The open panel selects one file or one folder. A drop of several files opens the first one, with its siblings as
-  usual, and says the rest were not opened. The source stays one file or one folder, in the description and in `show`.
+- A pane shows one source, a file or a folder. Opening another replaces it, and a slideshow that was playing stops.
+  The open panel selects one file or one folder. A drop of several items is refused with a message asking for one
+  file or folder, and the pane keeps what it showed. The source stays one file or one folder, in the description and
+  in `show`, as UTERM-009 settles for the data viewer. Amended 2026-11-03; see Decision Log.
+- A drawer of open documents beside the image, as Preview has, is an idea for later. This proposal does not commit to
+  it. Building it needs its own proposal, since it changes what a pane and its description hold.
 - All loading goes through one internal entry point that takes a source.
 - App-level opening is not part of this proposal: Finder "Open With", document types, Cmd-O, and routing a file type to
   an applet. UTERM-009 leaves it to one cross-applet proposal. The image viewer binds no File > Open shortcut until
@@ -313,9 +317,9 @@ None.
 - The cross-applet file-opening proposal that UTERM-009 commits to is filed before this milestone starts
 - The launcher offers the image viewer. An image or a folder opens from an open panel that accepts both, or by dropping
   file URLs on the pane, through the one source-taking entry point
-- A drop of several files opens the first and says the rest were not opened, and a drop with no file URL shows why it
-  was refused. When the first item is not an image, or the items come from different folders, the pane names what it
-  opened and what it did not
+- Opening a source into a pane that shows one replaces it and stops any slideshow. A drop of several items is refused
+  with a message asking for one file or folder, and the pane keeps what it showed. A drop with no file URL shows why it
+  was refused
 - The app reads no image bytes: it types files by extension and UTType only, and every ImageIO call runs in the helper
 - The shipped helper cannot open a file by path or make a network connection
 - The regular-file check runs on the opened descriptor, so swapping the path after the check cannot slip past it
@@ -465,6 +469,10 @@ None.
 - 2026-11-03: ADR candidate (cuts across the system): reading a path for a controller is its own scoped power under
   ADR-09. Waits on the cross-applet file-opening proposal, which defines the power and may reshape its scope.
 - 2026-11-03: Accepted by the user after the review.
+- 2026-11-03: Amended "Input sources" to match UTERM-009: a pane shows one source, opening another replaces it, and a
+  drop of several items is refused with a message asking for one. Before, a multi-file drop opened the first file and
+  said the rest were not opened. Noted a Preview-style document drawer as an idea that needs its own proposal. The
+  user's decision.
 
 ## References
 
