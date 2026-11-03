@@ -367,6 +367,7 @@ None.
 - 2026-11-03: Amended "Input sources": a pane shows one file, opening another replaces it, and a drop of several files
   is refused with a message asking for one. Before, the decision said nothing about either case. Noted a Preview-style
   document drawer as an idea that needs its own proposal. The user's decision.
+- 2026-11-03: Scheduled as UTERM-009 M1-M4 in queue.md.
 
 ## References
 

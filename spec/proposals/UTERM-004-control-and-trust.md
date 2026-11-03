@@ -766,6 +766,7 @@ None.
   every applet type, and a host function in UTERM-003's module)
 - 2026-11-03: ADR candidate (hard to reverse): every applet command, exec or remote, names its applet schema version,
   and an unsupported version is refused before any effect. Declined: the user judged it does not rise to an ADR.
+- 2026-11-03: Scheduled as UTERM-004 M1-M6 in queue.md.
 
 ## References
 

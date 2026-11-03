@@ -2,7 +2,7 @@
 
 **Status:** accepted
 **Created:** 2026-10-31
-**Updated:** 2026-11-02
+**Updated:** 2026-11-03
 
 ## Dependencies
 
@@ -400,6 +400,7 @@ Leaves undone: nothing.
   so neither needs rework if implementation shows it cannot hold as written.
 - 2026-11-02: Risks rewritten for helper processes; added protocol skew, UTERM-004 identity exposure, same-user
   control before UTERM-004, and plaintext REPL history (autonomous).
+- 2026-11-03: Scheduled as UTERM-003 M1-M5 in queue.md.
 
 ## References
 
