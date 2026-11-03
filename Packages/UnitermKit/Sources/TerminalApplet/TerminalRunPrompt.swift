@@ -51,11 +51,19 @@ final class TerminalRunPrompt: NSView {
     stack.addArrangedSubview(button)
     addSubview(stack)
 
+    // The margins yield when the prompt is narrower than them. It is zero wide until its pane's
+    // first layout, and a required margin would conflict with that and log on every launch.
+    let leading = stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16)
+    let trailing = stack.trailingAnchor.constraint(
+      lessThanOrEqualTo: trailingAnchor, constant: -16)
+    leading.priority = .init(999)
+    trailing.priority = .init(999)
+
     NSLayoutConstraint.activate([
       stack.centerXAnchor.constraint(equalTo: centerXAnchor),
       stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-      stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16),
-      stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+      leading,
+      trailing,
     ])
 
     setAccessibilityElement(true)
