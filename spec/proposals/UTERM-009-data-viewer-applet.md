@@ -2,7 +2,7 @@
 
 **Status:** accepted
 **Created:** 2026-10-31
-**Updated:** 2026-11-02
+**Updated:** 2026-11-03
 
 ## Dependencies
 
@@ -40,6 +40,11 @@ Decision: files open from inside the pane now. Pipe and script input is deferred
 
 - The pane starts from the launcher like any applet, so the applet factory does not change. Inside it, the user opens
   a file with an open panel or by dropping a file onto the pane. A drop accepts file URLs only.
+- A pane shows one file. Opening another file replaces it: the old load is cancelled, and the new file starts with no
+  sort or filter. The open panel selects one file. A drop of several files is refused with a message asking for one
+  file, and the pane keeps what it showed. Amended 2026-11-03; see Decision Log.
+- A drawer of open documents beside the table, as Preview has, is an idea for later. This proposal does not commit to
+  it. Building it needs its own proposal, since it changes what a pane and its description hold.
 - All loading goes through one internal entry point that takes a source. Today the only source is a file URL. A
   byte-stream source is added when its first caller lands. It spools to a file when a format needs random access, as
   `.xlsx` does.
@@ -174,12 +179,13 @@ file.
 - Every description, the empty one included, holds the directory the pane started in. The factory passes it. An empty
   pane reports it as `currentDirectory`. With a file open, the pane reports the file's folder. The open panel always
   starts in `currentDirectory`. The open panel's own remembered directory is never used, since it is AppKit state, not
-  the pane's. Amended 2026-11-02; see Decision Log.
+  the pane's.
 - A column's identity is its key-segment list plus its occurrence among columns with the same name. A headerless CSV
   column, or an `.xlsx` column with no header, is named by its position. So two `amount` headers stay two columns, and
   a restored sort lands on the right one.
-- The bookmark is created once at load and refreshed only when resolution reports it stale. Resolution runs in
-  `start()`, off the main thread, without UI and without mounting volumes. `describe()` never touches the disk.
+- The bookmark is created at load, and remade when an open, a restore included, finds a different file than the
+  bookmark names. Resolution runs in `start()`, off the main thread, without UI and without mounting volumes.
+  `describe()` never touches the disk. Amended 2026-11-03; see Decision Log.
 
 Rationale: the path is what the user named, so it wins while a file is there. The bookmark recovers a file that was
 moved or renamed. Bookmark-first resolution follows the file ID, which would show a rotated-away backup instead of the
@@ -230,6 +236,8 @@ None.
 - A pane can run the data viewer and open a CSV file as a table, from an open panel or by dropping a file on the pane
 - Every load goes through the one source-taking entry point
 - A drop accepts file URLs only, and the data viewer binds no File > Open shortcut
+- Opening a file into a pane that shows one replaces it, cancels any load still running, and clears the sort and
+  filter. A drop of several files is refused with a message asking for one file, and the pane keeps what it showed
 - The loader opens regular files only, so a FIFO, a device, or a stalled mount never blocks the pane, and reads off the
   main thread
 - A missing or unreadable file shows a message in the pane. Stored sort and filter state that names an absent column
@@ -243,7 +251,7 @@ None.
   directory. Reopen works through whichever key reopens a pane when M1 lands, and through Cmd-Shift-T once UTERM-013 M2
   lands
 - A file moved or renamed after the save is found through its bookmark, and the pane says where. A new file at the
-  stored path wins over the bookmark
+  stored path wins over the bookmark, and the bookmark is then remade for it
 - The open panel starts in the pane's `currentDirectory`, never in the panel's remembered one. When the file's folder
   is gone, `currentDirectory` is the start directory, or nil when that is gone too
 - A restored file in a folder behind macOS privacy protection, such as Downloads, shows a permission message when access
@@ -350,6 +358,15 @@ None.
   with `Package.resolved` committed and its license collected. Waits on M4, which settles whether the offline-build
   check covers SwiftPM fetches.
 - 2026-11-02: Accepted by the user after the review.
+- 2026-11-03: Amended "The applet contract": the bookmark is remade when an open finds a different file than the
+  bookmark names. Before, it was created once at load and refreshed only when resolution reported it stale. So after
+  a renderer rotated `render.png` away and wrote a new one, the path won on restore but the bookmark still named the
+  rotated-away file. Once the new file was renamed, the next restore followed the bookmark to the stale file. Found in
+  the UTERM-006 review, which settles the same rule. The marker on the `currentDirectory` bullet moved here, since a
+  decision carries one marker; the 2026-11-02 entry above still records that change.
+- 2026-11-03: Amended "Input sources": a pane shows one file, opening another replaces it, and a drop of several files
+  is refused with a message asking for one. Before, the decision said nothing about either case. Noted a Preview-style
+  document drawer as an idea that needs its own proposal. The user's decision.
 
 ## References
 
