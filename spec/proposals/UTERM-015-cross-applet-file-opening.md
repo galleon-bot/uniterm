@@ -1,6 +1,6 @@
 # UTERM-015: Cross-Applet File Opening
 
-**Status:** draft
+**Status:** designing
 **Created:** 2026-11-03
 **Updated:** 2026-11-03
 
@@ -25,8 +25,10 @@
 - UTERM-008 — "Where pins come from": under "The path-reading power", a driver whose scope does not hold the user's
   file gets no value from it. UTERM-008 was amended so `pin selected` marks a file pin without its ID, and a click on
   one sends no `map clicked`
-- UTERM-007 — the text viewer, still a draft, opens its documents through the same router and declares the types it
-  opens
+- UTERM-007 — "The applet contract": its "Open..." command with no key is the pane-local open "Who owns Cmd-O" settles.
+  Its documents reach it through the router, and it declares the types it opens
+- UTERM-006, UTERM-008, UTERM-009 — "Input sources": each declares a pane-local "Open..." command with no key, as
+  UTERM-007 does, and the types it opens with a rank
 - UTERM-005 — "Navigation": the browser refuses `file:` because loading it needs a file read scope. That scope is the
   path-reading power defined here, so a later change to the browser's `file:` rule builds on it
 - UTERM-004 — "Permission scopes and approval flow": adds the path-reading power to the typed permission set
@@ -106,38 +108,97 @@ Documents, and Desktop. The scope protects controllers that have no file access 
 starts, such as a shell or an exec driver, already holds those grants directly, and the scope does not change that.
 The grant's declaration and approval are open. See "How the path-reading power is granted".
 
-## Design Decisions (Open)
-
 ### Which entry points open files
 
-Which app-level ways to open a file this proposal builds.
+Original question: which app-level ways to open a file this proposal builds.
 
-- **Finder, Dock, and File > Open, plus `uniterm open` and terminal clicks.** The complete set. Terminal clicks need
-  uniterm to handle libghostty's open-URL action and hyperlinks, which it ignores today. Adds a milestone for clicks.
-  `uniterm open` brings in "Who may run `uniterm open`".
-- **Finder, Dock, File > Open, and `uniterm open`.** Leaves undone: a path printed in the terminal still needs copying
-  into a command.
-- **Finder, Dock, and File > Open only.** Needs no caller identity, so it can land before UTERM-003 and UTERM-004, as
-  long as "Opens that arrive through Launch Services" accepts program-sent opens. Gating them needs sender identity or
-  UTERM-004's approval flow.
-  Leaves undone: a terminal user cannot open a file beside the terminal without leaving the keyboard.
+Decision: all of them. Finder Open With, a drop on the Dock icon, File > Open, a `uniterm open` command, and Cmd-click
+on a path or a local `file:` hyperlink in the terminal.
+
+- Terminal clicks need uniterm to handle libghostty's open-URL action. It reaches the app through an addition to the
+  terminal surface protocol, per ADR-01, never as a libghostty type outside that module.
+- A click on a web URL or any other non-file scheme does nothing new. Opening it in a browser is out of scope.
+- Who may open by click is its own question, "Who may open by terminal click".
+- `uniterm open` can be no stricter than the Launch Services path, per "Opens that arrive through Launch Services".
+
+Rationale: the Motivation's user works at a terminal, and the common case is a file beside the terminal. Finder, the
+Dock, and File > Open alone leave that case to the mouse. `uniterm open` covers paths the user types, and clicks cover
+paths a program prints. Leaves undone: nothing.
 
 ### How a file type maps to an applet
 
-Several applets can read one type. `.json` suits the data viewer and the text viewer. `.geojson` suits the map, the
-data viewer, and the text viewer. `.md` and `.pdf` go to the text viewer, and `.svg` to the image viewer.
+Original question: several applets can read one type, such as `.json` for the data viewer and the text viewer, and
+`.geojson` for the map, the data viewer, and the text viewer. How the router picks one.
 
-- **Each applet type declares the content types it opens, with a rank.** The router picks the most specific conforming
-  type, then the highest rank. A setting lets the user pick the applet for a type. Declarations live with the applet,
-  so a new applet needs no host change.
-- **A host-owned table from type to applet.** One place to read, but every new applet edits the host.
-- **Ask every time when more than one applet can open the file.** No wrong guess, but an extra step on every common
-  open.
-- **Each applet declares types with a rank, plus an "Open With" choice for one open, and no setting.** The rank
-  decides every default. The user overrides a single open. Leaves undone: a user who always wants `.json` in the text
-  viewer picks it every time.
-- Any option with a setting must say what happens when the setting names an applet type that no longer exists.
-- Any option may pair with an "Open With" choice in uniterm, for overriding one open.
+Decision: each applet type declares the types it opens with a rank, an "Open With" choice overrides one open, and a
+per-type choice the user saves overrides the rank.
+
+- Each compiled applet type declares the content types it opens. Each declaration carries a rank from a fixed set:
+  owner or alternate.
+- Every declared type the system lacks is imported in `Info.plist` with its real conformance, such as `.geojson`
+  conforming to `public.json`. Without it, the file resolves to a dynamic type that matches no declaration.
+- One match is more specific than another when its declared type conforms to the other's. Rank decides only between
+  matches that are equal or that neither conforms to. Two applets claiming the same type at the same rank fail a test,
+  so no silent tiebreak ever picks a default.
+- An "Open With" choice in uniterm lists every applet that declares the file's type. It can save the choice for the
+  file's exact type, and the user can clear a saved choice.
+- A saved choice matches the file's exact resolved type only, never types that conform to it. A choice for `.json`
+  therefore never moves `.geojson` away from the map. When it names an applet type that no longer exists, or one that
+  no longer declares the type, that open falls back to the rank, and the saved choice is kept for when it returns.
+- Only the user's own UI writes a saved choice. No script or controller can write one, and only compiled applet types
+  declare types.
+- A new applet type declares its types beside its code. Its imported and document types still edit the host's
+  `Info.plist`, which the drift test checks.
+
+Rationale: users differ on `.json`. A developer reading config wants it as text, and an analyst wants an API dump as a
+table. Picking "Open With" on every open is a standing chore for whichever one the rank does not suit, so the saved
+choice has named users. A host table drifts from what each applet's entry point accepts. Asking on every open with
+several claimants adds a second chooser after Finder's, and lets any program raise prompts with `open -a`.
+
+### Who owns Cmd-O
+
+Original question: whether Cmd-O belongs to the window, routed, or to each viewer, opening into its pane.
+
+Decision: File > Open is a window command on Cmd-O, always through the router. Each viewer keeps a pane-local Open
+command with no default key.
+
+- Cmd-O is a reserved window key under UTERM-013, so it works the same in every pane, the terminal and the launcher
+  included.
+- The pane-local command replaces the pane's source. UTERM-007 already declares it, as "Open..." with no key. Each
+  other viewer declares the same. It is reached from the applet menu and the palette, and the user can remap a key to
+  it under UTERM-013.
+- Replacing the source of a pane a controller owns is the user's act. That controller gets nothing outside its scope
+  from it, per "The path-reading power".
+
+Rationale: an applet-owned Cmd-O leaves the terminal and the launcher, the most common panes, with no keyboard open.
+It also changes what Cmd-O does with focus, which UTERM-013's reserved keys exist to prevent. A window command alone
+leaves the in-place replace off the palette.
+
+### How the path-reading power is granted
+
+Original question: how a controller gets the path-reading power, and the shape of its scope.
+
+Decision: a typed permission in UTERM-004's set. Its scope is a list of directories, and protected locations inside a
+scope directory are excluded unless the scope names them.
+
+- A controller declares the power and its scope at startup. The user approves it through UTERM-004's panel, with
+  Allow once, session, and remembered approvals as for every other power.
+- The scope is a list of directories.
+- A scope directory never covers a macOS-protected location inside it unless the scope names that location. One list
+  of protected locations, kept in one place with a test, names Documents, Desktop, Downloads, iCloud Drive, other
+  apps' containers, removable and network volumes, and the Photos library.
+- Coverage compares effective scopes, with protected locations removed. A request for `~/Documents/x` is broader than
+  an approved `~`, so it asks.
+- The approval panel names every protected location a scope lies in or names.
+- The read scope is its own type, not the directory scope of UTERM-004's host-launch grant. A launched process holds
+  its macOS grants directly and needs no exclusion, so one shared type would mean two things in a stored approval.
+
+Rationale: a per-path approval prompts once per slideshow member, and UTERM-004 forbids coalescing Allow once across
+different operations, so prompts end in blind approval. One directory with no exclusion lets a scope of `~` silently
+borrow uniterm's grants for Documents, which the power's settled rationale rules out. Comparing raw paths would cover
+`~/Documents/x` under an approved `~` with no prompt.
+
+## Design Decisions (Open)
 
 ### Where a routed pane goes
 
@@ -152,17 +213,6 @@ data viewer, and the text viewer. `.md` and `.pdf` go to the text viewer, and `.
   lands after restored windows, or in its own window.
 - Constraint: a routed open never lands in a pane a controller owns. Otherwise a controller could place an empty pane
   to learn when the user opens a file.
-
-### Who owns Cmd-O
-
-UTERM-013 makes every key on a non-applet menu item a reserved window key, so an applet can never also bind it.
-
-- **File > Open is a window command on Cmd-O. It always goes through the router.** Works the same in every pane.
-  Reserves Cmd-O, so no applet can use it.
-- **Open is an applet command each viewer declares on Cmd-O, opening into that pane.** The terminal and the launcher
-  then have no Open.
-- **Both: File > Open on Cmd-O through the router, and an "Open in This Pane" applet command with no default chord.**
-  The pane-local open stays reachable from the menu and the palette.
 
 ### Which file types uniterm registers with Finder
 
@@ -230,6 +280,18 @@ the router adds.
 - Constraint: a terminal in an ssh session reports a remote directory, and a `file://host/path` hyperlink can name
   another host. Neither may be read as a local path.
 
+### Who may open by terminal click
+
+A Cmd-click is the user's gesture, but a program chose the target. An OSC 8 hyperlink's text can read `README.md`
+while its target is `file:///Users/me/Documents/tax.pdf`.
+
+- **A click is the user's act only when uniterm shows the resolved local target before the open.** uniterm handles
+  libghostty's hover action and shows the target, and the click opens what was shown.
+- **Hyperlinks follow the authority of `uniterm open`, and bare paths uniterm detects itself are the user's act.** A
+  program chooses a hyperlink's target, and the user reads a bare path on screen.
+- **Every click is the user's act.** Leaves undone: a program can make a click open a file the user did not read.
+- Constraint: a click opens no more than the Launch Services path allows.
+
 ### Who may run `uniterm open`
 
 Only when "Which entry points open files" keeps `uniterm open`. Opening a pane from a process is a control effect under
@@ -249,16 +311,6 @@ identify its originating program cannot use a particular script's approval.
   path-reading power for that path, the reply must not tell "missing", "unsupported", and "denied" apart. The user
   still sees the full message in uniterm.
 
-### How the path-reading power is granted
-
-The settled shape says what the power does. This question says how a controller gets it.
-
-- **A typed permission in UTERM-004's set, with the same directory scope type its host-launch grant uses.** Declared at
-  startup, approved through the existing panel, covered by an unchanged or narrower request.
-- **A per-request approval for each path.** No remembered state. Prompts on every read a controller makes.
-- Sub-questions for either option: whether a scope is one directory or a list, and whether a scope that contains a
-  macOS-protected folder, such as home containing Documents, must name that folder explicitly.
-
 ## Risks
 
 - **Registering document types takes Finder defaults from other apps** — likelihood: medium, impact: medium. A Default
@@ -277,8 +329,8 @@ The settled shape says what the power does. This question says how a controller 
 - **A hard link inside the scope reaches a file outside it** — likelihood: low, impact: medium. A hard link has no
   other real path, so a path check cannot see that the inode also lives elsewhere. Accepted: making one needs write
   access to a directory in the scope, on the same volume, and the controller already reads what the scope holds.
-- **Draft applets change what they claim** — likelihood: medium, impact: low. UTERM-007 and UTERM-010 are drafts.
-  Accepted: declarations live with each applet, so a later claim changes no router code.
+- **Draft applets change what they claim** — likelihood: medium, impact: low. UTERM-010 is a draft. Accepted:
+  declarations live with each applet, so a later claim changes no router code, and an equal-rank claim fails a test.
 - **No viewer applet exists in code yet** — likelihood: high, impact: low. The router cannot be tested against real
   viewers at first. Mitigation: the router's milestones test with fixture applets, as UTERM-004 M4 does.
 
@@ -299,7 +351,14 @@ remove, add, or reshape them.
 - Working out a routed file's type never opens or blocks on a FIFO or a device node
 - Routing works with fixture applets, so it needs no production viewer to test
 - A routed pane's start directory follows "Start directory and current directory", with no implicit inheritance
-- The "Open With" choice, if the type mapping keeps one, lists every applet that declares the file's type
+- The "Open With" choice lists every applet that declares the file's type, can save the choice for the file's exact
+  type, and lets the user clear it
+- A saved choice for one type never routes a type that conforms to it, and a saved choice naming a missing applet, or
+  one that no longer declares the type, falls back to the rank for that open
+- No script or controller can write a saved choice
+- A test fails when two applets claim the same type at the same rank, and when a declared type the system lacks is not
+  imported with its conformance
+- Type and placement work runs off the main thread, so a path on a slow network volume never stalls the UI
 
 ### M2: Finder and Dock
 
@@ -318,7 +377,9 @@ remove, add, or reshape them.
 
 - File > Open opens a panel and routes the chosen file, by the key ownership "Who owns Cmd-O" settles
 - The panel starts in the directory "Start directory and current directory" settles
-- A test checks that no built-in applet command claims the File > Open key, if it is reserved
+- A test checks that no built-in applet command claims Cmd-O
+- Each viewer's pane-local Open command replaces its source, and in a controller-owned pane that controller gets no
+  path or content outside its scope
 
 ### M4: The path-reading power
 
@@ -339,6 +400,9 @@ remove, add, or reshape them.
   member cannot reach outside the scope
 - Scope and path compare as APFS does, so case and Unicode normalization cannot widen or narrow the scope
 - An older build refuses a stored approval that holds the path-reading power, and authorizes nothing from it
+- A request for a path under a protected location is not covered by an approved scope that only contains it
+- The protected-location list has one owner and a test, and the approval panel names every protected location a scope
+  lies in or names
 
 ### M5: `uniterm open`
 
@@ -355,6 +419,8 @@ remove, add, or reshape them.
 - Cmd-click on a path or a local `file:` hyperlink in the terminal opens it through the router, with the authority
   and relative-path rule their open questions settle
 - A `file:` hyperlink naming another host, and a path in an ssh session, never open a local file
+- A Cmd-click on a web URL or another non-file scheme does nothing
+- The open-URL action reaches the app through the terminal surface protocol
 
 ## Decision Log
 
@@ -376,6 +442,23 @@ remove, add, or reshape them.
   and device checks to M4.
 - 2026-11-03: Critique pass 3 converged. Added its constraints to "Which entry points open files", "Where a routed
   pane goes", and "Opens that arrive through Launch Services", and routed two checks to M1 and M2.
+- 2026-11-03: Review start: 6 milestones, 3 settled decisions, 7 risks, no `**Live after:**` lines or row gates; five
+  out-of-scope statements under "Scope"; proposal at the commit "Fold the converged critique's constraints into the
+  open questions". The user asked for a design review of the 11 open questions, in autonomous mode.
+- 2026-11-03: Which entry points open files: all of them, terminal clicks included. Who may open by click became its
+  own open question. Converged in 1 pass. (autonomous)
+- 2026-11-03: How a file type maps to an applet: applet declarations with an owner or alternate rank, "Open With"
+  for one open, and a per-type choice the user saves, matched on the exact type. Equal-rank claims fail a test, and
+  every claimed type is imported with its conformance. Converged in 2 passes, after the critic named the users a saved
+  choice serves. (autonomous)
+- 2026-11-03: Who owns Cmd-O: File > Open is a window command on Cmd-O through the router, and each viewer keeps a
+  pane-local "Open..." with no key, as UTERM-007 already declares. Converged in 1 pass. (autonomous)
+- 2026-11-03: How the path-reading power is granted: a typed UTERM-004 permission, its own scope type, a list of
+  directories, with protected locations excluded unless named and coverage compared on effective scopes. Converged in
+  1 pass. (autonomous)
+- 2026-11-03: Updated for UTERM-007's acceptance: its "Open..." command is the pane-local open, and the risk about draft
+  applets names only UTERM-010. ADR impact review: the settled text conflicts with no ADR. Routed ADR-08's main-thread
+  bound to M1, and ADR-01's terminal surface protocol to M6. (autonomous)
 
 ## References
 
