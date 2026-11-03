@@ -640,6 +640,7 @@ a libghostty that cannot mark rows, one remote session turns off clicks in that 
 - 2026-11-03: ADR candidate: which Launch Services senders count as the user's act. Waits on M2's record of the sender
   each path reports, since the decision reopens if Finder and `open -a` cannot be told apart.
 - 2026-11-03: Accepted after the review gate. No ADR written.
+- 2026-11-03: Scheduled as UTERM-015 M1-M3 and UTERM-015 M4-M6 in queue.md.
 
 ## References
 
