@@ -6,13 +6,15 @@
 
 ## Dependencies
 
-- UTERM-001
+- UTERM-001: the pane tree, the applet contract, and the terminal applet the router places panes in
 - UTERM-002's command registry and UTERM-013: File > Open is a registry command, and its key falls under shortcut
   ownership
-- UTERM-003 M3: a `uniterm open` command, if "Which entry points open files" keeps it, uses the `uniterm` command and
-  its listener
-- UTERM-004 M1, M3, and M6: the path-reading power builds on caller identity, shared command dispatch, and the
-  permission scopes and approval flow
+- UTERM-003 M3: M5's `uniterm open` uses the `uniterm` command and its listener
+- UTERM-004 M1 and M3: M4's path-reading power builds on caller identity and shared command dispatch
+- UTERM-004 M4: M1's check that a routed split never joins a group a controller owns. Until it lands, the check runs
+  against a fixture group
+- UTERM-004 M6: M4's grants, M2's approvals for senders other than Apple's openers, and M5's session approval all use
+  its approval flow and pending indicator. M5 starts only after it. Until it lands, M2 refuses other senders
 
 ## Impacts
 
@@ -35,10 +37,16 @@
 
 ## Summary
 
-One way for a file to reach an applet from outside its pane. Finder, the Dock, File > Open, and possibly a `uniterm
-open` command and terminal clicks all hand a file to one router. The router picks an applet from the file's type, places
-a pane, and hands the file to that applet's source-taking entry point. This proposal also defines the path-reading power
-under ADR-09, which lets a controller ask an applet to read a path inside an explicit directory scope.
+One way for a file to reach an applet from outside its pane. Finder, the Dock, File > Open, a `uniterm open` command,
+and Cmd-click in the terminal all hand a file to one router. The router picks an applet from the file's type, places a
+new pane beside the pane the request came from, and hands the file to that applet's source-taking entry point. A
+folder routed to the terminal opens a new terminal there.
+
+Each entry point has an authority. File > Open and Apple's own openers, such as Finder, are the user's act. Other
+programs that open files through Launch Services, and `uniterm open`, need the user's approval, which lasts at most for
+the sender's run or the terminal session. A click opens only the target uniterm showed on hover. This proposal also
+defines the path-reading power under ADR-09, which lets a controller ask an applet to read a path inside an explicit
+directory scope.
 
 ## Motivation
 
@@ -77,7 +85,9 @@ Rationale: these are the parts UTERM-006 and UTERM-009 handed to a cross-applet 
 ### One route from a path to a pane
 
 Every app-level entry point hands its files to one router. The router hands each file to the chosen applet through the
-same source-taking entry point the applet's own open panel and drop use.
+same source-taking entry point the applet's own open panel and drop use. The terminal has no source to replace, so a
+folder routed to it creates a new terminal pane with that folder as its explicit start directory. Amended 2026-11-03;
+see Decision Log.
 
 Rationale: UTERM-006 rejected a launcher path field because it would be a second route from a path to a pane. One
 route means the size limits, the type checks, the bookmark rules, and the error messages each viewer settled apply to
@@ -301,8 +311,8 @@ routed pane.
 - The routed pane is new and disconnected, and a routed split never joins a group a controller owns. A routed open
   never replaces the source of an existing pane.
 - When no window is open, or the split is refused for lack of room, or the window has a sheet attached, the file opens
-  in a new window whose only pane is the routed pane. That window never starts a terminal shell, and inherits no
-  directory from another window.
+  in a new window whose only pane is the routed pane. That window starts no shell beside the routed pane, and inherits
+  no directory from another window. A routed folder's terminal is the routed pane itself.
 - A batch opens in one new window. Each file splits the largest pane, and a file that still finds no room goes to a
   further new window.
 - An open that arrives while layout restore runs waits until restore finishes, then follows the same rules.
@@ -411,13 +421,20 @@ a libghostty that cannot mark rows, one remote session turns off clicks in that 
   access to a directory in the scope, on the same volume, and the controller already reads what the scope holds.
 - **Draft applets change what they claim** — likelihood: medium, impact: low. UTERM-010 is a draft. Accepted:
   declarations live with each applet, so a later claim changes no router code, and an equal-rank claim fails a test.
+- **M2's sender measurement reopens the Launch Services decision** — likelihood: medium, impact: medium. If a
+  cold-launch Finder open reports a Launch Services helper as its sender, Finder opens would be refused before UTERM-004
+  M6 and ask on every open after it. Mitigation: M2 records the sender each path reports before it builds the
+  authority, and the decision says to reopen the question if Finder and `open -a` cannot be told apart.
+- **Parts of the design wait on unbuilt work** — likelihood: high, impact: low. Third-party launchers are refused, and
+  `uniterm open` cannot ship, until UTERM-004 M6 and UTERM-003 M3 land. Accepted: Finder, the Dock, File > Open, and
+  terminal clicks need neither, and the gating is stated in Dependencies and each milestone.
+- **Hover and the remote marker depend on the pinned libghostty** — likelihood: medium, impact: low. Marking rows may
+  need a patch or a pin bump. Mitigation: M6 names each signal's source, and without row marks the marker covers the
+  whole pane.
 - **No viewer applet exists in code yet** — likelihood: high, impact: low. The router cannot be tested against real
   viewers at first. Mitigation: the router's milestones test with fixture applets, as UTERM-004 M4 does.
 
 ## Milestones
-
-The milestones below assume the complete option of "Which entry points open files". Answers to the open questions may
-remove, add, or reshape them.
 
 ### M1: The router
 
@@ -433,7 +450,8 @@ remove, add, or reshape them.
 - A routed pane starts in the file's folder, even when split beside a pane in another folder
 - A routed pane opens beside the pane the request came from, never in another window, and never joins a group a
   controller owns
-- A routed new window holds only the routed pane, starts no shell, and inherits no directory
+- A routed new window holds only the routed pane, starts no other shell, and inherits no directory
+- A saved choice survives a round trip through an older build, and a corrupt or unknown entry falls back to the rank
 - A batch opens in one new window, splitting the largest pane each time, and a window with a sheet attached is
   treated as having no room
 - The "Open With" choice lists every applet that declares the file's type, can save the choice for the file's exact
@@ -467,7 +485,10 @@ remove, add, or reshape them.
   unminimized
 - The reply to an open-documents event is the same for success, missing, unsupported, and denied
 - The app's declared document types match the applet declarations, and a test fails when they drift
-- Several files and folders follow the rules their open questions settle
+- A folder opened from Finder at cold launch opens one terminal there, and no other shell
+- A batch from a sender that needs approval raises one prompt that names every file and covers the count
+  confirmation
+- Its approvals for senders other than Apple's openers wait on UTERM-004 M6, and until then those senders are refused
 
 ### M3: File > Open
 
@@ -477,12 +498,14 @@ remove, add, or reshape them.
 - The panel starts in the focused pane's `currentDirectory`, or the home folder when there is none
 - A test checks that no built-in applet command claims Cmd-O
 - Each viewer's pane-local Open command replaces its source, and in a controller-owned pane that controller gets no
-  path or content outside its scope
+  path or content outside its scope, tested with fixture controllers and scopes
+- The panel selects several files, and they follow the batch rule
 
 ### M4: The path-reading power
 
 **Status:** NOT STARTED
 
+- Starts after UTERM-004 M1, M3, and M6
 - A controller command that makes an applet read a path is refused without the power, and with a path outside its
   scope
 - A symlink or a rename between check and open cannot reach a file outside the scope
@@ -506,7 +529,9 @@ remove, add, or reshape them.
 
 **Status:** NOT STARTED
 
+- Starts after UTERM-003 M3, UTERM-004 M6, and this proposal's M4
 - `uniterm open <path>` opens the path through the router, with the authority "Who may run `uniterm open`" settles
+- `uniterm open a b c` is one approval and one batch, with one summary message for failures
 - A session grant ends with its terminal session or pane, and a restored pane never carries it
 - A caller outside any terminal session, a tmux pane included, gets Allow once only
 - Nothing touches a path before its open is authorized, so an unapproved request never raises a macOS privacy prompt
@@ -556,9 +581,10 @@ remove, add, or reshape them.
 - 2026-11-03: How a file type maps to an applet: applet declarations with an owner or alternate rank, "Open With"
   for one open, and a per-type choice the user saves, matched on the exact type. Equal-rank claims fail a test, and
   every claimed type is imported with its conformance. Converged in 2 passes, after the critic named the users a saved
-  choice serves. (autonomous)
+  choice serves. (autonomous, addition: a saved per-type choice and an "Open With" chooser with a way to clear it)
 - 2026-11-03: Who owns Cmd-O: File > Open is a window command on Cmd-O through the router, and each viewer keeps a
-  pane-local "Open..." with no key, as UTERM-007 already declares. Converged in 1 pass. (autonomous)
+  pane-local "Open..." with no key, as UTERM-007 already declares. Converged in 1 pass. (autonomous, addition: a
+  pane-local "Open..." command on UTERM-006, UTERM-008, and UTERM-009)
 - 2026-11-03: How the path-reading power is granted: a typed UTERM-004 permission, its own scope type, a list of
   directories, with protected locations excluded unless named and coverage compared on effective scopes. Converged in
   1 pass. (autonomous)
@@ -574,9 +600,11 @@ remove, add, or reshape them.
   the session grant, as each pass confirmed a new objection. (autonomous, judge, addition: opens from other senders
   join UTERM-004's pending indicator and session tier, and the second half of M2 depends on UTERM-004 M6)
 - 2026-11-03: Several files at once: one pane per file, one summary message for failures, and a confirmation above a
-  fixed count. A batch needs a rule under "Where a routed pane goes". Converged in 1 pass. (autonomous)
+  fixed count. A batch needs a rule under "Where a routed pane goes". Converged in 1 pass. (autonomous, addition: a
+  count confirmation dialog)
 - 2026-11-03: Folders: routed by type as `public.folder`. The terminal opens a new pane with the folder as its explicit
-  start directory, and packages are refused. Converged in 1 pass. (autonomous)
+  start directory, and packages are refused. Converged in 1 pass. (autonomous, addition: a terminal entry point that
+  creates a pane at a routed folder)
 - 2026-11-03: Where a routed pane goes: beside the pane the request came from, in a new disconnected pane. A new window
   holds only the routed pane and starts no shell. Fixed rules for room, sheets, batches, and launch. The critic added
   the source-pane anchor as the complete option. Converged in 1 pass. (autonomous)
@@ -591,6 +619,12 @@ remove, add, or reshape them.
   path after the open, and never on output marked as possibly remote. The marker outlives the remote client. Converged
   in 1 pass, with the critic's fixes to the hover display, the symlink case, and remote scrollback. (autonomous,
   addition: the mouse-over-link action joins the terminal surface protocol, with a hover display and a remote marker)
+- 2026-11-03: Coherence review: no weak decisions. Stated each milestone's dependencies on UTERM-003 and UTERM-004,
+  so M5 starts only after UTERM-004 M6. Brought the Summary and Dependencies up to the settled design, reworded the
+  new-window rule so a routed folder's terminal is the routed pane, added three risks, tagged five untagged additions,
+  and routed seven checks to M1, M2, M3, and M5. Amended "One route from a path to a pane", which said every file
+  reaches a source-taking entry point. A folder routed to the terminal creates a new pane instead, since the terminal
+  has no source to replace. (autonomous)
 
 ## References
 
