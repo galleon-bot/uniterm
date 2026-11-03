@@ -597,6 +597,7 @@ Starts after UTERM-004 M6.
   under ADR-03". The user reframed it by what counts as state: the open page is where a tab was, and the page's running
   state is never restored. ADR-03 stays unchanged.
 - 2026-11-03: Accepted by the user.
+- 2026-11-03: Scheduled as UTERM-005 M1-M7 and UTERM-005 M8 in queue.md.
 
 ## References
 

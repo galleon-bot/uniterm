@@ -402,6 +402,7 @@ None.
   whether an applet spools data to disk is that applet's own decision, not a rule for every applet.
 - 2026-11-03: Review complete. Size against Review start: 2 to 3 milestones, 2 to 6 settled decisions, 1 to 6 risks.
   The review also amended UTERM-004 at the user's request. No ADR was written.
+- 2026-11-03: Scheduled as UTERM-008 M1-M2 and UTERM-008 M3 in queue.md.
 
 ## References
 
