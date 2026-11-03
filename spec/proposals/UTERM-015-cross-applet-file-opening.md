@@ -95,9 +95,10 @@ for every applet, with the shape UTERM-006 settled:
 - Errors for paths outside the scope do not tell "missing", "not a supported type", and "denied" apart.
 - When a pane's source lies outside the controller's scope, because the user opened it or a restore found it, events
   and replies to that controller carry no path or content detail from it.
-- A file the user picks in Finder, on the Dock, in File > Open, or in a pane's own open panel or drop is the user's
-  act, not a controller's. It needs no grant. `uniterm open` and terminal clicks are not covered by this rule, since a
-  program chooses what they name. Their own questions decide their authority. Amended 2026-11-03; see Decision Log.
+- A file the user picks in File > Open, or in a pane's own open panel or drop, is the user's act, not a controller's.
+  It needs no grant. Opens that arrive through Launch Services, `uniterm open`, and terminal clicks are not covered by
+  this rule, since a program can choose what they name. Their own questions decide their authority. Amended
+  2026-11-03; see Decision Log.
 
 Rationale: UTERM-006 settled this shape in review, and the user kept it at the review gate. Without a scope, a script
 with no file capability could probe which files exist, and borrow uniterm's macOS privacy grants for Downloads,
@@ -171,6 +172,23 @@ Launch Services reads document types from the app's `Info.plist`, which cannot c
   quietly on install.
 - **Register no document types.** Finder can still open a file by a drop on the Dock icon only if types are declared,
   so this rules out Finder and Dock opens.
+
+### Opens that arrive through Launch Services
+
+Finder Open With and a drop on the Dock icon reach uniterm as an open-documents Apple Event. Any process of the same
+user can send the same event with `open -a uniterm <path>` or NSWorkspace. uniterm cannot tell those apart by the
+event alone.
+
+- **Accept them as the user's act, and say they are program-reachable.** ADR-09 disclaims isolation from same-user
+  processes. The open returns nothing to the sender and never lands in a pane a controller owns. Leaves undone: a
+  program can make uniterm open a file in a protected folder, and the user sees a pane they did not ask for.
+- **Gate by the sender's audit token.** Only Finder and the Dock count as the user's act. Any other sender gets the
+  authority "Who may run `uniterm open`" settles. Needs the sender's audit token from the Apple Event, which M2 must
+  confirm macOS provides for this event.
+- **Ask before every Launch Services open from a sender that is not Finder or the Dock.** A local, coalesced approval
+  like UTERM-004's pending indicator, with the sender named.
+- Constraint: whatever authority "Who may run `uniterm open`" settles cannot usefully be stricter than this path. A
+  program refused by `uniterm open` would otherwise run `open -a uniterm` instead.
 
 ### Several files at once
 
@@ -284,6 +302,7 @@ remove, add, or reshape them.
 **Status:** NOT STARTED
 
 - Open With in Finder and a drop on the Dock icon open the file in uniterm, at launch and while running
+- An open sent by another program follows the authority "Opens that arrive through Launch Services" settles
 - The app's declared document types match the applet declarations, and a test fails when they drift
 - uniterm never becomes the default app for a type without the user choosing it
 - Several files and folders follow the rules their open questions settle
@@ -307,6 +326,10 @@ remove, add, or reshape them.
 - A pane whose source lies outside a controller's scope sends that controller no path or content from it
 - Revoking the grant stops queued reads, per ADR-09
 - A path outside the scope raises no macOS privacy prompt, and a FIFO or device path never blocks the pane
+- Canonicalizing stops at the first component outside the scope, and never stats or reads a link target outside it
+- A dangling in-scope symlink to an outside target returns the same error as any other out-of-scope path
+- Opening a device node has no side effect, such as a tty becoming the controlling terminal
+- An in-scope symlink to an in-scope file opens through its canonical path, rather than failing on no-follow
 - Every file a folder source opens for a controller, such as a slideshow member, passes the same check, so a symlinked
   member cannot reach outside the scope
 - Scope and path compare as APFS does, so case and Unicode normalization cannot widen or narrow the scope
@@ -341,6 +364,11 @@ remove, add, or reshape them.
   Dock, File > Open, and in-pane opening only. Also narrowed the privacy rationale to controllers with no file access
   of their own, added UTERM-008's `pin selected` event to Impacts, put non-file URLs out of scope, added constraints
   on placement, relative and remote paths, and `uniterm open` replies, and routed five checks to M1 and M4.
+- 2026-11-03: Critique pass 2. Amended "The path-reading power" again. The user's-act rule still named Finder and the
+  Dock, but any same-user process can send the same open with `open -a uniterm`, so the rule would have let a program
+  skip whatever authority `uniterm open` gets. The rule now names File > Open and in-pane opening only. Launch
+  Services opens became the open question "Opens that arrive through Launch Services". Routed four canonicalization
+  and device checks to M4.
 
 ## References
 
