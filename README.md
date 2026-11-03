@@ -36,12 +36,17 @@ Commands:
 
 - `make build` builds the pinned libghostty, then `uniterm.app`, into `.build/DerivedData`.
 - `make run` builds, then runs the app in the foreground, so its logs and any crash show in the terminal.
-- `make test` runs the package tests and the app UI tests. UI tests need a logged-in desktop session and Accessibility
-  permission for the terminal.
+- `make test` runs the CI gating checks, package tests, and app UI tests. UI tests need a logged-in desktop session
+  and Accessibility permission for the terminal. `make test-ci` runs just the CI gating checks, without Xcode or Zig.
 - `make fmt`, `make fmt-check`, `make lint`, and `make check` format and check the sources.
 - `make ghostty-offline-check` proves that the pinned libghostty rebuilds with the network off. It takes about four
   minutes, and `make ci` runs it.
 - `make help` lists every target.
+
+GitHub CI skips the macOS SDK and build/test jobs when all changed files are root-level Markdown or Markdown under
+`spec/`. The lightweight `ci` check still reports a result. Markdown shipped in the app, such as files under
+`Licenses/`, still triggers the full build. Manual workflow runs always build fully. Missing comparison history also
+falls back to the full build.
 
 `ghostty.pin` records the Ghostty commit and the toolchain that built it. The build fails when Zig is not exactly the
 pinned version, or when Xcode or the SDK differ from the pin. It also fails when the extracted Ghostty source does not
