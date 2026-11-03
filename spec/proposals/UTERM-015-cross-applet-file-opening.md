@@ -117,7 +117,9 @@ Which app-level ways to open a file this proposal builds.
   `uniterm open` brings in "Who may run `uniterm open`".
 - **Finder, Dock, File > Open, and `uniterm open`.** Leaves undone: a path printed in the terminal still needs copying
   into a command.
-- **Finder, Dock, and File > Open only.** Needs no caller identity, so it can land before UTERM-003 and UTERM-004.
+- **Finder, Dock, and File > Open only.** Needs no caller identity, so it can land before UTERM-003 and UTERM-004, as
+  long as "Opens that arrive through Launch Services" accepts program-sent opens. Gating them needs sender identity or
+  UTERM-004's approval flow.
   Leaves undone: a terminal user cannot open a file beside the terminal without leaving the keyboard.
 
 ### How a file type maps to an applet
@@ -143,7 +145,7 @@ data viewer, and the text viewer. `.md` and `.pdf` go to the text viewer, and `.
   Finder at launch.
 - **Into the focused pane when it is a launcher or an empty pane of the chosen type, else beside it.**
 - **Finder and Dock opens in a new window, in-app opens beside the focused pane.** Matches how a document app behaves
-  for a Finder open.
+  for a Finder open. Unless Launch Services opens are gated by sender, this covers every program-sent open too.
 - Each option needs a rule for a split refused for lack of room. Candidates: a new window, a new tab in the window, or
   refusing with the "not enough room" message the window already posts.
 - Each option needs a rule for a Finder open that arrives at launch while layout restore runs: whether the routed pane
@@ -183,10 +185,11 @@ event alone.
   processes. The open returns nothing to the sender and never lands in a pane a controller owns. Leaves undone: a
   program can make uniterm open a file in a protected folder, and the user sees a pane they did not ask for.
 - **Gate by the sender's audit token.** Only Finder and the Dock count as the user's act. Any other sender gets the
-  authority "Who may run `uniterm open`" settles. Needs the sender's audit token from the Apple Event, which M2 must
-  confirm macOS provides for this event.
+  authority "Who may run `uniterm open`" settles, or its own when that command is not built. Needs the sender's audit
+  token from the Apple Event, which M2 must confirm macOS provides for this event. A program with Automation consent
+  over Finder can still ask Finder to send the open, so "Finder as sender" means any process with that consent.
 - **Ask before every Launch Services open from a sender that is not Finder or the Dock.** A local, coalesced approval
-  like UTERM-004's pending indicator, with the sender named.
+  like UTERM-004's pending indicator, with the sender named. M2 would then depend on UTERM-004 M6.
 - Constraint: whatever authority "Who may run `uniterm open`" settles cannot usefully be stricter than this path. A
   program refused by `uniterm open` would otherwise run `open -a uniterm` instead.
 
@@ -293,6 +296,7 @@ remove, add, or reshape them.
 - The router hands each file to the chosen applet's source-taking entry point, the same one its open panel and drop
   use
 - A file no applet declares is refused with a message that names the file and its type
+- Working out a routed file's type never opens or blocks on a FIFO or a device node
 - Routing works with fixture applets, so it needs no production viewer to test
 - A routed pane's start directory follows "Start directory and current directory", with no implicit inheritance
 - The "Open With" choice, if the type mapping keeps one, lists every applet that declares the file's type
@@ -303,6 +307,7 @@ remove, add, or reshape them.
 
 - Open With in Finder and a drop on the Dock icon open the file in uniterm, at launch and while running
 - An open sent by another program follows the authority "Opens that arrive through Launch Services" settles
+- The reply to an open-documents event is the same for success, missing, unsupported, and denied
 - The app's declared document types match the applet declarations, and a test fails when they drift
 - uniterm never becomes the default app for a type without the user choosing it
 - Several files and folders follow the rules their open questions settle
@@ -369,6 +374,8 @@ remove, add, or reshape them.
   skip whatever authority `uniterm open` gets. The rule now names File > Open and in-pane opening only. Launch
   Services opens became the open question "Opens that arrive through Launch Services". Routed four canonicalization
   and device checks to M4.
+- 2026-11-03: Critique pass 3 converged. Added its constraints to "Which entry points open files", "Where a routed
+  pane goes", and "Opens that arrive through Launch Services", and routed two checks to M1 and M2.
 
 ## References
 
