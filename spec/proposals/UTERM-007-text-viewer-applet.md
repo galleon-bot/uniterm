@@ -1,12 +1,27 @@
 # UTERM-007: Text Viewer Applet
 
-**Status:** draft
+**Status:** accepted
 **Created:** 2026-10-31
-**Updated:** 2026-11-01
+**Updated:** 2026-11-03
 
 ## Dependencies
 
 - UTERM-001
+- UTERM-009's cross-applet file-opening proposal: M1 starts only after it is filed
+- UTERM-006: M1 builds its document helper the way UTERM-006's image helper is built, and whichever lands first
+  builds the shared helper bundling
+- UTERM-013, and UTERM-002's command registry: the find, contents, open, and reload commands are registry entries the
+  viewer declares
+- UTERM-004 M2 and M3: M5's remote commands need remote-controlled panes and the applet command hook
+- UTERM-003 M2: M5's send-document check uses its send function
+
+## Impacts
+
+- UTERM-009 — "Control levels": the text viewer's restore message for inline content that had no file is the first
+  answer to the restore rule UTERM-009 deferred for pipe input
+- UTERM-006 — "RTF and Word use the system readers": both proposals run decoders uniterm does not own in sandboxed
+  helpers of the same design
+- UTERM-003 — "Control levels": "send a document or data to an applet" lands on the viewer's inline content command
 
 ## Summary
 
@@ -31,33 +46,78 @@ PDFs render with PDFKit's `PDFView`.
 
 RTF and Word documents load through `NSAttributedString`'s document readers and display in a text view.
 
-## Design Decisions (Open)
+The readers run in a sandboxed helper process, not in the app. The helper returns the attributed string through secure
+coding, with embedded images already decoded to bitmaps, and the app shows it in its own text view. A helper crash or
+hang ends that load, and the pane says so. The helper is built the way UTERM-006's image helper is: its own
+executable with its own sandbox entitlements, a file descriptor the app opens and passes at spawn, a private
+decode-only protocol with a version handshake, and a footprint cap the app enforces. It is a separate executable from
+the image helper, since the document readers need sandbox operations, such as the font service, that the image
+decoders' sandbox denies. Whichever of the two proposals lands first builds the shared helper bundling. Amended 2026-11-03; see Decision Log.
+
+PDFs are the exception. `PDFView`'s selection, find, links, and accessibility work only on an in-process
+`PDFDocument`, and no supported API remotes it. Rendering pages in a helper would mean rebuilding all of those over
+raster tiles. So PDF parses in-process, as ADR-07 allows when isolation is not possible, and the hostile-document risk
+states what bounds it.
 
 ### Markdown rendering
 
-Foundation's Markdown parsing focuses on inline styles. It does not lay out full documents with tables and code blocks.
-Options:
+Original question: Foundation's Markdown parsing focuses on inline styles. It does not lay out full documents with
+tables and code blocks. Render HTML in a `WKWebView`, use a native Swift Markdown renderer, or use QuickLook.
 
-- **Render HTML in a `WKWebView`.** Convert Markdown to HTML with a library. Full layout and easy theming with CSS.
-- **A native Markdown renderer.** A Swift library that renders to native views or attributed strings.
-- **QuickLook.** Depends on what Markdown support the system provides.
+Decision: Markdown is parsed and laid out inside a `WKWebView`, by a pinned, bundled JavaScript Markdown parser such as
+markdown-it. Raw HTML in the Markdown renders through a pinned sanitizer's allowlist. Nothing parses Markdown or HTML in
+uniterm's own process. Amended 2026-11-03; see Decision Log.
 
-### Live reload
+- The parser runs as a `WKUserScript` in its own `WKContentWorld`. Page JavaScript is off
+  (`allowsContentJavaScript = false`), so nothing in the document can run script, even if the parser emits markup it
+  should have escaped. The one message handler is registered for the parser's world only.
+- Raw HTML embedded in the Markdown passes through the parser. A pinned, bundled HTML sanitizer, such as DOMPurify,
+  filters the parser's output in the same isolated world before insertion. Its allowlist matches GitHub's published
+  README allowlist, minus anything that needs the network, so `<p align="center">`, `<h1 align>`, `<details>`,
+  `<summary>`, `<img width>`, `<picture>`, `<kbd>`, `<sup>`, and in-page anchors render. It drops `script`, `style`,
+  inline `style` attributes, `iframe`, `object`, `embed`, `form`, `input`, `audio`, `video`, `base`, `meta`, `link`,
+  and event attributes.
+- The scheme handler sends a Content-Security-Policy that allows images only from its own scheme and denies scripts in
+  the page, frames, forms, objects, and media. A `WKContentRuleList` also blocks every load outside the handler's
+  scheme, whichever world started it, since WebKit may let loads from an isolated world skip the page's policy.
+- The web view's light or dark appearance follows the uniterm theme, not the system, so `<picture>` sources that
+  test `prefers-color-scheme` match the theme.
+- Each pane's `WKWebView` uses its own non-persistent data store. It shares no cookies, cache, or storage with other
+  panes or with UTERM-005's browser.
+- The page, the document's text, and the images it references are served through a `WKURLSchemeHandler`, not
+  `loadFileURL(_:allowingReadAccessTo:)`. The handler serves the document and image files the document links by relative
+  path, through `src`, `srcset`, or `<source>`, resolved against the document's own folder, and nothing else. A
+  root-relative or `file:` image path is refused. A path that would cross a mount point or leave
+  the document's volume, such as one through `/net` or `/Volumes`, is refused before lookup, so no automount runs. No
+  network load happens. A remote image shows its alt text.
+- A same-document fragment link, such as `[Install](#install)`, scrolls to its target. Navigation leaves the view only
+  for a user-activated link to `http`, `https`, or `mailto`, which opens in the default browser. Every other navigation
+  is cancelled.
+- Colors come from CSS variables generated from the `ThemePalette` the host pushes through `apply(_:)`.
+- The page pushes its scroll position and headings to the host through the message handler. The host caches them, so
+  `describe()` stays synchronous and never waits on the page.
+- The parser and sanitizer assets are each pinned by version and content hash, and their license notices join
+  `Licenses/` through the collect script.
 
-Whether the viewer reloads when the file changes on disk. Useful while editing a document in a terminal.
-
-### Search and navigation
-
-- Find in document.
-- A table of contents from headings or PDF outlines.
-
-### Control levels
-
-Which UTERM-004 levels the viewer supports. The presentation example would send speaker notes here.
+Rationale: the Motivation asks for READMEs rendered properly, and many README headers are raw HTML, so showing that
+HTML as text puts markup at the top of the page. A README comes from clones and downloads, so it is untrusted input. WebKit's content process is sandboxed and
+out of process, so a parser bug, a hang, or a huge table ends or stalls that process, never the app (ADR-07, ADR-08).
+swift-markdown wraps cmark-gfm, third-party C maintained outside the OS, with a heap-corruption CVE in table parsing.
+Running it in-process is the exposure UTERM-009 rejected libxls for, and native `NSTextView` layout would also put an
+attacker-sized table on the main thread. A sandboxed helper process running swift-markdown contains the same failures,
+but rebuilds what WebKit already provides. An in-house Swift parser cannot corrupt memory, but a trap or a quadratic
+input still ends or pins the app, and a hand-written GFM subset mis-renders real READMEs. QuickLook ships no rendered
+Markdown on a stock system and cannot take theme colors. Foundation's full-syntax `AttributedString(markdown:)` parser
+in a sandboxed helper, rendering into the native text view, was weighed on reopening. It contains failures and shares
+find and selection with RTF and Word, but renders no raw HTML and may drop HTML blocks silently. Foundation in-process
+lacks the ADR-07 exception PDF has, since a parse tree can cross a process boundary. A fully trusted mode
+that passes all HTML was weighed too. Its trust mark would follow the path, so new content after a `git pull` would
+render trusted, and with page JavaScript and the network off it adds only styles and iframes over the allowlist.
+Left undone: remote images such as badges show their alt text, and authored inline styles are dropped.
 
 ### The applet contract
 
-Context from UTERM-001, which shipped the applet contract. ADR-05 and ADR-06 cover its lifecycle and its description
+Original context and question: Context from UTERM-001, which shipped the applet contract. ADR-05 and ADR-06 cover its lifecycle and its description
 versioning. An ADR for the rest of the contract is a candidate in UTERM-001's Decision Log. This proposal may reshape
 it, so it is not written yet. Every applet implements:
 
@@ -77,11 +137,174 @@ it, so it is not written yet. Every applet implements:
 For the text viewer: a description likely holds the file path and the scroll position. A read-only viewer likely never
 counts as running something.
 
+Decision: the text viewer needs no change to the applet contract or the factory. Its description holds a path, a
+bookmark fallback, a start directory, and the view state, and never any of the file's contents. This follows UTERM-009's
+applet contract decision.
+
+- The payload holds the file's absolute path, a macOS bookmark of the file, the view state, and whether the contents
+  sidebar is shown. It has its own version, per ADR-06.
+- View state is a source anchor that survives reflow: for PDF, a page index and a point on the page; for RTF and Word,
+  the character index at the top of the view; for Markdown, the source line of the top block, which the parser's token
+  map gives, plus a fraction within that block.
+- Restore opens the stored path when a regular file is there. It uses the bookmark only when the path is missing, and
+  then says where it found the file. A file renamed away and replaced by a new one at the same path shows the new one.
+- The bookmark is created at load, and remade when an open, a restore included, finds a different file than the
+  bookmark names. Resolution runs in `start()`, off the main thread, without UI and without mounting volumes.
+  `describe()` never touches the disk.
+- Every description, the empty one included, holds the directory the pane started in. The factory passes it. An empty
+  pane reports it as `currentDirectory`. With a file open, the pane reports the file's folder. The open panel always
+  starts in `currentDirectory`, never in AppKit's remembered folder.
+- Every format loads from bytes read in full off the main thread: a PDF through `PDFDocument(data:)`, RTF and Word
+  through `NSAttributedString`'s readers in the sandboxed helper with the document type set from the file type, and
+  Markdown through the scheme handler. The loaded document is a snapshot. A later change to the file, such as pdflatex rewriting its output in
+  place, never reaches a view that is already showing.
+- RTF and Word are decoded in the helper, and the decoded text's length and table cell count are checked against caps
+  off the main thread, before the text view lays anything out. A document past a cap shows a message naming the limit.
+  This is the bound ADR-08 asks for on the text view's main-thread layout.
+- Files open inside the pane, by an Open... registry command with no key in the File menu and an empty-state button,
+  or by dropping a file URL onto the pane. A pane shows one document. Opening another file replaces it, cancels any load
+  still running, and starts at the top. The open panel selects one file. A drop of several files is refused with a
+  message asking for one, and the pane keeps what it showed. App-level opening and any File > Open key wait on the
+  cross-applet file-opening proposal that UTERM-009 committed to filing. M1 starts only after that proposal is filed.
+- A drawer of open documents beside the view, as Preview has, is an idea for later. This proposal does not commit to
+  it. Building it needs its own proposal, since it changes what a pane and its description hold.
+- A read-only viewer never counts as running something, and closing it never asks.
+
+Rationale: the path is what the user named, so it wins while a file is there. The bookmark recovers a file that was
+moved or renamed. Bookmark-first resolution follows the file ID, so an editor save that renames the old file to a
+backup would restore the stale backup. Path-only loses a moved file and leaves the open panel on AppKit's hidden
+remembered folder. Adding a file case to the factory and binding Cmd-O in one viewer would decide app-level opening from
+one consumer, which UTERM-009 gave to a cross-applet proposal. A pixel scroll offset lands elsewhere after a width,
+font, or reload change, while a source anchor does not. A PDF opened by URL reads pages lazily from the file, so an
+in-place rewrite could feed CoreGraphics truncated bytes. Reading the whole file first bounds that, at the cost of
+memory equal to the file's size.
+
+### Live reload
+
+Original question: whether the viewer reloads when the file changes on disk. Useful while editing a document in a
+terminal.
+
+Decision: the viewer always watches its file and reloads when it changes. There is no setting. A Reload registry
+command, Cmd-R, re-reads the file on demand.
+
+- The watch follows the stored path. It watches the file and its parent folder, so both a write in place and an
+  editor's write-new-then-rename save are caught. The watch re-arms on the path after a rename or delete.
+- Bursts of change coalesce. The last write is always loaded.
+- A reload loads like a first load, off the main thread or in WebKit, and swaps in only when it succeeds. A failed load
+  keeps the last good render, with a status message. A file that disappears keeps the last render, and the pane says
+  it was moved or deleted. The pane never follows the bookmark while live. When a file reappears at the path, the
+  viewer reloads.
+- A reload keeps the view state's source anchor, so the reader stays at the same place.
+- While the pane is detached, changes collect and reload once at reattach. The watch stops at close.
+- Reload covers volumes where file events never arrive.
+
+Rationale: the Motivation is reading beside a terminal, often while editing the same file. Everyone who wants reload
+wants it on, so a per-pane toggle would be a setting nobody needs, plus a payload field and a second code path. A manual
+command alone leaves the view stale during exactly that loop. An FSEvents stream on the parent folder is equally
+correct, but it receives every change in the tree below, such as build output beside a README at a repository root.
+Following the bookmark live would switch to an editor's backup during a save, while the path briefly disappears.
+
+### Search and navigation
+
+Original question: find in document, and a table of contents from headings or PDF outlines.
+
+Decision: find, plus a contents sidebar built only from structural outline data.
+
+- Find (Cmd-F), Find Next (Cmd-G), and Find Previous (Cmd-Shift-G) are registry commands the viewer declares per
+  UTERM-013, in Edit > Find. The viewer owns one find bar. It drives each format's engine: `PDFDocument`'s asynchronous
+  find, a search of the text storage's string for RTF and Word, shown with selection and the find indicator, and
+  a find in the parser's isolated world for Markdown, which returns highlight ranges and a count, since
+  `WKWebView.find` offers no diacritic option and no count. The text view's built-in find bar and find panel are off.
+  `NSTextFinder` is not used, since it takes its query only from its own bar or the system find pasteboard.
+- The find query belongs to the pane. The viewer neither reads nor writes the system find pasteboard, so a search typed
+  in another pane or app never appears here. The shared find bar offers what every engine supports: the query, next,
+  previous, and whether there is a match. Match counts show where the engine gives one.
+- A Show Contents registry command, with no key, toggles a contents sidebar. It lists the PDF outline, the Markdown
+  headings the page pushes, or RTF and Word headings from `NSParagraphStyle.headerLevel` where the system reader sets
+  it. Selecting an entry scrolls there. A document with no structural outline gets a disabled command and a sidebar that
+  says there are no contents. Nothing is inferred from fonts or text.
+- The sidebar's visibility is saved in the description.
+
+Rationale: find is the main way through a long document, and every engine already exists. A table of contents built
+from structure is exact wherever the format carries it. Inferring headings from font sizes lists bold body lines and
+drops real headings, which is confident wrong navigation. A contents popup in the status bar would need clickable
+segments, a contract change every applet shares, and works poorly for a spec with hundreds of headings. Left undone:
+RTF and Word documents whose reader sets no heading level get no contents.
+
+### Control levels
+
+Original question: which UTERM-004 levels the viewer supports. The presentation example would send speaker notes here.
+
+Decision: the viewer supports remote-controlled and disconnected access, both without an exec driver. Exec combinations
+are refused before anything starts.
+
+- Remote commands: scroll to an anchor (a page, a heading, or a source line), find text, reload, and show Markdown text
+  sent inline. Each reply comes once the command's effect is done, so the reply to show or reload reports whether the
+  content loaded. Per UTERM-004, remote callers receive no applet events, and the viewer emits none.
+- There is no remote command to open a file path. A controller would otherwise make uniterm read any file uniterm can
+  read, under uniterm's privacy grants, and learn from the reply whether a protected path exists. Neither caller needs
+  it: notes arrive inline, and UTERM-003's send function sends content. The cross-applet file-opening proposal defines
+  a scoped path-reading power under ADR-09 for every viewer. Remote opening waits on it, and adopting it later is an
+  additive command.
+- Replies carry anchors and load status only. They never carry document text, such as find matches or heading text,
+  and never the path of a file the user opened.
+- Per UTERM-004, every remote command names the applet type and the command schema version it was written for. The
+  version is a major and a minor, as UTERM-006's schema is. A new command, or a new optional reply field, bumps the
+  minor. A change in what a command means, or a removed command, bumps the major. The viewer accepts any version with
+  its current major and a minor up to its own. Anything else is refused before any effect, so an old controller with a
+  new app and a new controller with an old app both fail with an actionable error. The units on each side are external
+  controllers and the app; UTERM-003's helper ships inside the app.
+- Inline Markdown is the viewer's second source, beside a file. It renders like a file, with no relative resources:
+  its relative images show their alt text. Showing it clears the stored path and stops the watch, and the pane reports
+  its start directory as `currentDirectory`. It is never saved in the layout file. The payload records only that inline
+  content was showing. Reopen within the launch brings the text back from the description's in-memory undo state. A
+  relaunched pane says the content came from a program and was not restored.
+- UTERM-003's "send a document or data to an applet" host function reaches the viewer through these same commands.
+
+Rationale: the presentation program drives the slide, notes, and chart panes it owns through remote control, and
+UTERM-003's send-data function goes through the same command validation. Inline notes let both work without writing
+temporary files that a description would then point at. An exec driver has no caller here. It would make the pane own
+a child process, contradicting the applet contract's rule that the viewer never counts as running something.
+Deferring, as UTERM-009 deferred pipe input, was weighed. UTERM-009 deferred because UTERM-003 and UTERM-004 had not
+settled, and both are now accepted, so its reason no longer holds. This departs from UTERM-009's deferral on purpose.
+Leaves undone: an exec-driven viewer, until a caller needs one.
+
+## Design Decisions (Open)
+
+None.
+
 ## Risks
 
 - **Word documents render imperfectly through the system reader** — likelihood: high, impact: low.
   Accepted: the viewer is for reading, not for faithful layout. Users needing exact layout can open the file in Word or
   Pages.
+- **A hostile PDF corrupts or takes over the app** — likelihood: medium, impact: high. PDFKit and CoreGraphics parse
+  PDFs from Downloads or email in uniterm's own process, with the App Sandbox off. A bug there can crash every terminal
+  pane's shell with the app, or corrupt memory and run code with the user's privileges. uniterm owns no code there, so
+  fuzzing can find such a bug but cannot fix it. This is ADR-07's stated exception: `PDFView` needs an in-process
+  document, per "RTF and Word use the system readers". Mitigation: these are OS libraries that macOS updates patch,
+  every read is capped and regular-file only, and M1 fuzzes PDF loading as shipped. RTF and Word parse in the sandboxed
+  helper, and Markdown in WebKit's content process. **Revisit:** when M1's fuzzing finds a memory error or a hang the
+  caps do not prevent, or an advisory in PDFKit or CoreGraphics is unpatched on a macOS version uniterm supports, file a
+  proposal to render PDFs in the sandboxed helper and rebuild selection, find, links, and accessibility over its output.
+- **The remote command schema becomes a contract external programs depend on** — likelihood: high, impact: medium.
+  Presentation programs and scripts will call it. Mitigation: the schema is versioned from its first release, every
+  command names its version, and additive changes bump only the minor, which older controllers keep working with, per
+  "Control levels".
+- **Many large documents exhaust memory** — likelihood: medium, impact: high. Each file is read whole, and PDFKit's
+  decoded pages use more memory than the file. A relaunch restoring several large PDFs could get uniterm killed along
+  with its terminals. The evidence does not settle the likelihood, so it is rated medium. Mitigation: the per-file cap
+  on bytes read, and the decoded caps for RTF and Word. Accepted beyond that: unlike UTERM-009's row store, the viewer
+  holds one document per pane, and a shared budget would have to predict PDFKit's own page cache.
+- **The cross-applet file-opening proposal reshapes opening** — likelihood: medium, impact: low. It is not filed yet,
+  and it may change Open..., drops, or Cmd-O for every viewer. Mitigation: M1 starts only after it is filed, and the
+  viewer binds no File > Open key until then.
+- **The bundled JavaScript parser and sanitizer fall behind** — likelihood: low, impact: medium. They are pinned
+  outside SwiftPM, so no tool flags their updates. A parser bug stays inside WebKit's sandboxed content process, page
+  JavaScript is off, and a sanitizer miss still meets the Content-Security-Policy. Mitigation: each pin records the
+  version and hash, and the license collect script lists both, so a bump is a reviewed change.
+- **The description is stored data** — the payload format is read by every later build. The design defuses the one-way
+  door: the payload carries its own version per ADR-06, and an unreadable description is kept, not dropped.
 
 ## Milestones
 
@@ -92,6 +315,52 @@ counts as running something.
 - A pane can run the text viewer and open a PDF
 - The viewer opens RTF and Word documents
 - Pages scroll and text can be selected and copied
+- Starts only after UTERM-009's cross-applet file-opening proposal is filed
+- A file opens from the Open... command, the empty-state button, or a drop. Dropping a file on a PDF or text view
+  opens it in the pane, and the viewer binds no File > Open key
+- The launcher offers the text viewer, and restore picks it by description type. An unknown type still becomes a
+  placeholder pane
+- Reopen and relaunch bring back the file at its view state, and an empty pane reopens empty in its start directory
+- A file moved or renamed after the save is found through its bookmark, and the pane says where. A new file at the
+  stored path wins over the bookmark, and the bookmark is then remade for it
+- Opening a file into a pane that shows one replaces it and cancels any load still running. A drop of several files is
+  refused with a message asking for one file, and the pane keeps what it showed
+- The open panel starts in the pane's `currentDirectory`, never in the panel's remembered one
+- A restored file behind macOS privacy protection, such as Downloads, shows a permission message, and `start()` raises
+  no prompt
+- A layout save never touches the disk to describe a pane, and an unchanged pane describes itself the same way twice
+- A PDF rewritten in place while showing keeps rendering the loaded document
+- RTF and Word load with the document type set from the file type, so a file is never read as HTML
+- A file too large to load shows a message naming its size, never a freeze or a crash
+- Every read, reloads included, opens the file and accepts it only when `fstat` shows a regular file after symlinks
+  are followed, and counts the bytes actually read against the cap. A symlink to `/dev/zero` or a FIFO shows a message
+- An RTF or Word document past the decoded length or table cell cap shows a message, and never lays out on the main
+  thread first. Embedded images are capped by count and pixel size and never decode on the main thread at draw time
+- A `.docx` whose entries inflate far past the byte cap ends at the helper's memory limit, never in the app
+- A decode that never finishes leaves the pane usable, and a reload never starts a second decode while one runs
+- One documented rule picks the format from the file type and extension, `README` and `.markdown` included, and an
+  unsupported type shows a message naming it
+- While the bookmark is still resolving, `describe()` returns the restored payload unchanged. Once the bookmark finds a
+  moved file, the stored path becomes the new one
+- A fuzzing run with malformed PDF input, through PDF loading as shipped and under a memory-error detector, records
+  every crash and hang it finds
+- RTF, `.doc`, and `.docx` parse only in the sandboxed helper. A malformed file that crashes or hangs the helper leaves
+  the app and the pane running, and the pane shows a message
+- The app decodes the helper's reply only through secure coding of the expected classes, and embedded images arrive as
+  bitmaps within the pixel caps
+- The document helper is its own executable, built the way UTERM-006's image helper is, and whichever proposal's
+  milestone lands first builds the shared helper bundling and handshake. The sandbox operations the readers need are
+  recorded, and the image helper's sandbox stays as narrow as before
+- The document helper cannot open a file by path or make a network connection. It reads only the descriptor the app
+  passes
+- Embedded images cross as raw pixel buffers in one fixed format, outside the archive, and the app builds images from
+  them with no codec. The allowed classes leave out `NSImage`, `NSBitmapImageRep`, and `NSFileWrapper`
+- The app caps the reply's bytes before decoding it, then applies the decoded length, table cell, image count, and
+  pixel caps itself, relying on no check in the helper. Attributes off an allowlist are dropped in the helper
+- Opening another file, a superseded reload, or closing the pane ends the helper's decode, killing the helper if it
+  has to. No helper outlives its pane, a PDF or Markdown pane starts none, and undo-reopen starts a fresh one
+- The app enforces the helper's memory limit and kills it past the limit, which is what bounds `.docx` inflation
+- A link in an RTF, Word, or PDF document opens only `http`, `https`, or `mailto`
 
 ### M2: Markdown
 
@@ -99,11 +368,186 @@ counts as running something.
 
 - The viewer renders Markdown headings, lists, code blocks, tables, and links
 - Rendered Markdown uses the current theme's colors
+- A document whose Markdown carries `<script>`, event-handler attributes, or `<meta http-equiv="refresh">` runs nothing
+  and navigates nowhere
+- Raw HTML on GitHub's README allowlist renders, such as a centered header, `<details>`, and `<kbd>`, and every tag off
+  the allowlist is dropped. The allowlist's source and version are recorded with the sanitizer pin
+- With the sanitizer bypassed in a test build, markup inserted from the parser's world, including a remote `<img src>`
+  and a remote `srcset`, makes no network request, and scripts, frames, forms, and media stay blocked
+- Theme colors apply with the policy in force
+- An in-page anchor link, Markdown or authored HTML, scrolls to its target
+- A document whose top block is raw HTML reopens at the same place, and data attributes written in the document cannot
+  spoof a source anchor
+- On a dark-mode Mac with a light uniterm theme, a `<picture>` that tests `prefers-color-scheme` shows its light source
+- `srcset` and `<source>` images follow the same rules as `src`, and a root-relative or `file:` image path loads
+  nothing
+- A relative image link, `../` paths included, shows the image. A link to a non-image file or a remote URL loads
+  nothing
+- A link opens in the default browser only when clicked, and only for `http`, `https`, or `mailto`
+- A 20 MB Markdown file opens without stalling the main thread
+- After a scroll and an immediate layout save, reopen lands on that scroll position
+- The parser and sanitizer assets are pinned by version and hash, and their license notices are collected
+- Dropping a file on rendered Markdown opens it in the pane
+- An image path through `/net`, `/Volumes`, or any other mount point, directly or through a symlink in any component,
+  is refused without triggering a mount
+- An image that is a symlink to a device or a FIFO, or larger than the cap, loads nothing
+- When WebKit's content process ends, the pane shows a message and reloads on Reload
+- Reload fetches images again, never WebKit's cached copies
+- Two Markdown panes, and the browser applet, share no web storage or cache
+- After reopen at a different pane width, the same heading or paragraph is at the top
+
+### M3: Live reload
+
+**Status:** NOT STARTED
+
+- Saving the file in place, or by an editor's write-new-then-rename save, reloads the pane at the same place
+- A burst of writes, such as `cmd > file`, ends with the last write shown, and a continuously rewritten file reloads
+  at a bounded rate
+- Changes to other files in the folder reload nothing
+- A file that fails to load keeps the last good render with a status message. A moved or deleted file keeps its render
+  and says so
+- After the file, or its parent folder, is deleted and recreated, the file reloads when it reappears at the path
+- After restore finds a moved file through its bookmark, the watch follows the updated path
+- A detached pane reloads once at reattach, and close stops the watch
+- Reload, Cmd-R, re-reads the file
+
+### M4: Find and contents
+
+**Status:** NOT STARTED
+
+- Find, Find Next, Find Previous, Show Contents, Open..., and Reload are registry commands the viewer declares, and none
+  of their keys is a reserved window key
+- The Find items sit in Edit > Find. The milestone that lands first, this one or UTERM-009 M3, adds the Edit menu home
+- Find looks and behaves the same in PDF, RTF and Word, and Markdown, including Markdown with page JavaScript off.
+  It offers the query, next, previous, and whether there is a match, plus a match count where the engine gives one
+- A search typed in another pane or app never appears in the viewer's find bar, and the viewer's query never changes
+  the system find pasteboard. Use Selection for Find sets the pane's query only
+- The contents sidebar lists the PDF outline, Markdown headings, and RTF and Word headings where the reader sets a
+  heading level. Selecting an entry scrolls there
+- A document with no outline disables Show Contents. A huge or cyclic outline is capped, and the sidebar says it was cut
+- The sidebar's visibility survives reopen and relaunch
+- RTF and Word heading levels survive the trip through the helper, so the sidebar lists them
+- Searching an RTF or Word document at the decoded cap never blocks the main thread
+- A reload while a search runs or results show discards the old matches
+- Use Selection for Find, Cmd-E, and the find menu items reach the viewer's commands, never a view's built-in find
+- Case and diacritic matching is the same in every format
+- A find query, from the find bar or a remote command, reaches the parser's world as a call argument, so quotes or
+  `</script>` search literally
+- Markdown find matches text that spans inline elements, and one documented rule says whether a match inside a closed
+  `<details>` is revealed or skipped
+
+### M5: Remote control
+
+**Status:** NOT STARTED
+
+- The viewer declares remote-controlled and disconnected access without an exec driver, and an exec combination is
+  refused before launch
+- Scroll to anchor, find, reload, and show inline Markdown work through UTERM-004's remote host call, and the reply to
+  show or reload reports whether the content loaded. The viewer emits no events. No remote command opens a file path
+- A controller written for schema 1.0 keeps working against a viewer on 1.1. A command naming another major, or a minor
+  newer than the viewer's, is refused before any effect
+- Scroll or find sent before a load finishes waits for the load or returns a structured error
+- Replies carry no document text and no path the user opened
+- Inline content that is not Markdown, or larger than one frame, returns a structured error
+- While inline content shows, `currentDirectory` is the start directory
+- Reopen within the launch brings back inline notes from the description's undo-only part, and an unchanged pane
+  still describes itself the same way twice without re-encoding them on the main thread
+- Showing inline content stops the watch, and a superseded load is discarded, so a late file reload never replaces the
+  notes
+- Inline content loads no relative resources
+- After relaunch, a pane that showed inline content shows a not-restored message, and an older build keeps its
+  description
+- UTERM-003's send-document function shows content in the viewer
+- A pane opened by a controller creates its own non-persistent web data store, like any other pane
 
 ## Decision Log
 
 - 2026-10-31: Drafted from the original write-up without an interview. The open questions hold everything undecided.
 - 2026-11-01: Added "The applet contract" with context from UTERM-001's implementation.
+- 2026-11-03: Review start: 2 milestones, 3 settled decisions, 1 risk, no `**Live after:**` lines or row gates; no
+  out-of-scope statements; proposal at commit 42057e4. The user asked for a design review of the open questions, in
+  autonomous mode, with UTERM-009's cross-applet decisions as precedent and any departure from them flagged.
+- 2026-11-03: Markdown rendering: a pinned, bundled JS parser in an isolated content world inside a `WKWebView`, with
+  page JavaScript off, a scheme handler serving only the document and its relative images, and no network. Converged in
+  one pass. (autonomous, addition: a bundled third-party JS asset, pinned and license-collected outside SwiftPM)
+- 2026-11-03: The applet contract: no contract change, following UTERM-009. The description holds a path with a
+  bookmark fallback, an explicit start directory, a reflow-proof source anchor, and the sidebar's visibility, never file
+  contents. Every format loads from bytes read in full. M1 waits on the cross-applet file-opening proposal UTERM-009
+  committed to. Converged in one pass. (autonomous)
+- 2026-11-03: Live reload: always on with no setting, watching the path and its parent folder, keeping the last good
+  render, plus a Reload command on Cmd-R. Converged in one pass. (autonomous)
+- 2026-11-03: Search and navigation: registry Find commands with one find bar over each format's engine, and a contents
+  sidebar from structural outlines only. Converged in one pass. (autonomous)
+- 2026-11-03: Control levels: remote-controlled and disconnected access without an exec driver, with a versioned
+  command schema including inline Markdown that is never saved. Converged in one pass after the critic added the
+  no-exec option. Departs from UTERM-009's deferral of pipe input, since UTERM-003 and UTERM-004 are now accepted.
+  (autonomous, addition: a published remote command and event contract, a second content source, and M5)
+- 2026-11-03: Coherence review. Amended "Control levels": dropped the remote open-path command, since it would let a
+  controller read any file under uniterm's privacy grants and probe whether protected paths exist; added the schema's
+  skew rules; inline notes come back on reopen from in-memory undo state. Bounded RTF and Word layout with decoded caps
+  checked off the main thread. Image paths never cross a mount point. Routed regular-file and byte-count checks,
+  bookmark path updates, a dead WebKit content process, find feature parity, and event coalescing to milestone checks.
+  (autonomous)
+- 2026-11-03: Hidden state, raised per CLAUDE.md "Applet Attributes": the find query belongs to the pane instead of the
+  system find pasteboard, and each Markdown pane uses its own non-persistent web data store instead of WebKit's shared
+  default. (autonomous)
+- 2026-11-03: Risk review. Added risks for in-process PDF and Word parsing, with fuzzing in M1 and a revisit hook for
+  a sandboxed helper; the published remote schema; memory across many large documents, mitigated by per-file caps and
+  accepted beyond them; the unfiled file-opening proposal; and the bundled parser's upkeep. Noted the description's
+  one-way door. (autonomous)
+- 2026-11-03: Re-check. Text-view find searches the text storage directly instead of through `NSTextFinder`, which
+  reads its query only from its own bar or the find pasteboard. The remote schema version is declared once per binding
+  in the handshake, so events before a controller's first command have a version. (autonomous)
+- 2026-11-03: Final re-check. The listener handshake carries no applet schema version, so the version moved into a
+  bind command, the first a controller sends a viewer pane; no event goes out before it. This fix was made after the
+  proposal loop's third pass and was not re-checked. (autonomous)
+- 2026-11-03: ADR candidate (cuts across the system): untrusted documents are parsed in-process only by OS-maintained
+  libraries, and a third-party parser runs out of process, as Markdown does in WebKit. Declined on 2026-11-03: the user
+  chose UTERM-006's rule instead, that decoders uniterm does not own run in a sandboxed helper. ADR-07 already states
+  it, and UTERM-006 declined the same candidate for that reason.
+- 2026-11-03: ADR candidate (cuts across the system): control over a pane never lends a controller uniterm's own access
+  to files. Waits on the cross-applet file-opening proposal UTERM-009 committed to, which defines any scoped
+  path-reading power under ADR-09.
+- 2026-11-03: ADR candidate (cuts across the system): applet state never comes from shared system state such as the
+  find pasteboard, AppKit's remembered folder, or WebKit's default data store. Declined: CLAUDE.md "Applet Attributes"
+  already states it.
+- 2026-11-03: Hidden state, chosen by the user at the review gate per CLAUDE.md "Applet Attributes": the find query
+  belongs to the pane, not the system find pasteboard, and each Markdown pane uses its own non-persistent web data store.
+- 2026-11-03: Review gate: reopened Markdown rendering, in converge mode. The user asked to weigh HTML support in
+  WebKit (raw HTML disabled, a sanitized subset, or a fully trusted mode with all HTML) and Foundation's full-syntax
+  Markdown parsing into a native text view. If judging finds no clear winner, both may be built for a user-driven
+  comparison. The other gate items wait until this settles.
+- 2026-11-03: Markdown rendering, reopened: raw HTML renders through a pinned sanitizer's GitHub-aligned allowlist,
+  with a Content-Security-Policy backstop and the web view's appearance taken from the theme. Markdown find runs in the
+  parser's world. Before, raw HTML was disabled and showed as text. Converged in one pass; chosen by the user over
+  Foundation full-syntax parsing in a helper, a trust-level mode, and building both for comparison. (addition: a second
+  bundled third-party JS asset, the sanitizer)
+- 2026-11-03: Re-check of the Markdown amendment converged. Added a content rule list that blocks every load outside
+  the viewer's scheme, since loads started from an isolated world may skip the page's policy, and let in-page anchor
+  links scroll. (autonomous)
+- 2026-11-03: Followed two UTERM-009 amendments the user made during the UTERM-006 review. The bookmark is remade when
+  an open finds a different file than it names, so a restore never follows it to a rotated-away file. A pane shows one
+  document, opening another replaces it, and a drop of several files is refused with a message asking for one. Noted a
+  Preview-style document drawer as an idea that needs its own proposal. (autonomous)
+- 2026-11-03: Amended "RTF and Word use the system readers", by the user's choice: the readers run in UTERM-006's
+  sandboxed helper and return a secure-coded attributed string. Before, they ran in the app, as UTERM-009's readers do.
+  UTERM-009's caps and fuzzing protect code uniterm owns, while uniterm owns no code in these importers. PDF stays
+  in-process as ADR-07's stated exception, since `PDFView` needs an in-process document. Rewrote the hostile-document
+  risk for PDF only. (addition: a dependency on UTERM-006's helper and sandbox profile)
+- 2026-11-03: Re-check of the helper split converged. The helper is shared with UTERM-006, but the document readers'
+  sandbox operations never widen the image decoders' sandbox. Routed checks for codec-free image transfer, app-side
+  caps, helper lifecycle, the memory limit, and link schemes to M1. (autonomous)
+- 2026-11-03: Review gate: kept control levels, bind-command versioning, and the memory risk's acceptance. The user
+  reopened nothing else.
+- 2026-11-03: Accepted by the user after the review.
+- 2026-11-03: Amended "Control levels" and "RTF and Word use the system readers" while rebasing onto UTERM-004,
+  UTERM-006, and UTERM-008, accepted concurrently. UTERM-004 now has every remote command name its applet type and
+  schema version, and gives remote callers no events. So the viewer's bind command and its two events are gone, and the
+  show and reload replies report whether content loaded. The schema version is a major and a minor, as UTERM-006's is.
+  UTERM-006's image helper is decode-only with a narrow sandbox, so the document readers get their own helper of the
+  same design instead of sharing it. Remote file opening waits on the scoped path-reading power the cross-applet
+  file-opening proposal defines. Before, the viewer had a bind command, events, an integer version, and a helper shared
+  with UTERM-006. (autonomous)
 
 ## References
 
