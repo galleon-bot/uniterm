@@ -49,7 +49,7 @@ extension TerminalApplet {
       text("smaller-text", "Smaller Text", KeyChord("-"), .decreaseFontSize),
       text("actual-size", "Actual Size", KeyChord("0"), .resetFontSize),
       AppletCommand(
-        name: "clear", title: "Clear Screen", key: KeyChord("k"), home: .applet,
+        name: "clear", title: "Clear Screen", home: .applet,
         isAvailable: hasSession,
         run: { ($0 as? TerminalApplet)?.perform(.clearScreen) }),
     ]

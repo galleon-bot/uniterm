@@ -15,7 +15,7 @@ final class DockedPaletteUITests: UnitermUITestCase {
   }
 
   private func activate(in app: XCUIApplication) {
-    app.typeKey("p", modifierFlags: [.command, .shift])
+    app.typeKey("k", modifierFlags: .command)
     XCTAssertTrue(results(in: app).waitForExistence(timeout: 5), "the overlay never showed")
   }
 
@@ -28,7 +28,7 @@ final class DockedPaletteUITests: UnitermUITestCase {
 
     XCTAssertTrue(field(in: app).exists, "a docked palette is always on show")
     XCTAssertEqual(
-      field(in: app).placeholderValue, "Search tabs and commands (\u{21E7}\u{2318}P)")
+      field(in: app).placeholderValue, "Search tabs and commands (\u{2318}K)")
     XCTAssertFalse(results(in: app).exists)
 
     app.typeText("echo typed-while-inactive\n")
@@ -40,7 +40,7 @@ final class DockedPaletteUITests: UnitermUITestCase {
     app.typeText("split")
     XCTAssertTrue(waitFor(field(in: app), timeout: 5) { $0 == "split" })
 
-    app.typeKey("p", modifierFlags: [.command, .shift])
+    app.typeKey("k", modifierFlags: .command)
     XCTAssertTrue(waitUntilGone(results(in: app)), "the hotkey did not deactivate the palette")
     XCTAssertTrue(field(in: app).exists)
 
@@ -117,18 +117,22 @@ final class DockedPaletteUITests: UnitermUITestCase {
     XCTAssertTrue(results(in: app).waitForExistence(timeout: 5), "the remapped key did not work")
   }
 
-  /// Catches a top-docked strip under the traffic lights, and a bottom-docked overlay that opens
-  /// toward the edge instead of away from it.
-  func testTheStripSitsBelowTheTitleBarAndTheOverlayOpensAwayFromTheEdge() {
+  /// Catches a top-docked palette that sits below the title bar or covers the traffic lights, and
+  /// a bottom-docked overlay that opens toward the edge instead of away from it.
+  func testTheTopStripSitsInTheTitleBarRowAndTheOverlayOpensAwayFromTheEdge() {
     let top = launchApp(settings: docked)
     _ = waitForTerminal(in: top)
 
-    let window = mainWindow(in: top)
-    XCTAssertGreaterThan(
-      field(in: top).frame.minY, window.frame.minY + 20, "the strip sits in the title bar")
+    // The traffic lights end about 70 points from the window's left edge. The title bar row is
+    // under 40 points tall.
+    let window = mainWindow(in: top).frame
+    let palette = field(in: top).frame
+
+    XCTAssertLessThan(palette.maxY, window.minY + 40, "the palette sits below the title bar row")
+    XCTAssertGreaterThan(palette.minX, window.minX + 70, "the palette covers the traffic lights")
 
     activate(in: top)
-    XCTAssertGreaterThanOrEqual(results(in: top).frame.minY, field(in: top).frame.maxY)
+    XCTAssertGreaterThanOrEqual(results(in: top).frame.minY, palette.maxY)
     top.terminate()
 
     let bottom = launchApp(settings: ["paletteMode": "docked", "paletteDockEdge": "bottom"])

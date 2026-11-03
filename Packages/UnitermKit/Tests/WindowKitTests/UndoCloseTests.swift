@@ -220,8 +220,10 @@ final class UndoCloseTests: XCTestCase {
   }
 
   /// Catches an undo that cannot place a pane whose neighbor has gone. Pane 2 closes beside pane 1.
-  /// Then pane 1's shell exits, which leaves only pane 4. The reopened pane 5 goes at the end of the
-  /// row, on the side it was recorded on.
+  /// Then pane 1's shell exits, which leaves only pane 4. The first reopen brings pane 1 back as
+  /// pane 5, before pane 4, and the new row takes ID 6. Pane 2's neighbor is still gone, since
+  /// pane 5 has a new ID. So the second reopen puts pane 2 back as pane 7 at the end of the row,
+  /// on the side it was recorded on.
   func testUndoFallsBackToTheEdgeWhenTheNeighborIsGone() throws {
     let fixture = try makeFixture()
     fixture.openPanes(3)
@@ -232,9 +234,12 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertEqual(fixture.controller.paneIDs, [id(4)])
 
     fixture.controller.reopenClosed()
+    XCTAssertEqual(fixture.controller.paneIDs, [id(5), id(4)])
 
-    XCTAssertEqual(fixture.controller.paneIDs, [id(4), id(5)])
-    XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1"])
+    fixture.controller.reopenClosed()
+
+    XCTAssertEqual(fixture.controller.paneIDs, [id(5), id(4), id(7)])
+    XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 0", "Fake 1"])
   }
 
   /// Catches a stack that grows past its depth. With a depth of 2, three closes keep the newest
@@ -318,8 +323,8 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertEqual(fixture.controller.ledger.entries.map(\.title), ["Fake 1"])
   }
 
-  /// Catches a pane that exited while its close question was open and is closed twice, or kept on
-  /// the stack. The exit closes the pane with no entry. Confirming then does nothing.
+  /// Catches a pane that exited while its close question was open and is closed twice. The exit
+  /// closes the pane with one entry. Confirming then does nothing.
   func testAPaneThatExitsDuringItsCloseQuestionIsNotClosedAgain() async throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
@@ -334,7 +339,7 @@ final class UndoCloseTests: XCTestCase {
     await fixture.settle()
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
-    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
+    XCTAssertEqual(fixture.controller.ledger.entries.map(\.title), ["Fake 1"])
   }
 
   /// Catches a confirmed pane close that does nothing once the pane has become the last one. Pane 2
@@ -357,9 +362,9 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertTrue(fixture.made[1].closed)
   }
 
-  /// Catches a shell that exits on its own and leaves a description behind. The user did not close
-  /// this pane, so undo has nothing to bring back.
-  func testAPaneThatExitedOnItsOwnAddsNoEntry() throws {
+  /// Catches a pane whose shell exited that Cmd-Shift-T cannot bring back. A close is a close,
+  /// however it happens. The exit asks nothing and leaves an entry, and reopening uses it.
+  func testAPaneThatExitedOnItsOwnCanBeReopened() throws {
     let fixture = try makeFixture()
     fixture.openPanes(2)
 
@@ -367,8 +372,13 @@ final class UndoCloseTests: XCTestCase {
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(1)])
     XCTAssertTrue(fixture.made[1].closed)
-    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
+    XCTAssertEqual(fixture.controller.ledger.entries.map(\.title), ["Fake 1"])
     XCTAssertTrue(fixture.recorder.asked.isEmpty)
+
+    fixture.controller.reopenClosed()
+
+    XCTAssertEqual(fixture.controller.paneIDs.count, 2)
+    XCTAssertEqual(fixture.recorder.restored.map(\.title), ["Fake 1"])
   }
 
   // MARK: Window close guard
@@ -517,10 +527,10 @@ final class UndoCloseTests: XCTestCase {
     XCTAssertFalse(window.isVisible)
   }
 
-  /// Catches a dead pane that adds an undo entry. The last pane exits while the window question
-  /// is open, and Cancel leaves it. The user splits and closes the dead pane. It exited on its own,
-  /// so undo has nothing to bring back.
-  func testADeadPaneClosedLaterAddsNoEntry() async throws {
+  /// Catches a dead pane that is asked about or lost. The last pane exits while the window
+  /// question is open, and Cancel leaves it. The user splits and closes the dead pane. It closes
+  /// without a question and goes on the reopen list.
+  func testADeadPaneClosedLaterIsReopenable() async throws {
     let fixture = try makeFixture()
     let window = try XCTUnwrap(fixture.controller.window)
     window.orderFrontRegardless()
@@ -538,7 +548,7 @@ final class UndoCloseTests: XCTestCase {
 
     XCTAssertEqual(fixture.controller.paneIDs, [id(2)])
     XCTAssertTrue(fixture.made[0].closed)
-    XCTAssertTrue(fixture.controller.ledger.entries.isEmpty)
+    XCTAssertEqual(fixture.controller.ledger.entries.map(\.title), ["Fake 0"])
   }
 
   /// Catches a message from a closed applet that claims a live pane. Its source names pane 0, which

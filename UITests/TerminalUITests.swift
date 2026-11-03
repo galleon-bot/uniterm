@@ -150,8 +150,8 @@ final class TerminalUITests: UnitermUITestCase {
     XCTAssertEqual(app.state, .runningForeground)
   }
 
-  /// Catches a clear-screen menu item that does not reach the terminal. The marker leaves the
-  /// screen after Cmd-K.
+  /// Catches a Clear Screen command that does not reach the terminal. It has no default key, so
+  /// the test runs it from the palette. The marker leaves the screen.
   func testClearScreenClearsTheTerminal() {
     let app = launchApp()
     let terminal = waitForTerminal(in: app)
@@ -160,6 +160,7 @@ final class TerminalUITests: UnitermUITestCase {
     XCTAssertTrue(waitFor(terminal, timeout: 40) { $0.contains("C:42:") })
 
     app.typeKey("k", modifierFlags: .command)
+    app.typeText("clear screen\n")
 
     XCTAssertTrue(waitFor(terminal, timeout: 10) { !$0.contains("C:42:") })
   }

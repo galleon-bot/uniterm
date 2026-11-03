@@ -68,17 +68,26 @@ final class DockedPaletteTests: XCTestCase {
 
   // MARK: Placement
 
-  /// Catches a docked palette on the wrong edge, or one that eats a title bar's room.
-  func testTheDockedPaletteSitsAtTheTopBelowTheTitleBarByDefault() throws {
+  /// Catches a top-docked palette that sits below the title bar and costs the panes a row, or one
+  /// that covers the traffic lights. It fills the title bar row, flush with the window's top edge,
+  /// and its field stays clear of the window's sides.
+  func testTheDockedPaletteSitsInTheTitleBarRowByDefault() throws {
     let fixture = try makeFixture(position: "bottom")
     let safe = fixture.chrome.safeAreaRect
+    let strip = frame(strip(fixture), in: fixture)
+    let field = frame(palette(fixture), in: fixture)
+    let inset = MainContentViewController.titleBarPaletteSideInset
 
-    XCTAssertEqual(fixture.controller.contentController.edge(of: .commandPalette), .top)
-    XCTAssertEqual(frame(strip(fixture), in: fixture).maxY, safe.maxY)
-    XCTAssertEqual(
-      frame(strip(fixture), in: fixture).height,
-      MainContentViewController.dockedPaletteThickness)
-    XCTAssertEqual(fixture.paneArea.frame.maxY, frame(strip(fixture), in: fixture).minY)
+    XCTAssertEqual(fixture.controller.contentController.palettePlacement.edge, .top)
+    XCTAssertNil(fixture.controller.contentController.edge(of: .commandPalette))
+    XCTAssertGreaterThan(fixture.chrome.bounds.maxY, safe.maxY, "the window has a title bar row")
+    XCTAssertEqual(strip.maxY, fixture.chrome.bounds.maxY)
+    XCTAssertEqual(strip.minY, safe.maxY)
+    XCTAssertEqual(fixture.paneArea.frame.maxY, safe.maxY, "the panes keep the whole safe area")
+    XCTAssertEqual(field.midY, strip.midY, accuracy: 0.5)
+    XCTAssertEqual(field.height, CommandPaletteView.Style.titleBar.height)
+    XCTAssertGreaterThanOrEqual(field.minX, inset - 0.5)
+    XCTAssertLessThanOrEqual(field.maxX, fixture.chrome.bounds.maxX - inset + 0.5)
     XCTAssertFalse(palette(fixture).isHidden)
   }
 
@@ -91,9 +100,10 @@ final class DockedPaletteTests: XCTestCase {
     XCTAssertEqual(fixture.paneArea.frame.minY, frame(strip(fixture), in: fixture).maxY)
   }
 
-  /// Catches the stacking order flipping. With both on one edge, the bar is at the window's edge
-  /// and the palette is next to the panes.
-  func testOnOneEdgeTheStatusBarIsOutermostAndThePaletteIsNextToThePanes() throws {
+  /// Catches the stacking order flipping. At the bottom, the bar is at the window's edge and the
+  /// palette is next to the panes. At the top, the palette is in the title bar row and the bar
+  /// sits right below it.
+  func testOnOneEdgeTheStatusBarAndThePaletteStackInOrder() throws {
     for edge in ["top", "bottom"] {
       let fixture = try makeFixture(edge: edge, position: edge)
       let bar = fixture.bar.frame
@@ -101,9 +111,8 @@ final class DockedPaletteTests: XCTestCase {
       let panes = fixture.paneArea.frame
 
       if edge == "top" {
-        XCTAssertGreaterThan(bar.minY, strip.minY, "the bar is above the palette")
-        XCTAssertEqual(strip.minY, panes.maxY)
-        XCTAssertEqual(bar.minY, strip.maxY)
+        XCTAssertEqual(bar.maxY, strip.minY, "the bar is below the title bar row")
+        XCTAssertEqual(bar.minY, panes.maxY)
       } else {
         XCTAssertLessThan(bar.maxY, strip.maxY)
         XCTAssertEqual(strip.maxY, panes.minY)
@@ -112,18 +121,22 @@ final class DockedPaletteTests: XCTestCase {
     }
   }
 
-  /// Catches a docked strip that is missing from the minimum size, so a window could shrink until
-  /// the strip overlaps the panes.
-  func testTheDockedStripCountsTowardTheMinimumSize() throws {
-    let docked = try makeFixture()
+  /// Catches a bottom strip that is missing from the minimum size, so a window could shrink until
+  /// the strip overlaps the panes. A top-docked palette lives in the title bar row and adds nothing.
+  func testTheBottomStripCountsTowardTheMinimumSize() throws {
+    let top = try makeFixture()
+    let docked = try makeFixture(edge: "bottom")
     let floating = try makeFixture(mode: nil)
 
     let dockedHeight = try XCTUnwrap(docked.controller.window?.contentMinSize.height)
     let floatingHeight = try XCTUnwrap(floating.controller.window?.contentMinSize.height)
 
+    let topHeight = try XCTUnwrap(top.controller.window?.contentMinSize.height)
+
     XCTAssertEqual(
       dockedHeight - floatingHeight, MainContentViewController.dockedPaletteThickness,
       accuracy: 0.5)
+    XCTAssertEqual(topHeight, floatingHeight, accuracy: 0.5)
   }
 
   /// Catches a floating palette that still holds a row, or a docked one that leaves a ghost.
@@ -132,7 +145,7 @@ final class DockedPaletteTests: XCTestCase {
     fixture.store.set(.floating, for: .paletteMode)
 
     let switched = await waitUntil {
-      fixture.controller.contentController.edge(of: .commandPalette) == nil
+      fixture.controller.contentController.palettePlacement.mode == .floating
     }
 
     XCTAssertTrue(switched)
@@ -305,7 +318,7 @@ final class DockedPaletteTests: XCTestCase {
     fixture.store.set(.docked, for: .paletteMode)
 
     let docked = await waitUntil {
-      fixture.controller.contentController.edge(of: .commandPalette) != nil
+      fixture.controller.contentController.palettePlacement.mode == .docked
     }
 
     XCTAssertTrue(docked)
@@ -388,12 +401,12 @@ final class DockedPaletteTests: XCTestCase {
     fixture.controller.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification))
     let field = palette(fixture).field
 
-    XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{21E7}\u{2318}P)")
+    XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{2318}K)")
 
     item.keyEquivalent = "o"
     fixture.controller.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification))
 
-    XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{21E7}\u{2318}O)")
+    XCTAssertEqual(field.placeholderString, "Search tabs and commands (\u{2318}O)")
 
     fixture.controller.showCommandPalette()
     XCTAssertEqual(field.placeholderString, "Search tabs and commands")

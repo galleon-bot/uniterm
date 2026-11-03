@@ -17,8 +17,28 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
 {
   static let width: CGFloat = 560
   static let rowHeight: CGFloat = 28
-  static let fieldHeight: CGFloat = 40
   static let maximumVisibleRows = 8
+
+  /// The padding between the results panel's border and its rows.
+  static let resultsPadding: CGFloat = 6
+
+  /// The sizes of the field's box. The text centers in it at its own height, so a taller box adds
+  /// room above and below the text and never moves the text to the top.
+  struct Style: Equatable {
+    var height: CGFloat
+    var fontSize: CGFloat
+    var cornerRadius: CGFloat
+    var textInset: CGFloat
+
+    /// A floating palette is a card over the panes, so it has room for a larger field.
+    static let floating = Style(height: 40, fontSize: 15, cornerRadius: 10, textInset: 14)
+
+    /// A palette docked at the bottom sits in a strip that costs the panes its height.
+    static let docked = Style(height: 24, fontSize: 13, cornerRadius: 6, textInset: 10)
+
+    /// A palette docked at the top sits in the title bar row, beside the traffic lights.
+    static let titleBar = Style(height: 22, fontSize: 13, cornerRadius: 6, textInset: 10)
+  }
 
   /// How the window presents the palette. A floating palette is hidden until it is active. A docked
   /// one is always on show.
@@ -35,6 +55,10 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
   private let table = PaletteTableView()
   private var palette: ThemePalette = .latte
   private var resultsHeight: NSLayoutConstraint?
+  private var textLeading: NSLayoutConstraint?
+  private var textTrailing: NSLayoutConstraint?
+
+  private(set) var style: Style = .floating
 
   private(set) var presentation: Presentation = .floating
   private(set) var isActive = false
@@ -74,10 +98,8 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     super.init(frame: frameRect)
 
     wantsLayer = true
-    layer?.cornerRadius = 10
     layer?.borderWidth = 1
 
-    field.font = .systemFont(ofSize: 15)
     field.isBordered = false
     field.drawsBackground = false
     field.focusRingType = .none
@@ -90,6 +112,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("entry"))
     column.resizingMask = .autoresizingMask
     table.addTableColumn(column)
+    table.style = .plain
     table.headerView = nil
     table.rowHeight = Self.rowHeight
     table.intercellSpacing = .zero
@@ -111,17 +134,32 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     height.isActive = true
     resultsHeight = height
 
+    // The field keeps its own height, so its text is centered in the box at any box height.
+    let leading = field.leadingAnchor.constraint(equalTo: leadingAnchor)
+    let trailing = field.trailingAnchor.constraint(equalTo: trailingAnchor)
+    textLeading = leading
+    textTrailing = trailing
+
     NSLayoutConstraint.activate([
       field.centerYAnchor.constraint(equalTo: centerYAnchor),
-      field.heightAnchor.constraint(equalToConstant: Self.fieldHeight),
-      field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-      field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+      leading,
+      trailing,
     ])
 
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityIdentifier("command-palette")
+    apply(style: .floating)
     updatePresentation()
+  }
+
+  /// Sizes the field's font, corners, and text inset. The window sets the box's height to match.
+  func apply(style: Style) {
+    self.style = style
+    field.font = .systemFont(ofSize: style.fontSize)
+    layer?.cornerRadius = style.cornerRadius
+    textLeading?.constant = style.textInset
+    textTrailing?.constant = -style.textInset
   }
 
   // MARK: Presentation
@@ -217,7 +255,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
     }
 
     let rows = min(entries.count, Self.maximumVisibleRows)
-    resultsHeight?.constant = CGFloat(rows) * Self.rowHeight
+    resultsHeight?.constant = CGFloat(rows) * Self.rowHeight + 2 * Self.resultsPadding
     results.isHidden = !isActive || entries.isEmpty
 
     table.reloadData()
@@ -366,16 +404,20 @@ final class PaletteResultsPanel: NSView {
     layer?.masksToBounds = true
 
     scroll.hasVerticalScroller = true
+    scroll.automaticallyAdjustsContentInsets = false
+    scroll.contentInsets = NSEdgeInsetsZero
     scroll.drawsBackground = false
     scroll.borderType = .noBorder
     scroll.translatesAutoresizingMaskIntoConstraints = false
     addSubview(scroll)
 
+    let padding = CommandPaletteView.resultsPadding
+
     NSLayoutConstraint.activate([
-      scroll.topAnchor.constraint(equalTo: topAnchor),
-      scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
-      scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-      scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+      scroll.topAnchor.constraint(equalTo: topAnchor, constant: padding),
+      scroll.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding),
+      scroll.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
+      scroll.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
     ])
 
     setAccessibilityElement(true)
@@ -434,9 +476,9 @@ private final class PaletteRowView: NSView {
     addSubview(kind)
 
     NSLayoutConstraint.activate([
-      title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+      title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       title.centerYAnchor.constraint(equalTo: centerYAnchor),
-      kind.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+      kind.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
       kind.centerYAnchor.constraint(equalTo: centerYAnchor),
       title.trailingAnchor.constraint(lessThanOrEqualTo: kind.leadingAnchor, constant: -12),
     ])

@@ -107,7 +107,7 @@ enum StandardCommands {
       },
       Command(
         .showCommandPalette, "Show Command Palette", scope: .window,
-        key: KeyChord("p", commandShift), menu: MenuPlacement(.view, section: 1),
+        key: KeyChord("k"), menu: MenuPlacement(.view, section: 1),
         listedInPalette: false,
         isAvailable: { $0.actionsEnabled },
         run: { context in
