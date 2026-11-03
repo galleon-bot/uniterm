@@ -287,42 +287,80 @@ Rationale: the settled type mapping already decides between claimants. A host ru
 terminal would be a special case beside it. Refusing folders loses opening a terminal on a Finder folder, a common
 case.
 
-## Design Decisions (Open)
-
 ### Where a routed pane goes
 
-- **Beside the focused pane, as Split Right does.** In a new window when no window is open, such as an open from
-  Finder at launch.
-- **Into the focused pane when it is a launcher or an empty pane of the chosen type, else beside it.**
-- **Finder and Dock opens in a new window, in-app opens beside the focused pane.** Matches how a document app behaves
-  for a Finder open. Unless Launch Services opens are gated by sender, this covers every program-sent open too.
-- Each option needs a rule for a split refused for lack of room. Candidates: a new window, a new tab in the window, or
-  refusing with the "not enough room" message the window already posts.
-- Each option needs a rule for a Finder open that arrives at launch while layout restore runs: whether the routed pane
-  lands after restored windows, or in its own window.
-- Constraint: a routed open never lands in a pane a controller owns. Otherwise a controller could place an empty pane
-  to learn when the user opens a file.
-- Constraint: a batch of several files needs a rule too, so it never stops halfway when a split runs out of room.
+Original question: where the router places the pane a routed file opens in.
+
+Decision: beside the pane the request came from, in a new pane that no controller owns. A new window holds only the
+routed pane.
+
+- The anchor is the pane the request came from. A terminal click anchors to the clicked pane. `uniterm open` from a
+  terminal session anchors to that session's pane, by the source-pane binding UTERM-004 settles. File > Open anchors
+  to the focused pane of the window whose menu ran it. Finder, the Dock, other Launch Services senders, and callers in
+  no terminal session anchor to the focused pane of the most recently key window, which is brought forward.
+- The routed pane is new and disconnected, and a routed split never joins a group a controller owns. A routed open
+  never replaces the source of an existing pane.
+- When no window is open, or the split is refused for lack of room, or the window has a sheet attached, the file opens
+  in a new window whose only pane is the routed pane. That window never starts a terminal shell, and inherits no
+  directory from another window.
+- A batch opens in one new window. Each file splits the largest pane, and a file that still finds no room goes to a
+  further new window.
+- An open that arrives while layout restore runs waits until restore finishes, then follows the same rules.
+
+Rationale: anchoring to the key window would place a pane in a window the caller is not in, which UTERM-003 rejects as
+an implicit target and UTERM-004's "Same window only" forbids. Reusing a launcher or an empty pane would hand a routed
+file to a pane a controller may already watch through remote control. Opening a new window through the usual path
+would start an extra shell, in a directory taken silently from the active window. Sending every Finder open to a new
+window would still anchor in-app opens to the key window.
 
 ### Start directory and current directory
 
-uniterm's rules require that current directory flows explicitly, never as hidden state. This question decides each flow
-the router adds.
+Original question: uniterm's rules require that current directory flows explicitly, never as hidden state. Which
+directory each flow the router adds uses.
 
-- The routed pane's start directory, for a file. A routed folder is already the new terminal's explicit start
-  directory, per "Folders". Candidates: the opened file's folder, the focused pane's `currentDirectory`, or
-  none.
-- File > Open's panel start directory. Candidates: the focused pane's `currentDirectory`, the last folder File > Open
-  used, kept explicitly per window, or the panel's own remembered folder.
-- A relative path given to `uniterm open`. Candidates: the command resolves it against its own working directory
-  before it sends anything, so the app only sees absolute paths, or relative paths are refused. UTERM-003 says the
-  CLI's working directory never flows in implicitly. Resolving a path the user typed in that directory may or may not
-  count as implicit flow.
-- A relative path clicked in the terminal, if "Which entry points open files" keeps clicks. The shell's directory when
-  the path was printed may differ from its directory now. Candidates: resolve against the directory recorded for the
-  output's command, refuse relative paths, or resolve against the current `currentDirectory` and accept the mismatch.
-- Constraint: a terminal in an ssh session reports a remote directory, and a `file://host/path` hyperlink can name
-  another host. Neither may be read as a local path.
+Decision: every flow is named here, and each takes its directory from the request itself.
+
+- A routed file's pane starts in the file's folder, wherever the pane lands. A routed folder is the new terminal's
+  start directory, per "Folders". When the file's folder later disappears, the viewer's fallback goes with it.
+- A routed window's only pane takes its start directory from the routed file or folder, never from another window.
+- File > Open's panel starts in the focused pane's `currentDirectory`, as UTERM-006 to UTERM-009's in-pane panels do.
+  With no window, or a pane that reports none, it starts in the home folder, never in AppKit's remembered folder.
+- `uniterm open` resolves a relative path against the command's own physical working directory before it sends
+  anything, so only absolute paths reach the app. The command's working directory itself never crosses the socket.
+  A deleted working directory fails in the command, with a message.
+- A relative path clicked in the terminal is refused. Only an absolute path or a `file:` hyperlink opens.
+
+Rationale: the file's folder comes from the request, so it is the same in a split and in a new window, and for every
+entry point. The focused pane's directory would depend on which pane had focus when a Finder event arrived. A relative
+argument to `uniterm open` means what the user's shell means by it, and resolving it in the command keeps any CLI
+state out of the app. A clicked relative path may have been printed by a remote `ls` over ssh, or before a `cd`.
+Shell integration gives no signal that output came from a remote host, so resolving it against any local directory can
+open the wrong file. Leaves undone: clicking `notes.txt` in `ls` output does nothing.
+
+### Who may run `uniterm open`
+
+Original question: opening a pane from a process is a control effect under ADR-09. Which approval a `uniterm open`
+request needs.
+
+Decision: a once or session approval scoped to the calling terminal session, as UTERM-004 gives shared-terminal OSC 52.
+A caller outside any terminal session gets Allow once only.
+
+- The approval names the terminal session and says it covers every program in that session. A session grant ends when
+  the session ends or its pane closes, and a restored pane never carries it.
+- The `uniterm` command is uniterm's own helper, a new process on every run. A caller with no terminal session is
+  therefore a go-between, and gets Allow once only, as the Launch Services rule gives one. A program inside tmux or
+  screen is outside, since the multiplexer's server breaks the ancestry, so it asks on every open.
+- Nothing stats, opens, or looks up the type of a path before its open is authorized. The same holds for every
+  Launch Services open that needs approval.
+- The reply never tells missing, unsupported, and denied apart without the path-reading power for that path.
+
+Rationale: a controller grant would require remote control on the source pane, and the only signed party is uniterm's
+own helper, a shared go-between ADR-09 forbids trusting. That is stricter than the Launch Services path, so a refused
+program would use `open -a` instead. Treating it as the user's act gives any process panes with no grant, against
+ADR-09, and looser than the Launch Services path. A session grant on the helper's PID would cover one call only, under
+a false label.
+
+## Design Decisions (Open)
 
 ### Who may open by terminal click
 
@@ -335,25 +373,11 @@ while its target is `file:///Users/me/Documents/tax.pdf`.
   program chooses a hyperlink's target, and the user reads a bare path on screen.
 - **Every click is the user's act.** Leaves undone: a program can make a click open a file the user did not read.
 - Constraint: a click opens no more than the Launch Services path allows.
-
-### Who may run `uniterm open`
-
-Only when "Which entry points open files" keeps `uniterm open`. Opening a pane from a process is a control effect under
-ADR-09. The listener knows the peer's audit token and PID, but ADR-09 says a request from a terminal session that cannot
-identify its originating program cannot use a particular script's approval.
-
-- **A once or session approval scoped to the calling terminal session, labelled as covering programs in that
-  session.** The same shape UTERM-004 gives anonymous OSC 52. The first open in a session asks.
-- **A `uniterm open` request needs a controller grant, like any `uniterm run` script.** Consistent with every other
-  control entry point. A user typing `uniterm open` sees an approval prompt, and remembered trust needs a verified
-  controller.
-- **Treat it as the user's act, since the command only opens a pane and returns no content.** The caller learns nothing
-  it could not read itself. Any same-user process can then open panes, which ADR-09's scope rules exist to prevent.
-- Constraint: the reply to `uniterm open` carries no file content, so the path-reading power may not be needed for it.
-  Opening a pane may still need pane-creation authority.
-- Constraint: a reply that says a file is missing, or names its type, tells the caller what exists. Without the
-  path-reading power for that path, the reply must not tell "missing", "unsupported", and "denied" apart. The user
-  still sees the full message in uniterm.
+- Constraint: shell integration gives no signal that output came from a remote host. After `ssh`, the remote side
+  usually runs no uniterm shell integration, so an absolute path a remote `ls` prints, such as `/etc/hosts`, names a
+  remote file that also exists locally. Candidate signals: the pane's foreground process being `ssh` or `mosh`, or a
+  hostname in OSC 7 that is not this host. Showing the resolved local target before the open leaves the call to the
+  user.
 
 ## Risks
 
@@ -394,7 +418,12 @@ remove, add, or reshape them.
 - A file no applet declares is refused with a message that names the file and its type
 - Working out a routed file's type never opens or blocks on a FIFO or a device node
 - Routing works with fixture applets, so it needs no production viewer to test
-- A routed pane's start directory follows "Start directory and current directory", with no implicit inheritance
+- A routed pane starts in the file's folder, even when split beside a pane in another folder
+- A routed pane opens beside the pane the request came from, never in another window, and never joins a group a
+  controller owns
+- A routed new window holds only the routed pane, starts no shell, and inherits no directory
+- A batch opens in one new window, splitting the largest pane each time, and a window with a sheet attached is
+  treated as having no room
 - The "Open With" choice lists every applet that declares the file's type, can save the choice for the file's exact
   type, and lets the user clear it
 - A saved choice for one type never routes a type that conforms to it, and a saved choice naming a missing applet, or
@@ -421,6 +450,9 @@ remove, add, or reshape them.
 - Several files open one pane each, with one summary message for the ones that failed, and a confirmation above the
   fixed count
 - A routed folder opens a new terminal there, or the applet the type mapping picks, and a package is refused
+- An open-documents event that arrives before layout restore finishes waits for it, on every launch outcome
+- A Finder open while uniterm is in the background lands in the most recently key window, brought forward and
+  unminimized
 - The reply to an open-documents event is the same for success, missing, unsupported, and denied
 - The app's declared document types match the applet declarations, and a test fails when they drift
 - Several files and folders follow the rules their open questions settle
@@ -430,7 +462,7 @@ remove, add, or reshape them.
 **Status:** NOT STARTED
 
 - File > Open opens a panel and routes the chosen file, by the key ownership "Who owns Cmd-O" settles
-- The panel starts in the directory "Start directory and current directory" settles
+- The panel starts in the focused pane's `currentDirectory`, or the home folder when there is none
 - A test checks that no built-in applet command claims Cmd-O
 - Each viewer's pane-local Open command replaces its source, and in a controller-owned pane that controller gets no
   path or content outside its scope
@@ -463,6 +495,10 @@ remove, add, or reshape them.
 **Status:** NOT STARTED
 
 - `uniterm open <path>` opens the path through the router, with the authority "Who may run `uniterm open`" settles
+- A session grant ends with its terminal session or pane, and a restored pane never carries it
+- A caller outside any terminal session, a tmux pane included, gets Allow once only
+- Nothing touches a path before its open is authorized, so an unapproved request never raises a macOS privacy prompt
+- A relative path resolves against the command's physical working directory, and a deleted one fails in the command
 - The reply carries no file content
 - An old `uniterm` command with a new app, or the reverse, is refused at the handshake
 
@@ -470,8 +506,9 @@ remove, add, or reshape them.
 
 **Status:** NOT STARTED
 
-- Cmd-click on a path or a local `file:` hyperlink in the terminal opens it through the router, with the authority
-  and relative-path rule their open questions settle
+- Cmd-click on an absolute path or a local `file:` hyperlink in the terminal opens it through the router, with the
+  authority "Who may open by terminal click" settles
+- A relative path clicked in the terminal is refused
 - A `file:` hyperlink naming another host, and a path in an ssh session, never open a local file
 - A Cmd-click on a web URL or another non-file scheme does nothing
 - The open-URL action reaches the app through the terminal surface protocol
@@ -525,6 +562,16 @@ remove, add, or reshape them.
   fixed count. A batch needs a rule under "Where a routed pane goes". Converged in 1 pass. (autonomous)
 - 2026-11-03: Folders: routed by type as `public.folder`. The terminal opens a new pane with the folder as its explicit
   start directory, and packages are refused. Converged in 1 pass. (autonomous)
+- 2026-11-03: Where a routed pane goes: beside the pane the request came from, in a new disconnected pane. A new window
+  holds only the routed pane and starts no shell. Fixed rules for room, sheets, batches, and launch. The critic added
+  the source-pane anchor as the complete option. Converged in 1 pass. (autonomous)
+- 2026-11-03: Start directory and current directory: a routed file starts in its folder, File > Open starts in the
+  focused pane's directory, `uniterm open` resolves relative paths in the command, and clicked relative paths are
+  refused. A per-command directory was weighed for clicks. Shell integration cannot tell remote output from local, so
+  it could open the wrong file. Converged in 1 pass. (autonomous)
+- 2026-11-03: Who may run `uniterm open`: once or session approval for the calling terminal session, and Allow once
+  only for a caller outside one. Nothing touches a path before its open is authorized. Converged in 1 pass.
+  (autonomous, addition: a terminal-session pane-open approval joins UTERM-004's pending indicator beside OSC 52's)
 
 ## References
 
