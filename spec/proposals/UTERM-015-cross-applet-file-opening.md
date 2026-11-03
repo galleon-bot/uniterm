@@ -22,9 +22,9 @@
   App-level opening and the data viewer's File > Open binding are decided here
 - UTERM-008 — "Input sources" file source: its open panel and drop stay in the pane. Finder and File > Open reach the
   map through the router
-- UTERM-008 — "Where pins come from": `pin selected` names a file pin by its ID, which comes from the user's file. Under
-  "The path-reading power", a driver whose scope does not hold the file gets no such detail. UTERM-008 needs an
-  amendment when this proposal is accepted
+- UTERM-008 — "Where pins come from": under "The path-reading power", a driver whose scope does not hold the user's
+  file gets no value from it. UTERM-008 was amended so `pin selected` marks a file pin without its ID, and a click on
+  one sends no `map clicked`
 - UTERM-007 — the text viewer, still a draft, opens its documents through the same router and declares the types it
   opens
 - UTERM-005 — "Navigation": the browser refuses `file:` because loading it needs a file read scope. That scope is the

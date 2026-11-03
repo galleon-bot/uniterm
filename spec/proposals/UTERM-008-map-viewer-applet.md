@@ -20,6 +20,8 @@
 - UTERM-004 — "Exec wire format" and M3: amended in this review to name the applet-side command and event hook and
   the remote applet-command call, which map M3 depends on
 - UTERM-003 — "Host API": scripts place pins through `uniterm/send-command`, which UTERM-004 adds to the module
+- UTERM-015 — "The path-reading power": no event reveals a value from the user's file, so the map needs nothing from
+  that power
 
 ## Summary
 
@@ -91,8 +93,9 @@ pin belongs to a named layer.
   stated rule of the schema, not state a library carries.
 - The user can clear any layer from the map's own UI.
 - Events go only to the exec driver, since UTERM-004 defines no other event channel. `map clicked` carries the
-  coordinate. `pin selected` names a command pin by its layer and ID, and a file pin by a separate file source field
-  and its ID.
+  coordinate of a click on the map. `pin selected` names a command pin by its layer and ID. For a file pin it carries
+  only a file-source marker, never the pin's ID or any other value from the file. A click on a file pin sends that
+  marker and no `map clicked`, so the pin's stored coordinate never reaches the driver.
 - UTERM-004 owns the applet-side command and event hook, and the remote host call that carries applet commands,
   `uniterm/send-command`. Each remote command names the applet type and schema version it targets. UTERM-004 was
   amended in this review to name both, and its M3 builds them. Map M3 depends on both.
@@ -292,7 +295,8 @@ None.
 - `clear` and `remove` touch only the named layer, and an exec driver with no layer named uses the default layer
 - A restarted driver, or a script run again, replaces its own layer's pins instead of adding a second copy
 - `map clicked` and `pin selected` reach the exec driver. `pin selected` names a command pin's layer and ID, or marks
-  a file pin by its source field
+  a file pin by its source field with no ID, coordinate, or other value from the file
+- A click on a file pin sends no `map clicked`
 - No command can add to, remove from, or clear the file layer, and a command naming the file's source gets a
   structured error
 - `add` with an existing ID replaces the whole pin, and an omitted accent or glyph takes the default
@@ -403,6 +407,12 @@ None.
 - 2026-11-03: Review complete. Size against Review start: 2 to 3 milestones, 2 to 6 settled decisions, 1 to 6 risks.
   The review also amended UTERM-004 at the user's request. No ADR was written.
 - 2026-11-03: Scheduled as UTERM-008 M1-M2 and UTERM-008 M3 in queue.md.
+- 2026-11-03: Amended "Where pins come from". `pin selected` named a file pin by a file source field and its ID, and
+  the decision did not say whether a click on a file pin also sent `map clicked`. Both let an exec driver learn values
+  from the user's file, which UTERM-015's path-reading power keeps from a controller whose scope does not hold that
+  file. A file pin is now only marked, and a click on one sends no `map clicked`. M3's check already marked file pins
+  without an ID, so the decision now matches it. Carrying the ID when the driver's read scope covers the file was
+  weighed. It would tie M3 to UTERM-015 for a need no caller has stated.
 
 ## References
 
