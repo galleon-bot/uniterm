@@ -8,7 +8,7 @@
 | [UTERM-004](UTERM-004-control-and-trust.md) | Pane control, durable controller trust, scoped approvals, and layout requests | accepted |
 | [UTERM-005](UTERM-005-browser-applet.md) | WebKit browser applet with tabs and a security indicator | accepted |
 | [UTERM-006](UTERM-006-image-viewer-applet.md) | Image viewer applet with folder slideshow | accepted |
-| [UTERM-007](UTERM-007-text-viewer-applet.md) | Viewer for Markdown, RTF, Word, and PDF | draft |
+| [UTERM-007](UTERM-007-text-viewer-applet.md) | Viewer for Markdown, RTF, Word, and PDF | accepted |
 | [UTERM-008](UTERM-008-map-viewer-applet.md) | MapKit applet with custom pins | accepted |
 | [UTERM-009](UTERM-009-data-viewer-applet.md) | Table viewer for CSV, JSON, and spreadsheets | accepted |
 | [UTERM-010](UTERM-010-canvas-applet.md) | Canvas applet that programs draw on | draft |
@@ -26,7 +26,7 @@ UTERM-003 ← UTERM-001
 UTERM-004 ← UTERM-001, UTERM-003
 UTERM-005 ← UTERM-001
 UTERM-006 ← UTERM-001
-UTERM-007 ← UTERM-001
+UTERM-007 ← UTERM-001, UTERM-003, UTERM-004, UTERM-006, UTERM-013
 UTERM-008 ← UTERM-001
 UTERM-009 ← UTERM-001
 UTERM-010 ← UTERM-001, UTERM-004
