@@ -39,7 +39,8 @@ Original question: whether data can arrive from a script or a pipe, as well as f
 Decision: files open from inside the pane now. Pipe and script input is deferred to UTERM-003 and UTERM-004.
 
 - The pane starts from the launcher like any applet, so the applet factory does not change. Inside it, the user opens
-  a file with an open panel or by dropping a file onto the pane. A drop accepts file URLs only.
+  a file with an open panel, from an Open... registry command with no key in the File menu, or by dropping a file onto
+  the pane. A drop accepts file URLs only.
 - A pane shows one file. Opening another file replaces it: the old load is cancelled, and the new file starts with no
   sort or filter. The open panel selects one file. A drop of several files is refused with a message asking for one
   file, and the pane keeps what it showed. Amended 2026-11-03; see Decision Log.
@@ -48,17 +49,15 @@ Decision: files open from inside the pane now. Pipe and script input is deferred
 - All loading goes through one internal entry point that takes a source. Today the only source is a file URL. A
   byte-stream source is added when its first caller lands. It spools to a file when a format needs random access, as
   `.xlsx` does.
-- App-level opening is not part of this proposal. That covers Finder "Open With", document types, routing a file type
-  to an applet, and which applet owns Cmd-O. UTERM-006, UTERM-007, and UTERM-008 open files too, and UTERM-013 owns
-  shortcut ownership, so one cross-applet proposal decides it. The data viewer binds no File > Open shortcut until
-  then.
+- App-level opening belongs to UTERM-015, the cross-applet proposal this decision committed to. Its File > Open on
+  Cmd-O routes files here by type, and this Open... is the pane-local open it keeps. The data viewer declares CSV,
+  `public.json`, and `.xlsx` at the owner rank. A GeoJSON file goes to the map, whose type is more specific. The data
+  viewer binds no File > Open key.
 - Pipe and script input waits on UTERM-003's "send data to an applet" host function and on UTERM-004's caller
   identification and exec wire format.
 
 **Revisit:** when UTERM-003 settles how a caller reaches the app and UTERM-004 settles caller identification, decide
-the byte-stream source, what a restored pane shows for data that had no file, and how a pipe reaches a pane; and file
-the cross-applet file-opening proposal before a second viewer applet among UTERM-006 to UTERM-008 starts its first
-milestone.
+the byte-stream source, what a restored pane shows for data that had no file, and how a pipe reaches a pane.
 
 Rationale: a pipe into a pane beside the calling terminal is the complete answer to the Motivation. It needs caller
 identity and a channel, which UTERM-003 and UTERM-004 have not settled. A launcher source that runs a command was
@@ -235,7 +234,9 @@ None.
 
 - A pane can run the data viewer and open a CSV file as a table, from an open panel or by dropping a file on the pane
 - Every load goes through the one source-taking entry point
-- A drop accepts file URLs only, and the data viewer binds no File > Open shortcut
+- A drop accepts file URLs only, and the data viewer binds no File > Open key
+- The Open... command with no key opens the panel, and the viewer declares CSV and `public.json` at the owner rank, for
+  UTERM-015's router
 - Opening a file into a pane that shows one replaces it, cancels any load still running, and clears the sort and
   filter. A drop of several files is refused with a message asking for one file, and the pane keeps what it showed
 - The loader opens regular files only, so a FIFO, a device, or a stalled mount never blocks the pane, and reads off the
@@ -303,6 +304,7 @@ None.
 **Status:** NOT STARTED
 
 - An `.xlsx` file opens as a table, and a workbook with several sheets offers a sheet picker
+- The viewer declares `.xlsx` at the owner rank, for UTERM-015's router
 - Dates show as dates, under both the 1900 and the 1904 date systems, including Excel's serial 60
 - Shared, inline, and rich-text strings show their text, and sparse cells land in the column their reference names
 - A formula with no cached value shows as not computed
@@ -368,6 +370,10 @@ None.
   is refused with a message asking for one. Before, the decision said nothing about either case. Noted a Preview-style
   document drawer as an idea that needs its own proposal. The user's decision.
 - 2026-11-03: Scheduled as UTERM-009 M1-M4 in queue.md.
+- 2026-11-03: Amended "Input sources" for UTERM-015. App-level opening waited on a cross-applet proposal this decision
+  committed to filing. UTERM-015 is that proposal, now accepted. The viewer gains an Open... command with no key and
+  declares CSV, JSON, and `.xlsx` as owner. Revisit-hook audit: act on the filing clause, which is done and removed.
+  The byte-stream clause stays.
 
 ## References
 

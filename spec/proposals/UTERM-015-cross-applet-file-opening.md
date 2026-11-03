@@ -287,11 +287,11 @@ Decision: a folder routes like a file, with the folder as its content type.
 
 - Applets declare `public.folder`, never `public.directory`, so a package such as the Photos library or an app bundle
   is refused as an unsupported type.
-- The terminal declares folders. Its entry point for a routed folder is a new terminal pane created with that folder as
-  its explicit start directory. The terminal has no source to replace, so the routed folder is never handed to a
+- The terminal declares folders at the owner rank, so a folder from Finder opens a shell there. Its entry point for a
+  routed folder is a new terminal pane created with that folder as its explicit start directory. Amended 2026-11-03;
+  see Decision Log. The terminal has no source to replace, so the routed folder is never handed to a
   running terminal.
-- The image viewer declares folders too. The type mapping picks between them, and "Open With" or a saved choice for
-  folders reaches the other.
+- The image viewer declares folders at the alternate rank. "Open With" or a saved choice for folders reaches it.
 
 Rationale: the settled type mapping already decides between claimants. A host rule that sends every folder to a
 terminal would be a special case beside it. Refusing folders loses opening a terminal on a Finder folder, a common
@@ -641,6 +641,9 @@ a libghostty that cannot mark rows, one remote session turns off clicks in that 
   each path reports, since the decision reopens if Finder and `open -a` cannot be told apart.
 - 2026-11-03: Accepted after the review gate. No ADR written.
 - 2026-11-03: Scheduled as UTERM-015 M1-M3 and UTERM-015 M4-M6 in queue.md.
+- 2026-11-03: Amended "Folders": the terminal declares `public.folder` at the owner rank and the image viewer at the
+  alternate rank. Folders said only that the type mapping picks, and two equal claims fail its test. Amended UTERM-006,
+  UTERM-008, and UTERM-009 to declare their types and gain a pane-local Open... with no key.
 
 ## References
 

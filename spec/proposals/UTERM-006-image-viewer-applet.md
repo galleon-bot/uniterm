@@ -18,8 +18,7 @@
 - UTERM-003 — "Control levels": "send a document to an applet" maps onto the viewer's `show` command
 - UTERM-009 — "Rendering": decoding untrusted files through OS code uniterm does not own runs in a sandboxed helper
   here, which bears on UTERM-009's waiting ADR candidate about in-process parsing
-- UTERM-009 — "Control levels": the cross-applet file-opening proposal also defines the path-reading power under
-  ADR-09
+- UTERM-009 — "Control levels": UTERM-015 defines the path-reading power under ADR-09 for both viewers
 
 ## Summary
 
@@ -94,7 +93,7 @@ Original question, raised in this review: how an image or a folder reaches an im
 Decision: files and folders open from inside the pane, following UTERM-009's "Input sources".
 
 - The launcher offers the image viewer, and the pane starts empty. Inside it, the user opens a file or a folder with an
-  open panel, or drops file URLs onto the pane.
+  open panel, from an Open... registry command with no key in the File menu, or drops file URLs onto the pane.
 - A pane shows one source, a file or a folder. Opening another replaces it, and a slideshow that was playing stops.
   The open panel selects one file or one folder. A drop of several items is refused with a message asking for one
   file or folder, and the pane keeps what it showed. The source stays one file or one folder, in the description and
@@ -102,9 +101,9 @@ Decision: files and folders open from inside the pane, following UTERM-009's "In
 - A drawer of open documents beside the image, as Preview has, is an idea for later. This proposal does not commit to
   it. Building it needs its own proposal, since it changes what a pane and its description hold.
 - All loading goes through one internal entry point that takes a source.
-- App-level opening is not part of this proposal: Finder "Open With", document types, Cmd-O, and routing a file type to
-  an applet. UTERM-009 leaves it to one cross-applet proposal. The image viewer binds no File > Open shortcut until
-  then.
+- App-level opening belongs to UTERM-015. Its File > Open on Cmd-O routes files here by type, and this Open... is the
+  pane-local open it keeps. The image viewer declares `public.image` at the owner rank and `public.folder` at the
+  alternate rank, since the terminal owns folders. It binds no File > Open key.
 - Script and terminal input belongs to "Control levels".
 
 Rationale: UTERM-009 settled the boundary for every viewer from UTERM-006 to UTERM-009, and its hook asks for the
@@ -165,13 +164,13 @@ power to read a path for a controller is defined once, outside this proposal.
 - Asking the viewer to read a path is its own power under ADR-09, apart from pane control. It carries an explicit
   directory scope, checked against the real path of the opened descriptor, so a symlink or a rename cannot widen it.
   Errors for paths outside the scope do not tell "missing", "not an image", and "denied" apart.
-- That power is defined in the cross-applet file-opening proposal that "Input sources" requires before M1, so UTERM-005,
-  UTERM-007, and UTERM-009 share one definition.
+- That power is defined in UTERM-015, so UTERM-005, UTERM-007, and UTERM-009 share one definition.
 - Schema compatibility: the schema version is a major and a minor, carried in UTERM-004's hello. A new command, or a
   new optional event field that drivers ignore, bumps the minor. A driver that needs a newer command requires that minor
   in the hello, so an older viewer is refused before any effect instead of failing midway. A change in meaning, or a
   removed command, bumps the major, and the handshake refuses the mismatch.
-- M4 builds it after UTERM-004's M2 and M3, UTERM-003's M2, and the cross-applet proposal defining the power.
+- M4 builds it after UTERM-004's M2 and M3, UTERM-003's M2, and UTERM-015's M4, which builds the power. Amended
+  2026-11-03; see Decision Log.
 
 Rationale: UTERM-009 deferred script input because caller identity and the exec wire format were unsettled. UTERM-004
 has since settled both, and asks each applet's proposal to carry its combinations and schema. Deferring would fail the
@@ -286,9 +285,9 @@ None.
   Mitigation: M1 decodes a sample of every type the helper reports, under the shipped sandbox, and a type that fails
   shows a message naming the format. The helper's entitlements live outside `App/`, and the check keeps guarding the
   app.
-- **The cross-applet file-opening proposal is not filed** — likelihood: high, impact: medium. It gates M1 and defines
-  the path-reading power M4 needs, and its rules may reshape the source entry point or the directory scope.
-  Mitigation: the "Input sources" revisit hook files it before M1, and M4 depends on it.
+- **UTERM-015 reshapes opening or the read power** — likelihood: low, impact: medium. It is accepted. It keeps the
+  in-pane panel and drops, adds the pane-local Open..., and defines the power M4 needs. Mitigation: M1 declares the
+  viewer's types, and M4 starts after UTERM-015 M4.
 - **UTERM-003 and UTERM-004 are accepted but not built** — likelihood: medium, impact: low. If M1 lands before UTERM-003
   M1, it builds the first bundled helper target and version handshake itself. Accepted: the image helper's protocol is
   private and decode-only, so it shares no wire format with the Janet helper, and either can land first.
@@ -312,9 +311,10 @@ None.
 
 - A pane can run the image viewer and show a chosen image
 - The image fits the pane and rescales when the pane resizes
-- The cross-applet file-opening proposal that UTERM-009 commits to is filed before this milestone starts
-- The launcher offers the image viewer. An image or a folder opens from an open panel that accepts both, or by dropping
-  file URLs on the pane, through the one source-taking entry point
+- The viewer declares `public.image` at the owner rank and `public.folder` at the alternate rank, for UTERM-015's router
+- The launcher offers the image viewer. An image or a folder opens from an open panel that accepts both, reached from
+  the Open... command with no key or the empty pane, or by dropping file URLs on the pane, through the one
+  source-taking entry point
 - Opening a source into a pane that shows one replaces it and stops any slideshow. A drop of several items is refused
   with a message asking for one file or folder, and the pane keeps what it showed. A drop with no file URL shows why it
   was refused
@@ -474,6 +474,10 @@ None.
 - 2026-11-03: Revisit-hook audit for "Input sources": act. The cross-applet file-opening proposal is filed as
   UTERM-015, and it is now in Dependencies. The hook's line is removed. 006 is not schedulable until UTERM-015 is
   accepted.
+- 2026-11-03: Amended "Input sources" and "Control levels" for UTERM-015, the cross-applet file-opening proposal.
+  App-level opening and Cmd-O waited on that proposal, and M4 waited on it for the read power. UTERM-015 is accepted. The
+  viewer gains an Open... command with no key, declares `public.image` as owner and `public.folder` as alternate, and
+  M4 starts after UTERM-015 M4. M1's gate on the filing became the declaration check, and the risk names UTERM-015.
 
 ## References
 
