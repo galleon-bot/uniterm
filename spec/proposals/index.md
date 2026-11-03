@@ -16,6 +16,7 @@
 | [UTERM-012](UTERM-012-shell-blocks.md) | Collapsible command blocks in the terminal | deferred |
 | [UTERM-013](UTERM-013-shortcut-ownership-and-reopen.md) | Window versus applet shortcuts, and Cmd-Shift-T reopen | implemented |
 | [UTERM-014](UTERM-014-palette-and-reopen-review-fixes.md) | Cmd-K palette, title bar dock, and reopenable exits | implemented |
+| [UTERM-015](UTERM-015-cross-applet-file-opening.md) | Finder, File > Open, and other ways a file reaches an applet, and the path-reading power | draft |
 
 ## Dependency Graph
 
@@ -34,6 +35,7 @@ UTERM-011 ← UTERM-001
 UTERM-012 ← UTERM-001
 UTERM-013 ← UTERM-001, UTERM-002
 UTERM-014 ← UTERM-002, UTERM-013
+UTERM-015 ← UTERM-001, UTERM-002, UTERM-003, UTERM-004, UTERM-013
 ```
 
 ## Not Yet Filed
