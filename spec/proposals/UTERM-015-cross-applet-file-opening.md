@@ -360,24 +360,36 @@ program would use `open -a` instead. Treating it as the user's act gives any pro
 ADR-09, and looser than the Launch Services path. A session grant on the helper's PID would cover one call only, under
 a false label.
 
-## Design Decisions (Open)
-
 ### Who may open by terminal click
 
-A Cmd-click is the user's gesture, but a program chose the target. An OSC 8 hyperlink's text can read `README.md`
-while its target is `file:///Users/me/Documents/tax.pdf`.
+Original question: a Cmd-click is the user's gesture, but a program chose the text. An OSC 8 hyperlink's text can read
+`README.md` while its target is `file:///Users/me/Documents/tax.pdf`. Who authorizes a click.
 
-- **A click is the user's act only when uniterm shows the resolved local target before the open.** uniterm handles
-  libghostty's hover action and shows the target, and the click opens what was shown.
-- **Hyperlinks follow the authority of `uniterm open`, and bare paths uniterm detects itself are the user's act.** A
-  program chooses a hyperlink's target, and the user reads a bare path on screen.
-- **Every click is the user's act.** Leaves undone: a program can make a click open a file the user did not read.
-- Constraint: a click opens no more than the Launch Services path allows.
-- Constraint: shell integration gives no signal that output came from a remote host. After `ssh`, the remote side
-  usually runs no uniterm shell integration, so an absolute path a remote `ls` prints, such as `/etc/hosts`, names a
-  remote file that also exists locally. Candidate signals: the pane's foreground process being `ssh` or `mosh`, or a
-  hostname in OSC 7 that is not this host. Showing the resolved local target before the open leaves the call to the
-  user.
+Decision: a click is the user's act only on a target uniterm showed before the click, opened only if it is exactly
+that file, and never on output that may be remote.
+
+- On Cmd-hover, uniterm shows the target as text: the absolute path, or a hyperlink's target rather than its text.
+  Showing it touches no file. libghostty's mouse-over-link action reaches the app through an addition to the terminal
+  surface protocol, per ADR-01, beside its open-URL action.
+- The click is bound to the string that was shown. After the open, the opened descriptor's real path must match that
+  string, after normalizing macOS firmlinks such as `/tmp` to `/private/tmp`, or the open is refused. A printed symlink
+  to another file therefore opens nothing.
+- Output written while a remote client ran in the foreground keeps a remote marker, even after the client exits. The
+  remote clients are `ssh`, `mosh`, and the others M6 lists, and an OSC 7 report that names another host. Where the
+  pinned libghostty cannot mark rows, the marker covers the whole pane for the rest of its life. A click on marked
+  output shows that the output may be remote and opens nothing.
+- M6 names where each signal comes from: the pinned libghostty, an addition to the terminal surface protocol, or a
+  process lookup on the pane's child.
+
+Rationale: accepting every click lets a program open any file with no grant, looser than the Launch Services path.
+Splitting hyperlinks from bare paths rests on a distinction libghostty does not report, and on reading text a program
+can hide. Inserting `uniterm open` on the command line types program-chosen text into whatever owns the terminal, such
+as `vim` or a remote shell. Resolving the target on hover would touch a program-chosen path before any authorization.
+Signals read at click time miss a remote `ls` that is still in the scrollback after `exit`. Leaves undone: remote
+clients M6 does not list, such as `kubectl exec`, `docker exec`, and `ssh` inside a local tmux, still look local. On
+a libghostty that cannot mark rows, one remote session turns off clicks in that pane.
+
+## Design Decisions (Open)
 
 ## Risks
 
@@ -506,12 +518,15 @@ remove, add, or reshape them.
 
 **Status:** NOT STARTED
 
-- Cmd-click on an absolute path or a local `file:` hyperlink in the terminal opens it through the router, with the
-  authority "Who may open by terminal click" settles
+- Cmd-hover on an absolute path or a local `file:` hyperlink shows its target as text, with no file-system access
+- Cmd-click opens exactly the shown target through the router, and a printed symlink whose real path differs opens
+  nothing
+- A path a remote `ls` printed opens nothing, even after `exit` returns to the local shell
+- The list of remote clients is written down, and each remote signal's source is named
 - A relative path clicked in the terminal is refused
-- A `file:` hyperlink naming another host, and a path in an ssh session, never open a local file
+- A `file:` hyperlink naming another host never opens a local file
 - A Cmd-click on a web URL or another non-file scheme does nothing
-- The open-URL action reaches the app through the terminal surface protocol
+- The open-URL and mouse-over-link actions reach the app through the terminal surface protocol
 
 ## Decision Log
 
@@ -572,6 +587,10 @@ remove, add, or reshape them.
 - 2026-11-03: Who may run `uniterm open`: once or session approval for the calling terminal session, and Allow once
   only for a caller outside one. Nothing touches a path before its open is authorized. Converged in 1 pass.
   (autonomous, addition: a terminal-session pane-open approval joins UTERM-004's pending indicator beside OSC 52's)
+- 2026-11-03: Who may open by terminal click: a click opens only the target uniterm showed on hover, matched by real
+  path after the open, and never on output marked as possibly remote. The marker outlives the remote client. Converged
+  in 1 pass, with the critic's fixes to the hover display, the symlink case, and remote scrollback. (autonomous,
+  addition: the mouse-over-link action joins the terminal surface protocol, with a hover display and a remote marker)
 
 ## References
 
