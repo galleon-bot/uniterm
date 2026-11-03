@@ -1,6 +1,6 @@
 # UTERM-015: Cross-Applet File Opening
 
-**Status:** designing
+**Status:** accepted
 **Created:** 2026-11-03
 **Updated:** 2026-11-03
 
@@ -629,6 +629,17 @@ a libghostty that cannot mark rows, one remote session turns off clicks in that 
   the group check once UTERM-004 M4 lands. Risk review: every risk is rated and mitigated or accepted, none is high
   likelihood and high impact, and the stored choices and the new permission carry skew checks in M1 and M4.
   (autonomous)
+- 2026-11-03: Review gate: kept all, including the judge's Launch Services ruling, every tagged addition, and the
+  entry points that brought `uniterm open` and terminal clicks into scope.
+- 2026-11-03: ADR candidate: uniterm never lends its macOS privacy grants to a program. A scope never covers a
+  protected location unless it names it, and no program-supplied path is touched before its open is authorized.
+  Declined.
+- 2026-11-03: ADR candidate: every way a file reaches an applet from outside its pane goes through one route into the
+  applet's own entry point. Waits on UTERM-009's byte-stream source and UTERM-010's design, either of which could
+  change what an entry point is. It was also amended in this review for the terminal's folder entry.
+- 2026-11-03: ADR candidate: which Launch Services senders count as the user's act. Waits on M2's record of the sender
+  each path reports, since the decision reopens if Finder and `open -a` cannot be told apart.
+- 2026-11-03: Accepted after the review gate. No ADR written.
 
 ## References
 
