@@ -14,6 +14,7 @@ private final class DirectoryApplet: Applet {
   let view = NSView()
   let title = "Directory"
   let segments: [AppletSegment] = []
+  let publishedTabs = AppletTabList(first: AppletTab(id: .make(), title: "Directory"))
   let isRunningSomething = false
   weak var host: (any AppletHost)?
   let currentDirectory: String?
@@ -72,7 +73,7 @@ final class SplitDirectoryTests: XCTestCase {
   }
 
   private func chooseTerminal(in controller: MainWindowController) throws {
-    let pane = try XCTUnwrap(controller.openLauncher(axis: .row))
+    let pane = try XCTUnwrap(controller.openLauncher(axis: .row, from: controller.focusedPane))
     let launcher = try XCTUnwrap(controller.paneArea.applet(for: pane) as? LauncherApplet)
     launcher.launcher.open()
   }
@@ -107,7 +108,7 @@ final class SplitDirectoryTests: XCTestCase {
     let controller = try window(reporting: "/tmp", engine: engine)
     defer { controller.window?.close() }
 
-    let pane = try XCTUnwrap(controller.openLauncher(axis: .row))
+    let pane = try XCTUnwrap(controller.openLauncher(axis: .row, from: controller.focusedPane))
     let launcher = try XCTUnwrap(controller.paneArea.applet(for: pane) as? LauncherApplet)
     launcher.launcher.choose(.program)
     launcher.launcher.setCommand("htop")

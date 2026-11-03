@@ -1,8 +1,8 @@
 # UTERM-002: Command Palette
 
-**Status:** accepted
+**Status:** implemented
 **Created:** 2026-10-31
-**Updated:** 2026-11-01
+**Updated:** 2026-11-02
 
 ## Dependencies
 
@@ -67,7 +67,8 @@ Decision: a live query from the pane tree.
 - An entry targets a pane by its stable pane ID, per ADR-02, and a tab by its tab ID. Never by a row, tree path, or tab
   index.
 - Choosing an entry whose pane or tab is gone changes nothing else. It refreshes the list and posts a status message.
-- Hidden grace-tier panes are not in the tree, so their tabs do not appear.
+- Every pane in the tree is on screen. A closed pane is out of the tree, so its tabs do not appear. Amended 2026-11-02;
+  see Decision Log.
 
 Rationale: the applet's own state is the only source, so nothing can go stale and nothing needs unregistering. A query
 on open breaks "when a tab closes, its entry disappears" in docked mode, where the palette may stay active for a long
@@ -82,7 +83,7 @@ This extends UTERM-001's applet contract. UTERM-001 expected the contract to cha
 Original questions: whether commands are declared in Swift only, or also in Janet once UTERM-003 lands; and whether
 the palette should eventually call the Janet API for every command.
 
-Decision: a uniterm command registry in Swift, shared by the palette and uniterm's key bindings. Amended 2026-11-01;
+Decision: a uniterm command registry in Swift, shared by the palette and uniterm's key bindings. Amended 2026-11-02;
 see Decision Log.
 
 - Each command has a stable ID, a title, a run action, and an availability check.
@@ -97,6 +98,8 @@ see Decision Log.
   items, per UTERM-013. A registry command would act on the pane, not on a find field or address bar inside it.
 - While the palette's search field has focus, text-editing chords go to the field: cut, copy, paste, select all, undo,
   and redo. This follows UTERM-001's rule that Cmd-Z in a focused text control undoes the edit.
+- A key, a menu item, and the palette all reach a command's action through one dispatch point in the window. It applies
+  the palette's rules below, so a key and a menu item chosen with the mouse cannot differ.
 - This proposal builds Swift commands only. The palette runs commands through the registry, never through the Janet
   API.
 - UTERM-003 may invoke registry commands, and may register its own. That work belongs to UTERM-003. A Janet caller
@@ -220,12 +223,15 @@ some panes unreachable, against the Motivation.
 
 Original question: which mode is the default, and which edge a docked palette uses by default.
 
-Decision: floating by default. A docked palette defaults to the top edge. Mode and edge are two plain settings.
+Decision: floating by default. A docked palette defaults to the top edge. Mode and edge are two plain settings. When a
+docked palette and the status bar share an edge, the status bar is outermost, at the window edge, and the palette sits
+inward, next to the content. Amended 2026-11-02; see Decision Log.
 
 Rationale: floating costs no window space, and the write-up asks for as much space as possible. A top edge matches
 the palette and omnibox convention. Making the palette follow the status bar's edge would couple two settings and
-need a third "auto" value. M3's stacking order covers a palette and a status bar on the same edge, whatever the status
-bar's default is.
+need a third "auto" value. The stacking order covers a palette and a status bar on the same edge, whatever the status
+bar's default is. The palette sits inward so that its results open from the panes' edge and stay beside the panes they
+cover.
 
 ### What an inactive docked palette shows
 
@@ -234,7 +240,11 @@ A list that grows the region resizes the content area, which resizes every termi
 
 Decision: while inactive, a docked palette shows a one-line field whose placeholder names the hotkey. On activation,
 the results list appears as an overlay anchored to the field, drawn over the pane content. The content area keeps its
-size. A click outside the overlay deactivates the palette and focuses what was clicked.
+size. A click outside the field and the overlay deactivates the palette. The press is then delivered to the view under
+it, so a terminal that reports the mouse to its program receives it, and that view takes focus as it would for any
+click. A click on something that takes no focus returns focus to the pane that had it before activation. Switching the
+mode or the edge while the palette is active deactivates it and returns focus to that pane. Amended 2026-11-02; see
+Decision Log.
 
 Rationale: growing the region would resize every terminal on each activation and deactivation. vim redraws, shells
 reprint prompts, and scrollback reflows. It could also push panes below their minimum size. An overlay keeps search
@@ -272,7 +282,7 @@ window.
 
 ### M1: Floating palette with commands
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 Amended 2026-11-01; see Decision Log.
 
@@ -300,9 +310,52 @@ Amended 2026-11-01; see Decision Log.
 - With the field focused, a menu item chosen with the mouse behaves the same as its key binding
 - A click outside the floating palette hides it and focuses what was clicked
 
+**As built:**
+
+The registry lives in a `Commands` area of WindowKit, not a new module. Its context carries the window
+controller and the target pane, and the palette view needs the window's theme and pane area. A separate module would
+need protocol indirection for nothing. UTERM-013 can extract it when applets register their own commands.
+
+Every UTERM-001 binding is a registry command owned by uniterm, including the app ones (New Window, Settings, Hide,
+Quit, Minimize) and the terminal ones. Terminal text size and clear reach the pane through a small AppletKit protocol
+that the terminal applet implements. The menu items for them use selectors that the terminal view does not answer.
+Otherwise the responder chain would reach the view first and skip the registry. The select-tab-by-number commands exist
+but are not listed in the palette.
+
+The palette-focused rules live in the window controller's dispatch point and not in the key route, so a menu item chosen
+with the mouse behaves like its key. The key route in the window sends a key to the live menu item before the views,
+and a remapped item wins over a default on the same key. The launcher that holds the keyboard is offered Cmd-1 to
+Cmd-9 first. AppKit rewrites a menu item's key equivalent when a user remap applies, so the route reads the live items.
+
+Constants, all recorded here and nowhere else: the palette is 560 points wide, never wider than the window less 16 on
+each side, and sits 12 below the top of the pane area. It shows up to 8 rows of 28 points under a 40 point field. The
+matcher scores 16 per matched character, with 12 for each consecutive pair, 10 for a word start, 8 for the first
+character, 40 for a contiguous match, 40 more for a prefix, and up to 24 off for skipped characters. A title match sits
+a tier above a detail-only match. Recency adds 24 for the newest command and 6 less for each older one. The registry
+remembers 8 commands, and only commands the palette lists count toward that, so tab-number presses do not push them out.
+
+The key route compares the character a key types, not the raw key. Cmd-Shift-= matches Bigger Text, which names "+",
+and Delete matches Dismiss Message, which names 0x08. Shift is dropped from the comparison for keys that are not letters
+or digits. Cmd-} and Cmd-Shift-] are not unified. An item and a key that differ in the character they type do not match.
+
+Unavailable commands show disabled, ranked like any other, and Enter skips them. The arrow keys skip them too. A
+pane-scoped command whose pane is gone counts as available, so choosing it posts a status message and acts on no other
+pane. A press outside the palette that lands on something taking no keyboard returns the keyboard to the focused pane.
+
+Two defects surfaced and were fixed. Cmd-Z in a field editor that keeps its own undo manager did nothing, so the window
+now undoes through the editor's manager. The app's own Quit item is no longer AppKit's, so it did not disable itself
+while a quit question was open, and a second Cmd-Q cancelled the question. It now disables itself the same way.
+
+Residuals: a remap onto another uniterm binding or a terminal's Control chord gets no collision warning, as decided. The
+hide path that must not take the keyboard from a sheet is covered by a unit test of the rule and by the close and quit
+UI tests, not by a test that drives a sheet over a showing palette. The palette lists "Toggle Message History" under a
+fixed title, while the menu item still retitles itself.
+
 ### M2: Tab search
 
-**Status:** NOT STARTED
+**Status:** DONE
+
+Amended 2026-11-02; see Decision Log.
 
 - Every terminal tab in the window appears in the palette
 - Choosing a tab focuses its pane and switches to that tab
@@ -311,7 +364,7 @@ Amended 2026-11-01; see Decision Log.
 - Enter acts on the highlighted entry's pane and tab IDs, even when the list re-sorts between the arrow key and Enter
 - A burst of tab title changes does not move the selection or stall typing
 - Choosing an entry whose tab is gone refreshes the list and posts a status message
-- Tabs of hidden grace-tier panes do not appear
+- The tabs of a closed pane do not appear, including those of a pane that closes while the palette shows
 - Tab IDs never repeat across launches without persisted state. A restored tab gets a new ID, and an old ID resolves
   to gone
 - On an empty query, the highlighted entry is the most recent tab other than the current one
@@ -323,9 +376,61 @@ Amended 2026-11-01; see Decision Log.
 - An entry for an applet's single implicit tab reads in a defined way, such as by the applet's title
 - Tabs restored from the layout file, and commands never run, follow recent entries in a defined order
 
+**As built:**
+
+The applet contract gains a tab list and a change signal. A list holds a first tab and any others, so an empty list
+cannot be built. It names the selected tab, and each tab carries an ID, a title, and detail strings. The terminal
+publishes every tab, background ones too, with the directory its shell last reported. The launcher and the placeholder
+publish one tab each for their whole life, titled by the applet's own title. The host learns of a change through a new
+signal that fires for any tab, which the old change signal never did for a background tab. An applet selects a tab by
+ID, and answers false when the tab is gone.
+
+A tab ID pairs an epoch picked at random once per launch with a counter. IDs are not saved, and a restored tab is a
+new tab with a new ID. Two launches can count to the same number, so only the epoch tells their IDs apart. An old ID
+resolves to gone.
+
+The palette walks the pane tree in order for its tab entries each time it lists. It re-lists at once when the text
+changes or the tree changes shape. It re-lists on the tab signal and on the layout-change signal after a 100 millisecond
+hold, and changes that arrive during the hold join the pending list. The window's own description comparison is not
+used, since it ignores a title change that the saved description does not carry. Entries target a pane ID and a tab ID.
+The highlighted entry is kept by ID across a re-list, so Return acts on the tab that was highlighted.
+
+Choosing a tab whose pane or tab is gone leaves the palette up, lists again, and posts a warning. Choosing a live tab
+hides the palette without taking the keyboard back, selects the tab, and focuses its pane, so the tab ends with the
+keyboard. A pane that is gone and a tab that is gone take the same path.
+
+Ranking reuses M1's matcher and constants. A tab's recency counts as a boost on the same scale as a command's, 24 for
+the newest and 6 less for each older one, so a recent scattered match stays below a prefix or contiguous title match,
+which the matcher lifts by 80. Tab recency lives in memory, holds the 64 most recent tabs, and is pruned of closed tabs
+each time the palette lists. A tab is recent when it is the selected tab of the focused pane at the moment it takes
+focus or becomes selected. A change in a background tab never counts. With no query, the order is tabs focused before,
+then commands run before, then tabs never focused in tree order, then the other commands by title. The current tab, the
+one showing in the pane that had focus before the palette, is listed and marked. With no query, the first choice is the
+first tab other than the current one, in that order. A query of only spaces counts as no query. Typing, or clearing the
+text, picks the first choice again. A re-list from a tab or layout change keeps the highlight by ID. With no other tab,
+it is the first other entry that can run.
+
+Rows show a kind word at the right, "Tab" or "Command". A tab row also shows its details after the title in a dimmer
+style. Titles and details pass through one neutralizer before they are matched or shown. It turns control characters and
+line breaks into spaces, collapses runs of spaces of any width, drops the bidirectional controls and the other
+invisible format characters, and caps the text at 120 unicode scalars. A title with nothing left reads "Untitled". It
+keeps the zero width joiner inside an emoji sequence, so those stay whole. Details are joined with a space and searched
+as one string.
+
+Narrowed: the hidden-pane check was stale and is now stated for closed panes, per the Decision Log. The UI tests cover a
+background tab, the keyboard following the choice, a neutralized title, and a tab that closes while the palette shows.
+A real split or undo while the palette shows is covered by unit tests only.
+
+Residuals: a program-mode tab waiting to run is listed by its program name. The 100 millisecond hold is a guess, and
+no measurement backs it. The current tab sits at the top of the empty-query list, and the first choice skips it by rule,
+not by position. The terminal's own title cap counts characters, not scalars, so only the palette bounds a title of many
+combining marks.
+
 ### M3: Docked mode
 
-**Status:** NOT STARTED
+**Status:** DONE
+
+Amended 2026-11-02; see Decision Log.
 
 - The palette docks at the top or the bottom of the window
 - A docked palette does not take focus until the hotkey activates it
@@ -347,6 +452,61 @@ Amended 2026-11-01; see Decision Log.
 - Switching mode while the palette is active leaves it in a defined state, with focus on the field or on the prior pane
 - The mode and dock position are settings in the Settings window, and an invalid value falls back to the default with
   a status bar warning
+
+**As built:**
+
+The field and the results are two views, and both modes use both. The field sits in the window: in a hidden card near
+the top of the pane area when floating, and in a strip against an edge when docked. The results are a card of their own,
+placed beside the field and above every other view in the window. They open away from the docked edge, and downward
+for a floating palette. A floating palette's results are now a separate card 4 points below the field. M1 drew them as
+one card with a divider. The search, the ranking, and the dispatch rules are the same objects in both modes, and a test
+pins that a docked and a floating palette list the same entries for the same text.
+
+A docked palette is a region of its own, with a new role, installed and moved through the same calls as the status bar.
+It leaves the window's region list when the mode is floating. Its strip is 48 points thick: the 40 point field with 6
+points on the window's side and 2 on the pane side. It counts toward the window's minimum size through the same sum as
+the status bar. The strip lies inside the safe area, below the title bar, so the traffic lights stay clear and a drag
+by the top edge still moves the window.
+
+On one edge the status bar is outermost and the palette sits inward, decided in the region stack and pinned for both
+edges and both install orders. The message history now starts at the pane area's edge rather than at the bar, so a
+palette on the bar's edge is not covered by it.
+
+An inactive docked field refuses the keyboard, even from a click, and a click on it or its card asks the window to
+activate. Activation reads the focused pane and its recency at that moment. Deactivation, by the hotkey, Escape, Cmd-W,
+or any other dismiss path, clears the text and returns the keyboard to the prior pane through the path M1 built for
+hiding. The strip outside the field takes no click while inactive. Making it a target would have reactivated the palette
+on the same press that deactivated it.
+
+The overlay is bounded by the pane area on its far side, so a short window shortens the list. It does not resize the
+pane area or any pane, which tests compare before and after activation.
+
+The deactivating click is delivered to the view under it. A UI test turns on mouse reporting in a shell and sees the
+press arrive. A unit test pins that the palette steps aside before the press is dispatched. A click on the status bar or
+another view that takes no keyboard returns the keyboard to the focused pane, by M1's path.
+
+A mode or edge change while the palette is active deactivates it and returns the keyboard to the prior pane. The change
+usually comes from the Settings window, so the field would otherwise hold a keyboard in a window that is not key. The
+new placement starts inactive.
+
+The placeholder of an inactive docked palette reads "Search tabs and commands" and then the menu item's key in
+parentheses, such as "(⇧⌘P)". It reads the live item in the main menu when the palette is placed, when it deactivates,
+and when its window becomes key. A remap that applies to the item shows from then on. An active palette reads "Search tabs
+and commands", as a floating one does. A menu item with no key leaves the parentheses out.
+
+Two settings, `paletteMode` and `paletteDockEdge`, take plain strings, so `defaults write` sets them. Each has a row in
+the Settings window. A value that is not one of the choices falls back to floating or to the top, and the window posts
+one warning for each. The stored text is not rewritten. A change from the Settings window or from outside the app moves
+every open window live.
+
+Constants: the field, width, margins, inset, and rows are M1's. The values this milestone adds are the 4 point gap
+between a floating palette's field and its results, and the 48 point docked strip, with 6 points on the window's side
+and 2 on the pane side.
+
+Residuals: the placeholder is not refreshed when a remap changes while the window is already key, until the palette is
+next activated or the window is next key. A palette docked on the status bar's edge puts the history over the pane area
+and under the palette's results, which is untested for overlap. The UI tests cover the top and bottom edges, the live
+Settings switch, a remap, and a status bar click. A split pane under the overlay is not covered.
 
 ## Decision Log
 
@@ -415,6 +575,32 @@ Amended 2026-11-01; see Decision Log.
   no menu decision behind it. It now says UTERM-013 makes menus read the registry. The decision's marker moved from the
   text-editing bullet to the decision's lead, so it covers both amendments. "Hotkey configurability" and the Impacts
   line on UTERM-001 said every uniterm binding runs a registry command. Both now leave out the standard edit actions.
+- 2026-11-02: Amended "Command source" (work-queue best guess): a key, a menu item, and the palette reach an action
+  through one dispatch point in the window, which applies the palette's rules. The decision said only that a binding
+  and its command run the same action. The key route alone would have left a menu item chosen with the mouse outside
+  the palette rules. Also recorded in M1's As built: the registry lives in WindowKit, and the palette sizes and ranking
+  constants are the implementation's.
+- 2026-11-02: Amended "How applets publish tabs" and M2 (work-queue best guess), a correction of fact. Both said the
+  tabs of hidden grace-tier panes do not appear. UTERM-001 M10 removed hidden panes, so every pane in the tree is on
+  screen and a closed pane is gone. The bullet now says that. The M2 check is restated for a closed pane, including one
+  that closes while the palette shows. UTERM-013 rejected a similar check for the same reason.
+- 2026-11-02: M2 best guesses (work-queue best guess). The contract signal is a new host call that fires for any tab,
+  not a change to the existing change signal, which feeds the status bar and layout saving for the selected tab only.
+  The list type cannot be empty, per "Applets without tabs". Tab IDs are a random per-launch epoch plus a counter. The
+  palette holds back tab-signal and layout re-lists for 100 milliseconds and joins a burst into one. Typing and a tree
+  change re-list at once. The current tab is listed, and the empty-query first choice skips it. Tab recency is kept for
+  the 64 most recent tabs. Titles and details are neutralized once, before matching, so what the user searches is what
+  shows.
+- 2026-11-02: M3 best guesses (work-queue best guess). Amended "Default mode and dock edge" and "What an inactive docked
+  palette shows". The first said M3's stacking order covers a palette and a status bar on one edge, with no order. It now
+  puts the status bar outermost and the palette inward, next to the content, so the results open from the panes' edge.
+  The second said only that a click outside the overlay deactivates and focuses what was clicked. It now says the press
+  is delivered to the view under it, including a mouse-reporting terminal, that a click on something that takes no focus
+  returns focus to the prior pane, and that a mode or edge change while active deactivates the palette and returns focus
+  to the prior pane. The placeholder reads the menu item's live key. The results are a card of their own in both modes,
+  so a floating palette's results sit 4 points below the field instead of in one card with it. The palette's sizes and
+  insets are the implementation's and are recorded in M3's As built.
+- 2026-11-02: Implemented. M1 to M3 are done, and the row review's fixes landed.
 
 ## References
 

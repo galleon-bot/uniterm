@@ -23,13 +23,15 @@ private final class TerminalContainerView: NSView {
 /// each has its own tty. Program mode runs one program in one tab and opens no others. The tab bar
 /// shows only while there is more than one tab.
 @MainActor
-public final class TerminalApplet: TabbedApplet {
+public final class TerminalApplet: TabbedApplet, TextActionApplet {
   /// The longest notification text that reaches the status bar.
   static let maximumMessageLength = 200
 
   /// One tab: a session, and what the applet knows about it.
   @MainActor
   private final class Tab {
+    /// Names the tab to the palette. A restored tab is a new tab, so it gets a new ID.
+    let id = AppletTabID.make()
     let launch: TerminalLaunch
     var session: (any TerminalSession)?
     var title: String
@@ -227,6 +229,23 @@ public final class TerminalApplet: TabbedApplet {
     RestoreDirectory.local(selectedTab?.workingDirectory, exists: directoryExists)
   }
 
+  /// Each tab with its title and the directory its shell last reported. The directory is shown as
+  /// reported, even one from another machine, since it is only text to search.
+  public var publishedTabs: AppletTabList {
+    let published = tabs.map { tab in
+      AppletTab(
+        id: tab.id, title: tab.title,
+        details: tab.workingDirectory.map { [$0] } ?? [])
+    }
+
+    guard let first = published.first else {
+      preconditionFailure("a terminal always holds a tab")
+    }
+
+    return AppletTabList(
+      first: first, rest: Array(published.dropFirst()), selected: selectedTab?.id)
+  }
+
   /// True when any tab is running something. A tab at an idle shell prompt is not.
   public var isRunningSomething: Bool {
     tabs.contains { $0.isRunningSomething }
@@ -274,6 +293,7 @@ public final class TerminalApplet: TabbedApplet {
 
     refreshTabs()
     updateSegments()
+    host?.appletTabsDidChange(self)
   }
 
   public func close() {
@@ -358,6 +378,23 @@ public final class TerminalApplet: TabbedApplet {
     }
   }
 
+  // MARK: Text actions
+
+  public func canPerform(_ action: TextAction) -> Bool {
+    selectedTab?.session != nil
+  }
+
+  public func perform(_ action: TextAction) {
+    guard let session = selectedTab?.session else { return }
+
+    switch action {
+    case .increaseSize: session.perform(.increaseFontSize)
+    case .decreaseSize: session.perform(.decreaseFontSize)
+    case .resetSize: session.perform(.resetFontSize)
+    case .clear: session.perform(.clearScreen)
+    }
+  }
+
   // MARK: Tabs
 
   public var tabCount: Int { tabs.count }
@@ -393,6 +430,7 @@ public final class TerminalApplet: TabbedApplet {
     refreshTabs()
     updateSegments()
     host?.appletDidChange(self)
+    host?.appletTabsDidChange(self)
     focus()
   }
 
@@ -405,8 +443,16 @@ public final class TerminalApplet: TabbedApplet {
     refreshTabs()
     updateSegments()
     host?.appletDidChange(self)
+    host?.appletTabsDidChange(self)
 
     if hadFocus { focus() }
+  }
+
+  public func selectTab(id: AppletTabID) -> Bool {
+    guard let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
+
+    selectTab(at: index)
+    return true
   }
 
   public func closeSelectedTab() async -> Bool {
@@ -466,6 +512,7 @@ public final class TerminalApplet: TabbedApplet {
     refreshTabs()
     updateSegments()
     host?.appletDidChange(self)
+    host?.appletTabsDidChange(self)
 
     if hadFocus { focus() }
   }
@@ -542,8 +589,11 @@ public final class TerminalApplet: TabbedApplet {
 
       if isSelected { host?.appletDidChange(self) }
 
+      host?.appletTabsDidChange(self)
+
     case .workingDirectoryChanged(let path):
       tab.workingDirectory = path
+      host?.appletTabsDidChange(self)
 
       if isSelected {
         rebuildSegments()

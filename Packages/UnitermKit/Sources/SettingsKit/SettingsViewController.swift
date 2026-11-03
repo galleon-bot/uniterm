@@ -6,6 +6,8 @@ import Preferences
 final class SettingsViewController: NSViewController {
   private let appearance: ChoiceSettingRow<AppearancePreference>
   private let statusBarPosition: ChoiceSettingRow<StatusBarPosition>
+  private let paletteMode: ChoiceSettingRow<PaletteMode>
+  private let paletteDockEdge: ChoiceSettingRow<PaletteDockEdge>
 
   init(store: SettingsStore) {
     appearance = ChoiceSettingRow(
@@ -28,6 +30,26 @@ final class SettingsViewController: NSViewController {
       }
     }
 
+    paletteMode = ChoiceSettingRow(
+      store: store, key: .paletteMode, caption: "Command palette:",
+      identifier: "palette-mode-control"
+    ) { mode in
+      switch mode {
+      case .floating: return "Floating"
+      case .docked: return "Docked"
+      }
+    }
+
+    paletteDockEdge = ChoiceSettingRow(
+      store: store, key: .paletteDockEdge, caption: "Palette edge:",
+      identifier: "palette-dock-edge-control"
+    ) { edge in
+      switch edge {
+      case .top: return "Top"
+      case .bottom: return "Bottom"
+      }
+    }
+
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -42,6 +64,8 @@ final class SettingsViewController: NSViewController {
     let grid = NSGridView(views: [
       [appearance.label, appearance.control],
       [statusBarPosition.label, statusBarPosition.control],
+      [paletteMode.label, paletteMode.control],
+      [paletteDockEdge.label, paletteDockEdge.control],
     ])
     grid.translatesAutoresizingMaskIntoConstraints = false
     grid.rowSpacing = 12

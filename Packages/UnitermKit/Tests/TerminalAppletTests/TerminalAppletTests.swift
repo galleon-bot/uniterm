@@ -66,6 +66,7 @@ private final class RecordingHost: AppletHost {
   var posts: [(StatusLevel, String)] = []
   var exited = false
   var changed = 0
+  var tabsChanged = 0
   var confirmations: [AppletConfirmation] = []
   var answer = false
 
@@ -75,6 +76,7 @@ private final class RecordingHost: AppletHost {
 
   func appletDidExit(_ applet: any Applet) { exited = true }
   func appletDidChange(_ applet: any Applet) { changed += 1 }
+  func appletTabsDidChange(_ applet: any Applet) { tabsChanged += 1 }
 
   func applet(_ applet: any Applet, confirm request: AppletConfirmation) async -> Bool {
     confirmations.append(request)
@@ -832,5 +834,93 @@ final class TerminalAppletTests: XCTestCase {
     XCTAssertTrue(engine.sessions[3...].allSatisfy { $0.launch.program == nil })
     XCTAssertEqual(restored.tabCount, 3)
     XCTAssertEqual(restored.selectedTabIndex, 1)
+  }
+
+  // MARK: Published tabs
+
+  /// Catches a tab list that omits background tabs, or whose directory comes from the selected tab.
+  /// Each tab reports its own title and the directory its own shell reported.
+  func testEveryTabPublishesItsOwnTitleAndDirectory() {
+    let (applet, engine, _, first) = makeApplet()
+    first.onEvent?(.titleChanged("vim notes"))
+    first.onEvent?(.workingDirectoryChanged("/a"))
+    applet.openTab()
+    engine.sessions[1].onEvent?(.workingDirectoryChanged("/b"))
+
+    let list = applet.publishedTabs
+
+    XCTAssertEqual(list.all.map(\.title), ["vim notes", "Terminal"])
+    XCTAssertEqual(list.all.map(\.details), [["/a"], ["/b"]])
+    XCTAssertEqual(list.selected, list.rest[0].id)
+    XCTAssertEqual(Set(list.all.map(\.id)).count, 2)
+  }
+
+  /// Catches a change signal that fires only for the selected tab, as the title signal does. A
+  /// program in a background tab that retitles itself must still reach the palette.
+  func testABackgroundTabsTitleAndDirectoryChangesSignal() {
+    let (applet, engine, host, first) = makeApplet()
+    applet.openTab()
+    host.tabsChanged = 0
+    host.changed = 0
+
+    first.onEvent?(.titleChanged("htop"))
+    XCTAssertEqual(host.tabsChanged, 1)
+
+    first.onEvent?(.workingDirectoryChanged("/var"))
+    XCTAssertEqual(host.tabsChanged, 2)
+
+    XCTAssertEqual(applet.publishedTabs.first.title, "htop")
+    XCTAssertEqual(engine.sessions.count, 2)
+  }
+
+  /// Catches opening, selecting, or closing a tab that leaves the palette's list stale.
+  func testOpeningSelectingAndClosingATabSignal() async {
+    let (applet, _, host, _) = makeApplet()
+    host.tabsChanged = 0
+
+    applet.openTab()
+    XCTAssertEqual(host.tabsChanged, 1)
+
+    applet.selectTab(at: 0)
+    XCTAssertEqual(host.tabsChanged, 2)
+
+    _ = await applet.closeSelectedTab()
+    XCTAssertEqual(host.tabsChanged, 3)
+    XCTAssertEqual(applet.publishedTabs.all.count, 1)
+  }
+
+  /// Catches selection by ID that falls back to an index, which would pick another tab after a
+  /// tab before it closed. A closed tab's ID selects nothing.
+  func testSelectingByIDFollowsTheTabAndAClosedIDIsGone() async {
+    let (applet, _, _, _) = makeApplet()
+    applet.openTab()
+    applet.openTab()
+
+    let ids = applet.publishedTabs.all.map(\.id)
+    XCTAssertEqual(ids.count, 3)
+
+    XCTAssertTrue(applet.selectTab(id: ids[0]))
+    XCTAssertEqual(applet.publishedTabs.selected, ids[0])
+
+    XCTAssertTrue(applet.selectTab(id: ids[2]))
+    XCTAssertEqual(applet.publishedTabs.selected, ids[2])
+
+    _ = await applet.closeSelectedTab()
+    XCTAssertFalse(applet.selectTab(id: ids[2]), "a closed tab's ID resolved")
+    XCTAssertEqual(applet.publishedTabs.all.map(\.id), [ids[0], ids[1]])
+  }
+
+  /// Catches tab IDs that survive a save. A restored tab is a new tab, so the ID of the tab it was
+  /// saved from resolves to nothing.
+  func testARestoredTabGetsANewID() throws {
+    let (applet, engine, _, _) = makeApplet()
+    let old = applet.publishedTabs.first.id
+
+    let restored = try TerminalApplet(
+      engine: engine, restoring: applet.describe(), directoryExists: { _ in true })
+    retained.append(restored)
+
+    XCTAssertNotEqual(restored.publishedTabs.first.id, old)
+    XCTAssertFalse(restored.selectTab(id: old))
   }
 }

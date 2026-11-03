@@ -2,7 +2,8 @@ import AppKit
 import TerminalSurface
 import WindowKit
 
-/// uniterm's menu. It owns every key binding. A focused terminal never keeps a key for itself:
+/// uniterm's menu. It owns every key binding, and each item except the standard edit actions
+/// dispatches a command from the command registry. A focused terminal never keeps a key for itself:
 /// Cmd-Z, Cmd-W, Cmd-T, Cmd-1 to Cmd-9, Cmd-Shift-[ and Cmd-Shift-], Cmd-D, Cmd-Shift-D, Cmd-[ and
 /// Cmd-], Cmd-Option-arrows, Cmd-N, and Cmd-Q reach these items first. Items with a nil target
 /// find their receiver on the responder chain, from the focused terminal up to the window
@@ -31,11 +32,17 @@ enum MainMenu {
     settings.target = target
     menu.addItem(settings)
     menu.addItem(.separator())
-    menu.addItem(
-      withTitle: "Hide uniterm", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+
+    let hide = NSMenuItem(
+      title: "Hide uniterm", action: #selector(AppDelegate.hideApp(_:)), keyEquivalent: "h")
+    hide.target = target
+    menu.addItem(hide)
     menu.addItem(.separator())
-    menu.addItem(
-      withTitle: "Quit uniterm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+    let quit = NSMenuItem(
+      title: "Quit uniterm", action: #selector(AppDelegate.quitApp(_:)), keyEquivalent: "q")
+    quit.target = target
+    menu.addItem(quit)
 
     item.submenu = menu
     return item
@@ -97,19 +104,27 @@ enum MainMenu {
     let menu = NSMenu(title: "View")
 
     menu.addItem(
-      withTitle: "Bigger Text", action: #selector(TerminalMenuActions.increaseTerminalFontSize(_:)),
+      withTitle: "Bigger Text", action: #selector(MainWindowController.biggerText(_:)),
       keyEquivalent: "+")
     menu.addItem(
       withTitle: "Smaller Text",
-      action: #selector(TerminalMenuActions.decreaseTerminalFontSize(_:)), keyEquivalent: "-")
+      action: #selector(MainWindowController.smallerText(_:)), keyEquivalent: "-")
     menu.addItem(
-      withTitle: "Actual Size", action: #selector(TerminalMenuActions.resetTerminalFontSize(_:)),
+      withTitle: "Actual Size", action: #selector(MainWindowController.actualSize(_:)),
       keyEquivalent: "0")
     menu.addItem(.separator())
     menu.addItem(
-      withTitle: "Clear Screen", action: #selector(TerminalMenuActions.clearTerminalScreen(_:)),
+      withTitle: "Clear Screen", action: #selector(MainWindowController.clearScreen(_:)),
       keyEquivalent: "k")
     menu.addItem(.separator())
+
+    // The title is fixed. A user's App Shortcuts remap matches the item by its title.
+    let palette = NSMenuItem(
+      title: "Show Command Palette",
+      action: #selector(MainWindowController.toggleCommandPalette(_:)),
+      keyEquivalent: "p")
+    palette.keyEquivalentModifierMask = [.command, .shift]
+    menu.addItem(palette)
 
     let history = NSMenuItem(
       title: "Show Message History",
@@ -134,7 +149,8 @@ enum MainMenu {
     let menu = NSMenu(title: "Window")
 
     menu.addItem(
-      withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+      withTitle: "Minimize", action: #selector(MainWindowController.minimizeWindow(_:)),
+      keyEquivalent: "m")
     menu.addItem(.separator())
 
     // With Shift held, a bracket key produces the brace, so the key equivalent is the brace and

@@ -16,6 +16,8 @@ public final class PlaceholderApplet: Applet {
   public let isRunningSomething = false
   public weak var host: (any AppletHost)?
 
+  public let publishedTabs: AppletTabList
+
   private let kept: AppletDescription
   private let reason: String
   private let panel: PlaceholderView
@@ -24,6 +26,7 @@ public final class PlaceholderApplet: Applet {
   public init(keeping kept: AppletDescription, reason: String) {
     self.kept = kept
     self.reason = reason
+    publishedTabs = AppletTabList(first: AppletTab(id: .make(), title: "Unavailable pane"))
 
     let panel = PlaceholderView(reason: reason, detail: Self.detail(of: kept))
     self.panel = panel

@@ -272,6 +272,7 @@ final class LauncherTests: XCTestCase {
       let view = NSView()
       let title = ""
       let segments: [AppletSegment] = []
+      let publishedTabs = AppletTabList(first: AppletTab(id: .make(), title: "Quiet"))
       let isRunningSomething = false
       weak var host: (any AppletHost)?
       func start() {}
