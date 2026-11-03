@@ -198,6 +198,95 @@ different operations, so prompts end in blind approval. One directory with no ex
 borrow uniterm's grants for Documents, which the power's settled rationale rules out. Comparing raw paths would cover
 `~/Documents/x` under an approved `~` with no prompt.
 
+### Which file types uniterm registers with Finder
+
+Original question: which document types uniterm declares to Launch Services, and at what rank.
+
+Decision: every type an applet declares is registered at the Alternate rank.
+
+- `Info.plist` declares each type an applet opens, and imports each one the system lacks, per "How a file type maps to
+  an applet".
+- Every `LSHandlerRank` is Alternate, whatever rank the applet declares. The applet's "owner" rank is uniterm's own
+  routing and never becomes Launch Services' Owner rank.
+- The router resolves a file's type through the system, never from uniterm's plist, since another app may export a
+  type uniterm imports with a different conformance.
+
+Rationale: registering nothing rules out Finder and the Dock, which "Which entry points open files" keeps. The Default
+rank can make uniterm the double-click app for `.md` or `.json` on install, without the user choosing it. Alternate
+puts uniterm under Open With and displaces no other app.
+
+### Opens that arrive through Launch Services
+
+Original question: Finder Open With and a drop on the Dock icon reach uniterm as an open-documents Apple Event. Any
+process of the same user can send the same event with `open -a uniterm <path>` or NSWorkspace. Which senders count as
+the user's act.
+
+Decision: Apple's user-facing openers are the user's act. Every other sender needs the user's approval, which is never
+remembered past the sender's run.
+
+- The sender is identified from the event's audit token, by code-signing requirement, never by PID, path, or display
+  name. Apple's user-facing openers are matched on platform-binary requirements: Finder, the Dock, Spotlight, Quick
+  Look, and Recent Items. M2 confirms the list on real macOS. Generic Apple-signed binaries, such as `osascript`,
+  `python3`, and `/usr/bin/open`, never match.
+- Opens from those openers are the user's act, and need no grant.
+- Until UTERM-004 M6 lands, every other sender is refused, with a bounded, coalesced message naming it.
+- After M6, every other sender goes to UTERM-004's pending indicator, named from its verified signing information. The
+  user can allow once, or allow for the session. A session grant binds to the sender's audit-token PID and PID
+  version, and its label says it covers everything that app sends until it quits, as UTERM-004's OSC 52 approval says
+  for a terminal session. Nothing is remembered after the sender quits.
+- A go-between, such as `/usr/bin/open` or a Launch Services helper, and a sender that cannot be identified, get Allow
+  once only. Before accepting a go-between as the sender, M2 checks for an attribute that names the originator.
+- One event is one operation that names every file in it.
+- A prompt for an unknown sender says the sender is unknown and lists every full path.
+- A program with Automation consent over Finder can make Finder the sender. The event carries no originator, so this
+  cannot be closed. It is accepted under ADR-09's statement that uniterm gives no isolation from the user's own
+  processes.
+- M2 records which sender a cold-launch Finder open, a warm Finder open, and `open -a` each report, before the
+  authority is built. If Finder and `open -a` cannot be told apart, this question reopens.
+
+Rationale: accepting every sender lets any program open panes with no grant, which ADR-09 forbids. Refusing every
+other sender breaks third-party file managers and launchers with no recovery. Remembered trust in a launcher such as
+Alfred or Raycast would trust every script it runs, which ADR-09 forbids for a shared interpreter. UTERM-004 also
+remembers only powers a controller declares at startup, and an Apple Event sender declares none. Allow once alone
+would ask a launcher user on every open, the habitual approval ADR-09's context warns against. A session grant honestly
+labelled, bound to the live sender, follows the pattern UTERM-004 already uses for OSC 52.
+
+### Several files at once
+
+Original question: what happens when Finder or `uniterm open` passes several files. Every viewer shows one source per
+pane and refuses an in-pane drop of several files.
+
+Decision: one pane per file, each routed on its own, with a confirmation above a fixed count.
+
+- Mixed types work. Each file goes where the type mapping sends it.
+- The batch follows the rule "Where a routed pane goes" settles for a batch, so it never stops halfway with no rule
+  for the rest.
+- Files that fail produce one summary message, not one each.
+- A batch from a sender that needs approval is approved as one operation, per "Opens that arrive through Launch
+  Services".
+
+Rationale: the user asked to open every file. Opening only the first drops the rest in an order Finder chose. Refusing
+makes a multi-select Open With always fail. The confirmation bounds a pane flood from a program. It is not a setting.
+
+### Folders
+
+Original question: Finder and `uniterm open` can pass a folder. The image viewer accepts one as a slideshow source, and
+a terminal could start a shell in it.
+
+Decision: a folder routes like a file, with the folder as its content type.
+
+- Applets declare `public.folder`, never `public.directory`, so a package such as the Photos library or an app bundle
+  is refused as an unsupported type.
+- The terminal declares folders. Its entry point for a routed folder is a new terminal pane created with that folder as
+  its explicit start directory. The terminal has no source to replace, so the routed folder is never handed to a
+  running terminal.
+- The image viewer declares folders too. The type mapping picks between them, and "Open With" or a saved choice for
+  folders reaches the other.
+
+Rationale: the settled type mapping already decides between claimants. A host rule that sends every folder to a
+terminal would be a special case beside it. Refusing folders loses opening a terminal on a Finder folder, a common
+case.
+
 ## Design Decisions (Open)
 
 ### Where a routed pane goes
@@ -213,60 +302,15 @@ borrow uniterm's grants for Documents, which the power's settled rationale rules
   lands after restored windows, or in its own window.
 - Constraint: a routed open never lands in a pane a controller owns. Otherwise a controller could place an empty pane
   to learn when the user opens a file.
-
-### Which file types uniterm registers with Finder
-
-Launch Services reads document types from the app's `Info.plist`, which cannot change at run time.
-
-- **Register every declared type at the Alternate rank.** uniterm shows under Open With and never takes a default from
-  another app. A test fails when the plist and the applet declarations disagree.
-- **Register at the Default rank.** uniterm can become the default for types it registers. It can take a default
-  quietly on install.
-- **Register no document types.** Finder can still open a file by a drop on the Dock icon only if types are declared,
-  so this rules out Finder and Dock opens.
-
-### Opens that arrive through Launch Services
-
-Finder Open With and a drop on the Dock icon reach uniterm as an open-documents Apple Event. Any process of the same
-user can send the same event with `open -a uniterm <path>` or NSWorkspace. uniterm cannot tell those apart by the
-event alone.
-
-- **Accept them as the user's act, and say they are program-reachable.** ADR-09 disclaims isolation from same-user
-  processes. The open returns nothing to the sender and never lands in a pane a controller owns. Leaves undone: a
-  program can make uniterm open a file in a protected folder, and the user sees a pane they did not ask for.
-- **Gate by the sender's audit token.** Only Finder and the Dock count as the user's act. Any other sender gets the
-  authority "Who may run `uniterm open`" settles, or its own when that command is not built. Needs the sender's audit
-  token from the Apple Event, which M2 must confirm macOS provides for this event. A program with Automation consent
-  over Finder can still ask Finder to send the open, so "Finder as sender" means any process with that consent.
-- **Ask before every Launch Services open from a sender that is not Finder or the Dock.** A local, coalesced approval
-  like UTERM-004's pending indicator, with the sender named. M2 would then depend on UTERM-004 M6.
-- Constraint: whatever authority "Who may run `uniterm open`" settles cannot usefully be stricter than this path. A
-  program refused by `uniterm open` would otherwise run `open -a uniterm` instead.
-
-### Several files at once
-
-Every viewer shows one source per pane and refuses a drop of several files.
-
-- **One pane per file, routed per file, with a confirmation above a fixed count.** Mixed types work.
-- **Refuse with a message asking for one file.** Matches the in-pane drop rule.
-- **Open the first file and post a message naming the rest.**
-
-### Folders
-
-Finder and `uniterm open` can pass a folder. The image viewer accepts one as a slideshow source. A terminal could start
-a shell in it.
-
-- **Route a folder like a file, with the folder as its content type.** The image viewer and the terminal both declare
-  folders. The type mapping question picks between them.
-- **Folders always open a terminal there.** Simple, but a slideshow then needs the in-pane open panel.
-- **Refuse folders.**
+- Constraint: a batch of several files needs a rule too, so it never stops halfway when a split runs out of room.
 
 ### Start directory and current directory
 
 uniterm's rules require that current directory flows explicitly, never as hidden state. This question decides each flow
 the router adds.
 
-- The routed pane's start directory. Candidates: the opened file's folder, the focused pane's `currentDirectory`, or
+- The routed pane's start directory, for a file. A routed folder is already the new terminal's explicit start
+  directory, per "Folders". Candidates: the opened file's folder, the focused pane's `currentDirectory`, or
   none.
 - File > Open's panel start directory. Candidates: the focused pane's `currentDirectory`, the last folder File > Open
   used, kept explicitly per window, or the panel's own remembered folder.
@@ -366,9 +410,19 @@ remove, add, or reshape them.
 
 - Open With in Finder and a drop on the Dock icon open the file in uniterm, at launch and while running
 - An open sent by another program follows the authority "Opens that arrive through Launch Services" settles
+- Before the authority is built, the sender each path reports is recorded: a cold-launch Finder open, a warm one, and
+  `open -a`
+- The sender is checked by code-signing requirement on the event's audit token, and a sender that already exited is
+  treated as unidentified
+- A test shows `osascript`, `python3`, and `/usr/bin/open` never match an Apple opener
+- Refusal messages and approval requests stay bounded and coalesced under a loop of `open -a`
+- A session grant binds to the sender's PID and PID version, so a reused PID never inherits it
+- Every `LSHandlerRank` is Alternate, and uniterm never displaces another app's handler
+- Several files open one pane each, with one summary message for the ones that failed, and a confirmation above the
+  fixed count
+- A routed folder opens a new terminal there, or the applet the type mapping picks, and a package is refused
 - The reply to an open-documents event is the same for success, missing, unsupported, and denied
 - The app's declared document types match the applet declarations, and a test fails when they drift
-- uniterm never becomes the default app for a type without the user choosing it
 - Several files and folders follow the rules their open questions settle
 
 ### M3: File > Open
@@ -459,6 +513,18 @@ remove, add, or reshape them.
 - 2026-11-03: Updated for UTERM-007's acceptance: its "Open..." command is the pane-local open, and the risk about draft
   applets names only UTERM-010. ADR impact review: the settled text conflicts with no ADR. Routed ADR-08's main-thread
   bound to M1, and ADR-01's terminal surface protocol to M6. (autonomous)
+- 2026-11-03: Which file types uniterm registers with Finder: every declared type, always at the Alternate rank, with
+  types resolved through the system. Converged in 1 pass. (autonomous)
+- 2026-11-03: Opens that arrive through Launch Services: Apple's user-facing openers, identified by platform-binary
+  code-signing requirement on the audit token, are the user's act. Other senders are refused until UTERM-004 M6, then
+  get Allow once or a session grant bound to the sender's PID, never remembered. The judge ruled after three passes
+  without convergence. The critic's top moved from Allow once only to remembered trust in signed apps, and then to
+  the session grant, as each pass confirmed a new objection. (autonomous, judge, addition: opens from other senders
+  join UTERM-004's pending indicator and session tier, and the second half of M2 depends on UTERM-004 M6)
+- 2026-11-03: Several files at once: one pane per file, one summary message for failures, and a confirmation above a
+  fixed count. A batch needs a rule under "Where a routed pane goes". Converged in 1 pass. (autonomous)
+- 2026-11-03: Folders: routed by type as `public.folder`. The terminal opens a new pane with the folder as its explicit
+  start directory, and packages are refused. Converged in 1 pass. (autonomous)
 
 ## References
 
