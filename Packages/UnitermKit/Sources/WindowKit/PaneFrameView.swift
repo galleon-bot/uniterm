@@ -59,7 +59,17 @@ final class PaneFrameView: NSView {
   }
 
   private var innerFrame: NSRect {
-    bounds.insetBy(dx: Self.gutter, dy: Self.gutter)
+    Self.appletFrame(in: bounds)
+  }
+
+  /// The applet's frame for a pane with these bounds: the bounds less the gutter on every side.
+  /// It is the bounds inset by hand on purpose. Core Graphics returns the null rect, with an
+  /// infinite origin, for bounds smaller than the inset, and a pane is zero size before its
+  /// first layout.
+  static func appletFrame(in bounds: NSRect) -> NSRect {
+    NSRect(
+      x: bounds.minX + gutter, y: bounds.minY + gutter,
+      width: max(0, bounds.width - 2 * gutter), height: max(0, bounds.height - 2 * gutter))
   }
 
   override func resizeSubviews(withOldSize oldSize: NSSize) {
