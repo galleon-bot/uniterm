@@ -2,7 +2,7 @@
 
 **Status:** accepted
 **Created:** 2026-10-31
-**Updated:** 2026-11-02
+**Updated:** 2026-11-03
 
 ## Dependencies
 
@@ -15,7 +15,7 @@
   access-mode and driver combinations it supports
 - UTERM-001 — "What layout persistence restores": saved layouts record inactive control intent, never grants
 - UTERM-003 — "Sandboxing", "Host API", and "REPL features": this proposal supplies fresh-helper capability grants,
-  scoped discovery, and authenticated pane binding. Its M1-M2 replace broad same-user control when they land
+  scoped discovery, authenticated pane binding, and the `uniterm/send-command` host function. Its M1-M2 replace broad same-user control when they land
 - UTERM-005 through UTERM-010 — exec schemas and supported combinations stay with each applet's design; this
   proposal supplies the shared transport and tests it with presentation fixtures
 
@@ -187,6 +187,24 @@ are escaped. Stdout carries protocol only; stderr carries diagnostic text.
   cannot flood the main thread or masquerade as a host message.
 - Terminal and REPL input injection remains unavailable, as UTERM-003 settles. An applet without an appropriate
   command schema or exec support refuses before launch.
+- The applet contract gains one command and event hook, which this proposal adds. Shared dispatch delivers each
+  validated command to the target applet through it, and the applet emits its events through it to its exec driver.
+  An applet publishes its command and event schemas and their versions through the same member. Events emitted with no
+  exec driver attached go nowhere and are not queued.
+- Supported combinations are declared separately from commands, by every applet. An applet that declares nothing
+  supports disconnected access with no exec driver. The terminal and REPL applets declare disconnected and
+  remote-controlled access with no exec driver and no commands, as "Clipboard access from controlled panes" and M2
+  assume.
+- A remote host call carries one applet command to a target pane, with its reply or structured error. It uses UTERM-003's
+  handshake and the same authorization, validation, and serialized dispatch as an exec driver's commands. Its authority
+  is the caller's own grant, never an attached driver's channel. In UTERM-003's Janet module it is
+  `uniterm/send-command`, following that module's verb-noun naming. Remote callers receive no applet events.
+- Each remote command names the applet type and the command schema version it was written for. An unsupported type or
+  version is refused before any effect, as the exec hello refuses. Skew: an old script or controller against a new
+  app, and a new one against an old app, are both refused when the app does not support the named version. No deploy
+  order is needed.
+
+Amended 2026-11-03; see the Decision Log.
 
 Rationale: JSON already serves the applet boundary and is easy for external drivers. CBOR can be equally correct,
 but brings another serialization ecosystem without a stated need. Unversioned text leaves old commands liable to new
@@ -545,7 +563,8 @@ None.
 - A disconnected pane rejects ambient control calls while preserving its attached driver and host lifecycle events
 - A program cannot control an ancestor or unrelated sibling; explicit owned group members remain eligible
 - Nearest selection filters by authority first, uses tree distance and deterministic ties, and never creates on failure
-- Remote and exec commands share authorization, argument validation, and serialized dispatch
+- Each applet type's supported combinations are readable before a pane is created or a driver launches, and a type
+  that declares none resolves to disconnected with no driver
 - Controlled OSC 52 writes check once/session permission through real backend callbacks; denial changes nothing
 - Pending clipboard approvals cannot release data or write after revocation, mode change, or session replacement
 
@@ -554,6 +573,20 @@ None.
 **Status:** NOT STARTED
 
 - An exec pane starts a program and sends applet events to its stdin
+- Hosted fixture applets receive validated commands and emit events through the applet contract's command and event
+  hook, and an applet with no commands refuses every command
+- Remote and exec commands share authorization, argument validation, and serialized dispatch
+- Adding the remote applet-command call bumps UTERM-003's app-to-helper protocol version, so an old `uniterm` command
+  with a new app, or the reverse, is refused at the handshake
+- A remote caller, a Janet script through `uniterm/send-command` included, sends an applet command to an authorized
+  target pane and receives its reply or structured error, with no effect on an error. A script gets the error as a
+  Janet value, and the app never crashes
+- A remote command naming an unsupported applet type or schema version is refused before any effect, for old and new
+  callers alike
+- A remote command to a disconnected pane is refused even while that pane's exec driver runs its own commands
+- Authority is revalidated when the hook delivers a command, so a grant revoked after validation leaves no effect
+- Events emitted with no exec driver attached reach no one and never grow a queue
+- Terminal and REPL panes can still be made remote-controlled, and refuse every applet command
 - The program's stdout drives the applet
 - The program's stderr appears in the status bar
 - Window shortcuts keep working while an exec driver is stalled
@@ -720,6 +753,19 @@ None.
   or linking defects. It surfaced the permission and durable-trust additions becoming architectural rules; the user
   had explicitly approved those additions and selected the disclosed ADR candidate. Review complete: proposal and
   ADR-09 accepted, M1-M6 unscheduled, and the required index update included in the one final commit.
+
+
+- 2026-11-03: Amended at the user's request during the UTERM-008 review. "Exec wire format" now names the applet
+  contract's command and event hook and a remote host call, `uniterm/send-command`, that carries one applet command.
+  The text before said only that exec and remote commands share dispatch and that remote host calls use the same
+  validation; neither part was named or built by a milestone. Supported combinations are declared by every applet,
+  apart from commands, and remote commands name the applet type and schema version they target. Added checks to M3,
+  which builds the hook. The map's program-pin
+  milestone depends on both. A re-check converged on the second pass. Moved the shared-dispatch check from M2 to M3,
+  since exec drivers and the hook are built there. (addition: the command and event hook, a combination declaration on
+  every applet type, and a host function in UTERM-003's module)
+- 2026-11-03: ADR candidate (hard to reverse): every applet command, exec or remote, names its applet schema version,
+  and an unsupported version is refused before any effect. Declined: the user judged it does not rise to an ADR.
 
 ## References
 
