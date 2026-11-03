@@ -6,7 +6,7 @@
 | [UTERM-002](UTERM-002-command-palette.md) | Floating or docked command palette with tab search | implemented |
 | [UTERM-003](UTERM-003-janet-scripting.md) | Embedded Janet, host API, `uniterm run`, and the REPL applet | accepted |
 | [UTERM-004](UTERM-004-control-and-trust.md) | Pane control, durable controller trust, scoped approvals, and layout requests | accepted |
-| [UTERM-005](UTERM-005-browser-applet.md) | WebKit browser applet with tabs and a security indicator | draft |
+| [UTERM-005](UTERM-005-browser-applet.md) | WebKit browser applet with tabs and a security indicator | accepted |
 | [UTERM-006](UTERM-006-image-viewer-applet.md) | Image viewer applet with folder slideshow | draft |
 | [UTERM-007](UTERM-007-text-viewer-applet.md) | Viewer for Markdown, RTF, Word, and PDF | draft |
 | [UTERM-008](UTERM-008-map-viewer-applet.md) | MapKit applet with custom pins | draft |
