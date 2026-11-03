@@ -10,6 +10,7 @@
 - UTERM-002's command registry and UTERM-013: the viewer's zoom and navigation commands are registry entries it
   declares
 - UTERM-003 M2 and UTERM-004 M2 and M3: M4's control and exec support
+- UTERM-015: app-level opening, and the path-reading power M4's `show` uses
 
 ## Impacts
 
@@ -105,9 +106,6 @@ Decision: files and folders open from inside the pane, following UTERM-009's "In
   an applet. UTERM-009 leaves it to one cross-applet proposal. The image viewer binds no File > Open shortcut until
   then.
 - Script and terminal input belongs to "Control levels".
-
-**Revisit:** before this applet's M1 starts, file the cross-applet file-opening proposal that UTERM-009's "Input
-sources" commits to, and add it to Dependencies.
 
 Rationale: UTERM-009 settled the boundary for every viewer from UTERM-006 to UTERM-009, and its hook asks for the
 cross-applet proposal before a second viewer starts its first milestone. A hook in this decision states that trigger
@@ -473,6 +471,9 @@ None.
   drop of several items is refused with a message asking for one. Before, a multi-file drop opened the first file and
   said the rest were not opened. Noted a Preview-style document drawer as an idea that needs its own proposal. The
   user's decision.
+- 2026-11-03: Revisit-hook audit for "Input sources": act. The cross-applet file-opening proposal is filed as
+  UTERM-015, and it is now in Dependencies. The hook's line is removed. 006 is not schedulable until UTERM-015 is
+  accepted.
 
 ## References
 
