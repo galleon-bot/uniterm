@@ -478,6 +478,7 @@ None.
   App-level opening and Cmd-O waited on that proposal, and M4 waited on it for the read power. UTERM-015 is accepted. The
   viewer gains an Open... command with no key, declares `public.image` as owner and `public.folder` as alternate, and
   M4 starts after UTERM-015 M4. M1's gate on the filing became the declaration check, and the risk names UTERM-015.
+- 2026-11-03: Scheduled as UTERM-006 M1-M3 and UTERM-006 M4 in queue.md.
 
 ## References
 

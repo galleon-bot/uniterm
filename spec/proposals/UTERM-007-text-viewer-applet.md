@@ -555,6 +555,7 @@ None.
   filed. UTERM-015 is now accepted. Its File > Open owns Cmd-O and routes files here by type, the viewer's Open... is
   its pane-local open, and the viewer declares the types it opens. M1's gate on the filing became a check that the
   viewer declares its types. Dependencies, "Control levels", and the opening risk now name UTERM-015.
+- 2026-11-03: Scheduled as UTERM-007 M1-M4 and UTERM-007 M5 in queue.md.
 
 ## References
 
