@@ -7,7 +7,8 @@
 ## Dependencies
 
 - UTERM-001
-- UTERM-009's cross-applet file-opening proposal: M1 starts only after it is filed
+- UTERM-015: app-level opening and Cmd-O, and the type declarations its router reads. A later remote open command
+  would use its path-reading power
 - UTERM-006: M1 builds its document helper the way UTERM-006's image helper is built, and whichever lands first
   builds the shared helper bundling
 - UTERM-013, and UTERM-002's command registry: the find, contents, open, and reload commands are registry entries the
@@ -164,8 +165,9 @@ applet contract decision.
 - Files open inside the pane, by an Open... registry command with no key in the File menu and an empty-state button,
   or by dropping a file URL onto the pane. A pane shows one document. Opening another file replaces it, cancels any load
   still running, and starts at the top. The open panel selects one file. A drop of several files is refused with a
-  message asking for one, and the pane keeps what it showed. App-level opening and any File > Open key wait on the
-  cross-applet file-opening proposal that UTERM-009 committed to filing. M1 starts only after that proposal is filed.
+  message asking for one, and the pane keeps what it showed. App-level opening belongs to UTERM-015. Its File > Open on
+  Cmd-O routes files here by type, and this Open... is the pane-local open it keeps. The viewer declares the types it
+  opens, with a rank. Amended 2026-11-03; see Decision Log.
 - A drawer of open documents beside the view, as Preview has, is an idea for later. This proposal does not commit to
   it. Building it needs its own proposal, since it changes what a pane and its description hold.
 - A read-only viewer never counts as running something, and closing it never asks.
@@ -243,8 +245,8 @@ are refused before anything starts.
   content loaded. Per UTERM-004, remote callers receive no applet events, and the viewer emits none.
 - There is no remote command to open a file path. A controller would otherwise make uniterm read any file uniterm can
   read, under uniterm's privacy grants, and learn from the reply whether a protected path exists. Neither caller needs
-  it: notes arrive inline, and UTERM-003's send function sends content. The cross-applet file-opening proposal defines
-  a scoped path-reading power under ADR-09 for every viewer. Remote opening waits on it, and adopting it later is an
+  it: notes arrive inline, and UTERM-003's send function sends content. UTERM-015 defines a scoped path-reading power
+  under ADR-09 for every viewer. Remote opening waits on it, and adopting it later is an
   additive command.
 - Replies carry anchors and load status only. They never carry document text, such as find matches or heading text,
   and never the path of a file the user opened.
@@ -296,9 +298,9 @@ None.
   with its terminals. The evidence does not settle the likelihood, so it is rated medium. Mitigation: the per-file cap
   on bytes read, and the decoded caps for RTF and Word. Accepted beyond that: unlike UTERM-009's row store, the viewer
   holds one document per pane, and a shared budget would have to predict PDFKit's own page cache.
-- **The cross-applet file-opening proposal reshapes opening** — likelihood: medium, impact: low. It is not filed yet,
-  and it may change Open..., drops, or Cmd-O for every viewer. Mitigation: M1 starts only after it is filed, and the
-  viewer binds no File > Open key until then.
+- **UTERM-015 reshapes opening** — likelihood: low, impact: low. It is accepted. It keeps the viewer's Open... and drops,
+  gives Cmd-O to the window's File > Open, and asks the viewer to declare its types. Mitigation: M1 declares the types
+  and binds no File > Open key.
 - **The bundled JavaScript parser and sanitizer fall behind** — likelihood: low, impact: medium. They are pinned
   outside SwiftPM, so no tool flags their updates. A parser bug stays inside WebKit's sandboxed content process, page
   JavaScript is off, and a sanitizer miss still meets the Content-Security-Policy. Mitigation: each pin records the
@@ -315,7 +317,7 @@ None.
 - A pane can run the text viewer and open a PDF
 - The viewer opens RTF and Word documents
 - Pages scroll and text can be selected and copied
-- Starts only after UTERM-009's cross-applet file-opening proposal is filed
+- The viewer declares the content types it opens, with a rank, for UTERM-015's router
 - A file opens from the Open... command, the empty-state button, or a drop. Dropping a file on a PDF or text view
   opens it in the pane, and the viewer binds no File > Open key
 - The launcher offers the text viewer, and restore picks it by description type. An unknown type still becomes a
@@ -548,6 +550,12 @@ None.
   same design instead of sharing it. Remote file opening waits on the scoped path-reading power the cross-applet
   file-opening proposal defines. Before, the viewer had a bind command, events, an integer version, and a helper shared
   with UTERM-006. (autonomous)
+- 2026-11-03: Amended "The applet contract" for UTERM-015, the cross-applet file-opening proposal UTERM-009 committed
+  to. It said app-level opening and any File > Open key waited on that proposal, and that M1 started only after it was
+  filed. UTERM-015 is now accepted. Its File > Open owns Cmd-O and routes files here by type, the viewer's Open... is
+  its pane-local open, and the viewer declares the types it opens. M1's gate on the filing became a check that the
+  viewer declares its types. Dependencies, "Control levels", and the opening risk now name UTERM-015.
+- 2026-11-03: Scheduled as UTERM-007 M1-M4 and UTERM-007 M5 in queue.md.
 
 ## References
 

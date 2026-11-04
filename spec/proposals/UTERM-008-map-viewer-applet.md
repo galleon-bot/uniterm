@@ -11,8 +11,7 @@
   applet-side command and event hook and `uniterm/send-command`, which UTERM-004 "Exec wire format" names and its M3
   builds
 - UTERM-013, and UTERM-002's command registry milestone: the map declares its style commands in the registry
-- UTERM-009's cross-applet file-opening proposal: UTERM-009 requires it filed before a second viewer among UTERM-006 to
-  UTERM-008 starts its first milestone. If another of them has started one, M1 waits for that proposal to be filed
+- UTERM-015: app-level opening and Cmd-O, and the type declarations its router reads
 
 ## Impacts
 
@@ -20,6 +19,8 @@
 - UTERM-004 — "Exec wire format" and M3: amended in this review to name the applet-side command and event hook and
   the remote applet-command call, which map M3 depends on
 - UTERM-003 — "Host API": scripts place pins through `uniterm/send-command`, which UTERM-004 adds to the module
+- UTERM-015 — "The path-reading power": no event reveals a value from the user's file, so the map needs nothing from
+  that power
 
 ## Summary
 
@@ -69,10 +70,11 @@ Decision: pins come from a GeoJSON file opened in the pane, and from commands ov
 pin belongs to a named layer.
 
 - One pin store holds every pin. Loading goes through one source-taking entry point, as UTERM-009 builds it.
-- File source: the user opens a GeoJSON file in the pane, with an open panel or by dropping a file URL. The file is its
-  own layer. Loading another file replaces only that layer. App-level opening, such as Finder "Open With" and File >
-  Open, waits on the cross-applet file-opening proposal that UTERM-009 requires. The map binds no File > Open shortcut
-  until then.
+- File source: the user opens a GeoJSON file in the pane, with an open panel reached from an Open... registry command
+  with no key in the File menu, or by dropping a file URL. The file is its own layer. Loading another file replaces
+  only that layer. App-level opening belongs to UTERM-015. Its File > Open on Cmd-O routes files here by type, and this
+  Open... is the pane-local open it keeps. The map declares the imported GeoJSON type, which conforms to `public.json`,
+  at the owner rank. It binds no File > Open key.
 - Command source: the map publishes a command schema and an event schema, both at version 1, per UTERM-004 "Exec wire
   format". The commands are `add`, `remove`, `clear`, `set-layer`, and setting the visible region. Exec drivers and
   authorized remote callers both use them, through UTERM-004's shared validation and serialized dispatch.
@@ -91,8 +93,9 @@ pin belongs to a named layer.
   stated rule of the schema, not state a library carries.
 - The user can clear any layer from the map's own UI.
 - Events go only to the exec driver, since UTERM-004 defines no other event channel. `map clicked` carries the
-  coordinate. `pin selected` names a command pin by its layer and ID, and a file pin by a separate file source field
-  and its ID.
+  coordinate of a click on the map. `pin selected` names a command pin by its layer and ID. For a file pin it carries
+  only a file-source marker, never the pin's ID or any other value from the file. A click on a file pin sends that
+  marker and no `map clicked`, so the pin's stored coordinate never reaches the driver.
 - UTERM-004 owns the applet-side command and event hook, and the remote host call that carries applet commands,
   `uniterm/send-command`. Each remote command names the applet type and schema version it targets. UTERM-004 was
   amended in this review to name both, and its M3 builds them. Map M3 depends on both.
@@ -253,7 +256,9 @@ None.
 **Status:** NOT STARTED
 
 - The user opens a GeoJSON file from an open panel or by dropping a file URL on the pane, and its points show as pins
-- Every load goes through the one source-taking entry point, and the map binds no File > Open shortcut
+- Every load goes through the one source-taking entry point, and the map binds no File > Open key
+- The Open... command with no key opens the panel, and the map declares the imported GeoJSON type at the owner rank,
+  for UTERM-015's router
 - Selecting a pin shows its label
 - Point and MultiPoint features become pins. Other geometry is skipped, and a message gives the count
 - One documented rule picks a feature's label from its properties
@@ -292,7 +297,8 @@ None.
 - `clear` and `remove` touch only the named layer, and an exec driver with no layer named uses the default layer
 - A restarted driver, or a script run again, replaces its own layer's pins instead of adding a second copy
 - `map clicked` and `pin selected` reach the exec driver. `pin selected` names a command pin's layer and ID, or marks
-  a file pin by its source field
+  a file pin by its source field with no ID, coordinate, or other value from the file
+- A click on a file pin sends no `map clicked`
 - No command can add to, remove from, or clear the file layer, and a command naming the file's source gets a
   structured error
 - `add` with an existing ID replaces the whole pin, and an omitted accent or glyph takes the default
@@ -403,6 +409,15 @@ None.
 - 2026-11-03: Review complete. Size against Review start: 2 to 3 milestones, 2 to 6 settled decisions, 1 to 6 risks.
   The review also amended UTERM-004 at the user's request. No ADR was written.
 - 2026-11-03: Scheduled as UTERM-008 M1-M2 and UTERM-008 M3 in queue.md.
+- 2026-11-03: Amended "Where pins come from". `pin selected` named a file pin by a file source field and its ID, and
+  the decision did not say whether a click on a file pin also sent `map clicked`. Both let an exec driver learn values
+  from the user's file, which UTERM-015's path-reading power keeps from a controller whose scope does not hold that
+  file. A file pin is now only marked, and a click on one sends no `map clicked`. M3's check already marked file pins
+  without an ID, so the decision now matches it. Carrying the ID when the driver's read scope covers the file was
+  weighed. It would tie M3 to UTERM-015 for a need no caller has stated.
+- 2026-11-03: Amended "Where pins come from" for UTERM-015, the cross-applet file-opening proposal. App-level opening
+  waited on that proposal, and M1 waited for it to be filed. UTERM-015 is accepted. The map gains an Open... command
+  with no key and declares the GeoJSON type as owner, checked in M2. The Dependencies line names UTERM-015.
 
 ## References
 
